@@ -5,13 +5,14 @@ import pandas as pd
 import streamlit as st
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares
-from scipy.stats import t as t_distribution
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import io
+from pathlib import Path
 
 
 R_GAS_J_MOL_K = 8.314462618  # Gas constant [J/(mol*K)]
+CONC_EPS_MOL_M3 = 1e-30  # Concentration floor [mol/m^3] (avoid 0^negative -> inf)
 
 
 def _clean_species_names(species_text: str) -> list[str]:
@@ -78,6 +79,193 @@ def _apply_plot_tick_format(
     ax.yaxis.set_major_formatter(formatter)
 
 
+def _build_example_batch_csv_bytes() -> bytes:
+    """
+    生成一个 Batch 示例数据（A -> B 一级反应，幂律 n=1）。
+    用于帮助页面下载示例 CSV。
+    """
+    temperature_K = 350.0  # Temperature [K]
+    conc_A0_mol_m3 = 2000.0  # Initial concentration [mol/m^3]
+    conc_B0_mol_m3 = 0.0  # Initial concentration [mol/m^3]
+
+    k0_1_s = 1.0e6  # Pre-exponential factor [1/s] (for n=1)
+    ea_J_mol = 5.0e4  # Activation energy [J/mol]
+    rate_constant_1_s = k0_1_s * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
+
+    time_s = np.array([0, 20, 40, 60, 90, 120, 180, 240, 360, 480], dtype=float)
+    conc_A_t = conc_A0_mol_m3 * np.exp(-rate_constant_1_s * time_s)
+    conc_B_t = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_t)
+    conversion_A = 1.0 - conc_A_t / max(conc_A0_mol_m3, 1e-30)
+
+    data_df = pd.DataFrame(
+        {
+            "t_s": time_s,
+            "T_K": np.full(time_s.size, temperature_K, dtype=float),
+            "C0_A_mol_m3": np.full(time_s.size, conc_A0_mol_m3, dtype=float),
+            "C0_B_mol_m3": np.full(time_s.size, conc_B0_mol_m3, dtype=float),
+            "Cout_A_mol_m3": conc_A_t,
+            "Cout_B_mol_m3": conc_B_t,
+            "X_A": conversion_A,
+        }
+    )
+    return data_df.to_csv(index=False).encode("utf-8")
+
+
+def _read_file_bytes_if_exists(file_path: str) -> bytes | None:
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            return None
+        return path.read_bytes()
+    except Exception:
+        return None
+
+
+def _figure_to_image_bytes(fig: plt.Figure, image_format: str) -> bytes:
+    """
+    将 Matplotlib Figure 导出为字节流，供 Streamlit download_button 使用。
+
+    image_format: "png" / "svg"
+    """
+    image_format = str(image_format).lower().strip()
+    buf = io.BytesIO()
+
+    save_kwargs = {"format": image_format, "bbox_inches": "tight"}
+    if image_format in ["png", "jpg", "jpeg", "tif", "tiff"]:
+        save_kwargs["dpi"] = 300
+
+    fig.savefig(buf, **save_kwargs)
+    return buf.getvalue()
+
+
+def _render_help_page() -> None:
+    st.title("教程 / 帮助")
+    st.caption("面向初学者：按步骤完成一次建模与拟合。")
+
+    tab_quick, tab_csv, tab_models, tab_fit, tab_trouble = st.tabs(
+        ["快速上手", "CSV 列说明", "动力学模型", "拟合技巧", "常见问题"]
+    )
+
+    with tab_quick:
+        st.markdown(
+            "**推荐流程（一次完整的拟合）**\n"
+            "1) 在左侧选择反应器类型与动力学模型；\n"
+            "2) 输入物种名与反应数，填写化学计量数矩阵 $\\nu$；\n"
+            "3) 设置级数矩阵 $n$、k0/Ea 初值与拟合开关（Fit）；\n"
+            "4) 下载并填写 CSV 模板（或用示例数据）；\n"
+            "5) 上传 CSV，选择拟合目标变量与目标物种；\n"
+            "6) 点击“开始拟合”，查看 Parity Plot 与误差图；\n"
+            "7) 导出拟合参数与对比数据。"
+        )
+
+        st.markdown("**示例数据下载（可直接用于上手）**")
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            pfr_example_bytes = _read_file_bytes_if_exists(
+                "test_data/test_data_matched.csv"
+            )
+            if pfr_example_bytes is None:
+                st.info(
+                    "未找到 `test_data/test_data_matched.csv`，请先运行 `test_data/generate_test_data.py` 生成。"
+                )
+            else:
+                st.download_button(
+                    "📥 下载 PFR 示例数据 (CSV)",
+                    data=pfr_example_bytes,
+                    file_name="pfr_example.csv",
+                    mime="text/csv",
+                    help="示例：A → B 一级反应，列包含 V_m3/T_K/vdot/F0_*/Fout_*。",
+                    use_container_width=True,
+                )
+        with col_ex2:
+            batch_example_bytes = _build_example_batch_csv_bytes()
+            st.download_button(
+                "📥 下载 Batch 示例数据 (CSV)",
+                data=batch_example_bytes,
+                file_name="batch_example.csv",
+                mime="text/csv",
+                help="示例：A → B 一级反应，列包含 t_s/T_K/C0_*/Cout_*/X_A。",
+                use_container_width=True,
+            )
+
+        st.info(
+            "提示：你可以先用示例数据跑通流程，再替换为自己的实验数据。"
+            "若拟合不动，可尝试：增大 diff_step、增大 max_nfev、开启 multi-start、或切换 ODE 求解器为 BDF/Radau。"
+        )
+
+    with tab_csv:
+        st.markdown("**PFR 输入列**")
+        st.markdown(
+            "- `V_m3`：反应器体积 [m³]\n"
+            "- `T_K`：温度 [K]\n"
+            "- `vdot_m3_s`：体积流量 [m³/s]\n"
+            "- `F0_<物种名>_mol_s`：入口摩尔流量 [mol/s]"
+        )
+        st.markdown("**Batch 输入列**")
+        st.markdown(
+            "- `t_s`：反应时间 [s]\n"
+            "- `T_K`：温度 [K]\n"
+            "- `C0_<物种名>_mol_m3`：初始浓度 [mol/m³]"
+        )
+        st.markdown("**测量值列（任选一种类型）**")
+        st.markdown(
+            "- PFR：`Fout_<物种名>_mol_s`（出口摩尔流量）\n"
+            "- PFR/Batch：`Cout_<物种名>_mol_m3`（出口浓度）\n"
+            "- PFR/Batch：`X_<物种名>`（转化率）"
+        )
+        st.caption(
+            "允许缺测：测量值为空/NaN 时，该行会在拟合中被赋予较大惩罚残差（相当于“提醒你这行缺数据”）。"
+        )
+
+    with tab_models:
+        st.markdown("**(1) 幂律 (Power-law)**")
+        st.latex(r"r_j = k_j(T)\prod_i C_i^{n_{ij}}")
+        st.latex(r"k_j(T)=k_{0,j}\exp\left(-\frac{E_{a,j}}{RT}\right)")
+        st.caption("k0 的单位取决于总反应级数；这是动力学常见现象。")
+
+        st.markdown("**(2) Langmuir-Hinshelwood（吸附抑制）**")
+        st.latex(
+            r"r_j=\frac{k_j(T)\prod_i C_i^{n_{ij}}}{\left(1+\sum_i K_i(T)C_i\right)^{m_j}}"
+        )
+        st.latex(r"K_i(T)=K_{0,i}\exp\left(-\frac{E_{a,K,i}}{RT}\right)")
+        st.caption(
+            "当 $C$ 用 mol/m³，则 $K$ 的单位为 m³/mol（保证 $K_iC_i$ 无量纲）；"
+            "$E_{a,K}$ 允许为负值（放热吸附）。"
+        )
+
+        st.markdown("**(3) 可逆反应 (Reversible)**")
+        st.latex(
+            r"r_j=k_j^+(T)\prod_i C_i^{n_{ij}^+}-k_j^-(T)\prod_i C_i^{n_{ij}^-}"
+        )
+        st.latex(
+            r"k_j^{\pm}(T)=k_{0,j}^{\pm}\exp\left(-\frac{E_{a,j}^{\pm}}{RT}\right)"
+        )
+        st.caption("正/逆反应有各自的 k0/Ea/n，拟合时可分别勾选 Fit。")
+
+    with tab_fit:
+        st.markdown("**推荐的拟合设置（更稳健）**")
+        st.markdown(
+            "- 初值不准/拟合不动：把 `diff_step` 调大到 `1e-2 ~ 1e-3`；并开启 `multi-start`。\n"
+            "- 参数量纲差异大（k0、Ea、n 混合）：保持 `x_scale='jac'` 开启。\n"
+            "- ODE 刚性明显：将求解器切换为 `BDF` 或 `Radau`。\n"
+            "- 极端参数（如 k0 很大）会导致求解困难：先缩紧边界，再逐步放开。"
+        )
+        st.markdown("**加权策略**")
+        st.markdown(
+            "- `不加权`：直接最小二乘。\n"
+            "- `按测量值相对误差(1/|y|)`：更重视相对误差，小量级数据更容易被照顾。"
+        )
+
+    with tab_trouble:
+        st.markdown("**常见报错与处理**")
+        st.markdown(
+            "- `solve_ivp失败`：尝试 `BDF/Radau`，或调松 `rtol/atol`，或缩紧参数边界。\n"
+            "- `T_K 无效` / `vdot 无效`：检查 CSV 对应列是否为正数。\n"
+            "- 负级数 + 浓度趋近 0：会导致 $C^n$ 发散；程序对负级数使用浓度下限避免 `inf`，但建议检查模型合理性。\n"
+            "- `x0 infeasible`：初值超出边界；程序会自动裁剪到边界内，但仍建议你设置更合理的初值与边界。"
+        )
+
+
 def _build_default_nu_table(species_names: list[str], n_reactions: int) -> pd.DataFrame:
     nu_default = pd.DataFrame(
         data=np.zeros((len(species_names), n_reactions), dtype=float),
@@ -134,7 +322,10 @@ def calc_rate_vector_power_law(
             order_value = reaction_order_matrix[reaction_index, species_index]
             if order_value == 0.0:
                 continue
-            rate_value = rate_value * (conc_mol_m3[species_index] ** order_value)
+            conc_value = float(conc_mol_m3[species_index])
+            if order_value < 0.0:
+                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+            rate_value = rate_value * (conc_value**order_value)
         rate_vector[reaction_index] = rate_value
     return rate_vector
 
@@ -188,9 +379,10 @@ def calc_rate_vector_langmuir_hinshelwood(
             order_value = reaction_order_matrix[reaction_index, species_index]
             if order_value == 0.0:
                 continue
-            rate_numerator = rate_numerator * (
-                conc_mol_m3[species_index] ** order_value
-            )
+            conc_value = float(conc_mol_m3[species_index])
+            if order_value < 0.0:
+                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+            rate_numerator = rate_numerator * (conc_value**order_value)
 
         # 分母：(1 + Σ_i K_i(T) * C_i)^m_j
         m_j = m_inhibition[reaction_index]
@@ -242,7 +434,10 @@ def calc_rate_vector_reversible(
             order_value = order_fwd_matrix[reaction_index, species_index]
             if order_value == 0.0:
                 continue
-            rate_fwd = rate_fwd * (conc_mol_m3[species_index] ** order_value)
+            conc_value = float(conc_mol_m3[species_index])
+            if order_value < 0.0:
+                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+            rate_fwd = rate_fwd * (conc_value**order_value)
 
         # 逆反应速率
         rate_rev = k_rev_T[reaction_index]
@@ -250,7 +445,10 @@ def calc_rate_vector_reversible(
             order_value = order_rev_matrix[reaction_index, species_index]
             if order_value == 0.0:
                 continue
-            rate_rev = rate_rev * (conc_mol_m3[species_index] ** order_value)
+            conc_value = float(conc_mol_m3[species_index])
+            if order_value < 0.0:
+                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+            rate_rev = rate_rev * (conc_value**order_value)
 
         # 净反应速率
         rate_vector[reaction_index] = rate_fwd - rate_rev
@@ -512,6 +710,262 @@ def integrate_batch_reactor(
 
     conc_final = solution.y[:, -1]
     return conc_final, True, "OK"
+
+
+def integrate_pfr_profile(
+    reactor_volume_m3: float,
+    temperature_K: float,
+    vdot_m3_s: float,
+    molar_flow_inlet_mol_s: np.ndarray,
+    stoich_matrix: np.ndarray,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    reaction_order_matrix: np.ndarray,
+    solver_method: str,
+    rtol: float,
+    atol: float,
+    n_points: int = 200,
+    kinetic_model: str = "power_law",
+    K0_ads: np.ndarray = None,
+    Ea_K_J_mol: np.ndarray = None,
+    m_inhibition: np.ndarray = None,
+    k0_rev: np.ndarray = None,
+    ea_rev_J_mol: np.ndarray = None,
+    order_rev_matrix: np.ndarray = None,
+) -> tuple[np.ndarray, np.ndarray, bool, str]:
+    """
+    返回 PFR 沿程剖面：
+      volume_grid_m3: shape (n_points,)
+      molar_flow_profile_mol_s: shape (n_species, n_points)
+    """
+    n_points = int(n_points)
+    if n_points < 2:
+        n_points = 2
+
+    if not np.isfinite(reactor_volume_m3):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "V_m3 无效（NaN/Inf）"
+    if reactor_volume_m3 < 0.0:
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "V_m3 不能为负"
+    if reactor_volume_m3 == 0.0:
+        return (
+            np.array([0.0], dtype=float),
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            True,
+            "V=0",
+        )
+
+    if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "温度 T_K 无效"
+    if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "体积流量 vdot_m3_s 无效"
+
+    if not np.all(np.isfinite(molar_flow_inlet_mol_s)):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "入口摩尔流量包含 NaN/Inf"
+    if not np.all(np.isfinite(stoich_matrix)):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "化学计量数矩阵 ν 包含 NaN/Inf"
+    if not np.all(np.isfinite(k0)):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "k0 包含 NaN/Inf"
+    if not np.all(np.isfinite(ea_J_mol)):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "Ea 包含 NaN/Inf"
+    if not np.all(np.isfinite(reaction_order_matrix)):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "反应级数矩阵 n 包含 NaN/Inf"
+
+    def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
+        conc_mol_m3 = _safe_nonnegative(molar_flow_mol_s) / max(vdot_m3_s, 1e-30)
+
+        if kinetic_model == "power_law":
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+        elif kinetic_model == "langmuir_hinshelwood":
+            rate_vector = calc_rate_vector_langmuir_hinshelwood(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+                ),
+                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+            )
+        elif kinetic_model == "reversible":
+            rate_vector = calc_rate_vector_reversible(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0_fwd=k0,
+                ea_fwd_J_mol=ea_J_mol,
+                order_fwd_matrix=reaction_order_matrix,
+                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                order_rev_matrix=(
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
+                ),
+            )
+        else:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+
+        dF_dV = stoich_matrix @ rate_vector
+        return dF_dV
+
+    volume_grid_m3 = np.linspace(0.0, float(reactor_volume_m3), n_points, dtype=float)
+
+    try:
+        solution = solve_ivp(
+            fun=ode_fun,
+            t_span=(0.0, float(reactor_volume_m3)),
+            y0=molar_flow_inlet_mol_s.astype(float),
+            method=solver_method,
+            t_eval=volume_grid_m3,
+            rtol=rtol,
+            atol=atol,
+        )
+    except Exception as exc:
+        return volume_grid_m3, molar_flow_inlet_mol_s.astype(float)[:, None], False, f"solve_ivp异常: {exc}"
+
+    if not solution.success:
+        message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
+        return volume_grid_m3, molar_flow_inlet_mol_s.astype(float)[:, None], False, str(message)
+
+    return solution.t.astype(float), solution.y.astype(float), True, "OK"
+
+
+def integrate_batch_profile(
+    reaction_time_s: float,
+    temperature_K: float,
+    conc_initial_mol_m3: np.ndarray,
+    stoich_matrix: np.ndarray,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    reaction_order_matrix: np.ndarray,
+    solver_method: str,
+    rtol: float,
+    atol: float,
+    n_points: int = 200,
+    kinetic_model: str = "power_law",
+    K0_ads: np.ndarray = None,
+    Ea_K_J_mol: np.ndarray = None,
+    m_inhibition: np.ndarray = None,
+    k0_rev: np.ndarray = None,
+    ea_rev_J_mol: np.ndarray = None,
+    order_rev_matrix: np.ndarray = None,
+) -> tuple[np.ndarray, np.ndarray, bool, str]:
+    """
+    返回 Batch 随时间剖面：
+      time_grid_s: shape (n_points,)
+      conc_profile_mol_m3: shape (n_species, n_points)
+    """
+    n_points = int(n_points)
+    if n_points < 2:
+        n_points = 2
+
+    if not np.isfinite(reaction_time_s):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "t_s 无效（NaN/Inf）"
+    if reaction_time_s < 0.0:
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "t_s 不能为负"
+    if reaction_time_s == 0.0:
+        return (
+            np.array([0.0], dtype=float),
+            conc_initial_mol_m3.astype(float)[:, None],
+            True,
+            "t=0",
+        )
+
+    if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "温度 T_K 无效"
+
+    if not np.all(np.isfinite(conc_initial_mol_m3)):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "初始浓度包含 NaN/Inf"
+    if not np.all(np.isfinite(stoich_matrix)):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "化学计量数矩阵 ν 包含 NaN/Inf"
+    if not np.all(np.isfinite(k0)):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "k0 包含 NaN/Inf"
+    if not np.all(np.isfinite(ea_J_mol)):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "Ea 包含 NaN/Inf"
+    if not np.all(np.isfinite(reaction_order_matrix)):
+        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "反应级数矩阵 n 包含 NaN/Inf"
+
+    def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
+        conc_safe = _safe_nonnegative(conc_mol_m3)
+
+        if kinetic_model == "power_law":
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_safe,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+        elif kinetic_model == "langmuir_hinshelwood":
+            rate_vector = calc_rate_vector_langmuir_hinshelwood(
+                conc_mol_m3=conc_safe,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
+                Ea_K_J_mol=(Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)),
+                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+            )
+        elif kinetic_model == "reversible":
+            rate_vector = calc_rate_vector_reversible(
+                conc_mol_m3=conc_safe,
+                temperature_K=temperature_K,
+                k0_fwd=k0,
+                ea_fwd_J_mol=ea_J_mol,
+                order_fwd_matrix=reaction_order_matrix,
+                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                order_rev_matrix=(
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
+                ),
+            )
+        else:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_safe,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+
+        dC_dt = stoich_matrix @ rate_vector
+        return dC_dt
+
+    time_grid_s = np.linspace(0.0, float(reaction_time_s), n_points, dtype=float)
+    try:
+        solution = solve_ivp(
+            fun=ode_fun,
+            t_span=(0.0, float(reaction_time_s)),
+            y0=conc_initial_mol_m3.astype(float),
+            method=solver_method,
+            t_eval=time_grid_s,
+            rtol=rtol,
+            atol=atol,
+        )
+    except Exception as exc:
+        return time_grid_s, conc_initial_mol_m3.astype(float)[:, None], False, f"solve_ivp异常: {exc}"
+
+    if not solution.success:
+        message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
+        return time_grid_s, conc_initial_mol_m3.astype(float)[:, None], False, str(message)
+
+    return solution.t.astype(float), solution.y.astype(float), True, "OK"
 
 
 def _pack_parameters(
@@ -822,90 +1276,6 @@ def _build_bounds(
     return np.concatenate(lower_parts), np.concatenate(upper_parts)
 
 
-def _calculate_confidence_intervals(
-    jacobian: np.ndarray,
-    residuals: np.ndarray,
-    n_params: int,
-    confidence_level: float = 0.95,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool, str]:
-    """
-    基于 Jacobian 矩阵计算参数的标准误差、置信区间和相关性矩阵。
-
-    参数:
-        jacobian: Jacobian 矩阵 (m x p)，m = 残差数，p = 参数数
-        residuals: 残差向量 (m,)
-        n_params: 拟合参数个数 p
-        confidence_level: 置信水平 (默认 0.95)
-
-    返回:
-        std_errors: 参数标准误差 (p,)
-        conf_half_widths: 置信区间半宽度 (p,)
-        correlation_matrix: 相关性矩阵 (p x p)
-        success: 是否成功计算
-        message: 成功/失败信息
-    """
-    m = len(residuals)  # 数据点数（残差数）
-    p = n_params  # 参数个数
-
-    if m <= p:
-        return (
-            np.full(p, np.nan),
-            np.full(p, np.nan),
-            np.full((p, p), np.nan),
-            False,
-            f"数据点数 ({m}) 必须大于参数数 ({p}) 才能计算置信区间",
-        )
-
-    # 计算残差方差估计 sigma^2 = SSR / (m - p)
-    ssr = float(np.dot(residuals, residuals))  # 残差平方和
-    dof = m - p  # 自由度
-    sigma_squared = ssr / dof
-
-    # 计算协方差矩阵 Cov = sigma^2 * (J^T J)^(-1)
-    try:
-        jtj = jacobian.T @ jacobian
-        # 使用伪逆以增强数值稳定性
-        jtj_inv = np.linalg.pinv(jtj)
-        cov_matrix = sigma_squared * jtj_inv
-    except np.linalg.LinAlgError as e:
-        return (
-            np.full(p, np.nan),
-            np.full(p, np.nan),
-            np.full((p, p), np.nan),
-            False,
-            f"矩阵求逆失败: {e}",
-        )
-
-    # 提取对角线元素（方差），计算标准误差
-    variances = np.diag(cov_matrix)
-    if np.any(variances < 0):
-        # 负方差通常表示数值问题
-        return (
-            np.full(p, np.nan),
-            np.full(p, np.nan),
-            np.full((p, p), np.nan),
-            False,
-            "协方差矩阵对角线存在负值，可能是数值不稳定",
-        )
-    std_errors = np.sqrt(variances)
-
-    # 计算置信区间半宽度 = t_critical * std_error
-    alpha = 1.0 - confidence_level
-    t_critical = t_distribution.ppf(1.0 - alpha / 2.0, dof)
-    conf_half_widths = t_critical * std_errors
-
-    # 计算相关性矩阵
-    # Corr[i,j] = Cov[i,j] / (std[i] * std[j])
-    std_outer = np.outer(std_errors, std_errors)
-    # 避免除以零
-    std_outer = np.where(std_outer < 1e-300, 1e-300, std_outer)
-    correlation_matrix = cov_matrix / std_outer
-    # 对角线应为 1
-    np.fill_diagonal(correlation_matrix, 1.0)
-
-    return std_errors, conf_half_widths, correlation_matrix, True, "成功"
-
-
 def _predict_outputs_for_row(
     row: pd.Series,
     species_names: list[str],
@@ -1181,6 +1551,16 @@ def main() -> None:
     )
 
     with st.sidebar:
+        with st.container(border=True):
+            st.markdown("#### 导航")
+            page_mode = st.radio(
+                "页面",
+                options=["建模与拟合", "教程/帮助"],
+                index=0,
+                help="新手建议先看“教程/帮助”，下载示例数据跑通一次流程。",
+                key="page_mode",
+            )
+
         st.markdown("### 全局设置")
 
         with st.container(border=True):
@@ -1269,6 +1649,10 @@ def main() -> None:
             atol = st.number_input(
                 "atol（绝对误差容限）", value=1e-9, min_value=1e-15, format="%.2e"
             )
+
+    if page_mode == "教程/帮助":
+        _render_help_page()
+        st.stop()
 
     # ========== 动态主标题 ==========
     if reactor_type == "PFR":
@@ -1953,24 +2337,24 @@ def main() -> None:
         for col in missing:
             data_df[col] = 0.0
 
-    # 对常用数值列：强制转为数值，无法解析的填 NaN，再统一用 0 填充
-    numeric_cols_to_fill = list(required_cols_hint)
-    for name in species_names:
-        # 根据反应器类型添加不同的输出列
-        if reactor_type == "PFR":
-            numeric_cols_to_fill.append(f"Fout_{name}_mol_s")
-        numeric_cols_to_fill.extend(
-            [
-                f"Cout_{name}_mol_m3",
-                f"X_{name}",
-            ]
-        )
-    for col in numeric_cols_to_fill:
+    # 对必需输入列：强制转为数值，无法解析的填 NaN，再统一用 0 填充（便于快速填表）
+    input_numeric_cols = list(required_cols_hint)
+    for col in input_numeric_cols:
         if col not in data_df.columns:
             data_df[col] = 0.0
-        data_df[col] = pd.to_numeric(data_df[col], errors="coerce")
+        data_df[col] = pd.to_numeric(data_df[col], errors="coerce").fillna(0.0)
 
-    data_df[numeric_cols_to_fill] = data_df[numeric_cols_to_fill].fillna(0.0)
+    # 对“测量值列”：只转换存在的列，不自动补列；NaN 保留表示“缺测”
+    # 这样 residual_function 才能识别缺测并进行惩罚（而不是被 0.0 误当成有效测量值）。
+    measured_cols_to_parse = []
+    for name in species_names:
+        if reactor_type == "PFR":
+            measured_cols_to_parse.append(f"Fout_{name}_mol_s")
+        measured_cols_to_parse.extend([f"Cout_{name}_mol_m3", f"X_{name}"])
+
+    for col in measured_cols_to_parse:
+        if col in data_df.columns:
+            data_df[col] = pd.to_numeric(data_df[col], errors="coerce")
 
     st.success(f"成功加载 {len(data_df)} 条实验数据。")
 
@@ -2016,9 +2400,27 @@ def main() -> None:
 
     with st.container(border=True):
         st.markdown("#### 参数边界与加权设置")
+        st.caption(
+            "边界只对 **勾选参与拟合（Fit）** 的参数生效；不同动力学模型启用的参数不同。"
+        )
+        if kinetic_model == "langmuir_hinshelwood":
+            st.caption(
+                "Langmuir-Hinshelwood 分母项："
+                "$$r_j = \\frac{k_j(T)\\prod_i C_i^{n_{ij}}}{\\left(1+\\sum_i K_i(T)C_i\\right)^{m_j}}$$  "
+                "$$K_i(T)=K_{0,i}\\exp\\left(-\\frac{E_{a,K,i}}{RT}\\right)$$  "
+                "若 $C$ 用 mol/m³，则 $K$ 的单位为 m³/mol（保证 $K_iC_i$ 无量纲）。"
+            )
+        elif kinetic_model == "reversible":
+            st.caption(
+                "可逆反应模型："
+                "$$r_j=k_j^+(T)\\prod_i C_i^{n_{ij}^+}-k_j^-(T)\\prod_i C_i^{n_{ij}^-}$$  "
+                "本区的 k0/Ea/n 对应正反应（+）；逆反应（-）有独立边界。"
+            )
         col_bounds1, col_bounds2, col_bounds3 = st.columns(3)
         with col_bounds1:
-            st.markdown("**k0 范围**")
+            st.markdown(
+                "**k0 范围**" if kinetic_model != "reversible" else "**k0⁺ 范围（正反应）**"
+            )
             k0_min = st.number_input(
                 "Min",
                 value=1e-15,
@@ -2026,6 +2428,7 @@ def main() -> None:
                 max_value=1e15,
                 format="%.1e",
                 key="k0min",
+                help="仅对勾选 Fit_k0（或 Fit_k0_rev）生效；k0 的单位取决于总级数（常见现象）。",
             )
             k0_max = st.number_input(
                 "Max",
@@ -2034,9 +2437,14 @@ def main() -> None:
                 max_value=1e15,
                 format="%.1e",
                 key="k0max",
+                help="建议先给出合理范围（不要过宽），再逐步放开。",
             )
         with col_bounds2:
-            st.markdown("**Ea 范围 [J/mol]**")
+            st.markdown(
+                "**Ea 范围 [J/mol]**"
+                if kinetic_model != "reversible"
+                else "**Ea⁺ 范围 [J/mol]（正反应）**"
+            )
             ea_min_J_mol = st.number_input(
                 "Min",
                 value=1.0e4,
@@ -2044,6 +2452,7 @@ def main() -> None:
                 max_value=3.0e5,
                 format="%.1e",
                 key="eamin",
+                help="活化能下界 [J/mol]。仅对勾选 Fit_Ea（或 Fit_Ea_rev）生效。",
             )
             ea_max_J_mol = st.number_input(
                 "Max",
@@ -2052,11 +2461,154 @@ def main() -> None:
                 max_value=3.0e5,
                 format="%.1e",
                 key="eamax",
+                help="活化能上界 [J/mol]。",
             )
         with col_bounds3:
-            st.markdown("**级数 n 范围**")
+            st.markdown(
+                "**级数 n 范围**"
+                if kinetic_model != "reversible"
+                else "**级数 n⁺ 范围（正反应）**"
+            )
             order_min = st.number_input("Min", value=-2.0, format="%.1f", key="nmin")
             order_max = st.number_input("Max", value=5.0, format="%.1f", key="nmax")
+
+        if kinetic_model == "langmuir_hinshelwood":
+            st.markdown("**Langmuir-Hinshelwood 专用边界**")
+            col_lhb1, col_lhb2, col_lhb3 = st.columns(3)
+            with col_lhb1:
+                st.markdown("K0_ads 范围 [m³/mol]")
+                K0_ads_min = st.number_input(
+                    "Min",
+                    value=0.0,
+                    min_value=0.0,
+                    max_value=1e20,
+                    format="%.1e",
+                    key="K0_ads_min",
+                    help="K0_ads 为吸附常数指前因子。若 C 用 mol/m³，则 K 的单位为 m³/mol。",
+                )
+                K0_ads_max = st.number_input(
+                    "Max",
+                    value=1e10,
+                    min_value=0.0,
+                    max_value=1e20,
+                    format="%.1e",
+                    key="K0_ads_max",
+                    help="建议先给出合理范围（例如 1e-6 ~ 1e6），再根据拟合情况调整。",
+                )
+            with col_lhb2:
+                st.markdown("Ea_K 范围 [J/mol]")
+                Ea_K_min = st.number_input(
+                    "Min",
+                    value=-2.0e5,
+                    min_value=-1.0e6,
+                    max_value=1.0e6,
+                    format="%.1e",
+                    key="Ea_K_min",
+                    help="吸附热（表观）下界 [J/mol]。允许负值（放热吸附）。",
+                )
+                Ea_K_max = st.number_input(
+                    "Max",
+                    value=2.0e5,
+                    min_value=-1.0e6,
+                    max_value=1.0e6,
+                    format="%.1e",
+                    key="Ea_K_max",
+                    help="吸附热（表观）上界 [J/mol]。",
+                )
+            with col_lhb3:
+                st.markdown("m 范围 [-]")
+                m_min = st.number_input(
+                    "Min",
+                    value=0.0,
+                    min_value=0.0,
+                    max_value=50.0,
+                    format="%.2f",
+                    key="m_min",
+                    help="抑制指数 m（分母整体幂次）下界，通常取 0~5。",
+                )
+                m_max = st.number_input(
+                    "Max",
+                    value=5.0,
+                    min_value=0.0,
+                    max_value=50.0,
+                    format="%.2f",
+                    key="m_max",
+                    help="抑制指数 m 上界。",
+                )
+        else:
+            K0_ads_min = 0.0
+            K0_ads_max = 1.0
+            Ea_K_min = -2.0e5
+            Ea_K_max = 2.0e5
+            m_min = 0.0
+            m_max = 5.0
+
+        if kinetic_model == "reversible":
+            st.markdown("**可逆反应（逆反应）专用边界**")
+            col_rvb1, col_rvb2, col_rvb3 = st.columns(3)
+            with col_rvb1:
+                st.markdown("k0⁻ 范围")
+                k0_rev_min = st.number_input(
+                    "Min",
+                    value=float(k0_min),
+                    min_value=1e-15,
+                    max_value=1e15,
+                    format="%.1e",
+                    key="k0_rev_min",
+                    help="逆反应 k0⁻ 的下界（仅对勾选 Fit_k0_rev 的反应生效）。",
+                )
+                k0_rev_max = st.number_input(
+                    "Max",
+                    value=float(k0_max),
+                    min_value=1e-15,
+                    max_value=1e15,
+                    format="%.1e",
+                    key="k0_rev_max",
+                    help="逆反应 k0⁻ 的上界。",
+                )
+            with col_rvb2:
+                st.markdown("Ea⁻ 范围 [J/mol]")
+                ea_rev_min_J_mol = st.number_input(
+                    "Min",
+                    value=float(ea_min_J_mol),
+                    min_value=0.0,
+                    max_value=1.0e6,
+                    format="%.1e",
+                    key="ea_rev_min",
+                    help="逆反应 Ea⁻ 下界 [J/mol]（仅对勾选 Fit_Ea_rev 的反应生效）。",
+                )
+                ea_rev_max_J_mol = st.number_input(
+                    "Max",
+                    value=float(ea_max_J_mol),
+                    min_value=0.0,
+                    max_value=1.0e6,
+                    format="%.1e",
+                    key="ea_rev_max",
+                    help="逆反应 Ea⁻ 上界 [J/mol]。",
+                )
+            with col_rvb3:
+                st.markdown("n⁻ 范围")
+                order_rev_min = st.number_input(
+                    "Min",
+                    value=float(order_min),
+                    format="%.1f",
+                    key="n_rev_min",
+                    help="逆反应级数 n⁻ 下界（仅对勾选逆反应级数 Fit 的项生效）。",
+                )
+                order_rev_max = st.number_input(
+                    "Max",
+                    value=float(order_max),
+                    format="%.1f",
+                    key="n_rev_max",
+                    help="逆反应级数 n⁻ 上界。",
+                )
+        else:
+            k0_rev_min = float(k0_min)
+            k0_rev_max = float(k0_max)
+            ea_rev_min_J_mol = float(ea_min_J_mol)
+            ea_rev_max_J_mol = float(ea_max_J_mol)
+            order_rev_min = float(order_min)
+            order_rev_max = float(order_max)
 
         weight_mode = st.selectbox(
             "残差加权策略", options=["不加权", "按测量值相对误差(1/|y|)"], index=0
@@ -2233,6 +2785,21 @@ def main() -> None:
         fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
     )
 
+    # 将边界做最小清洗：保证 upper > lower（避免 least_squares 报 x0 infeasible / bounds 错误）
+    K0_ads_min_bound = max(float(K0_ads_min), 0.0)
+    K0_ads_max_bound = max(float(K0_ads_max), K0_ads_min_bound + 1e-15)
+    Ea_K_min_bound = float(min(Ea_K_min, Ea_K_max))
+    Ea_K_max_bound = float(max(Ea_K_max, Ea_K_min_bound + 1.0))
+    m_min_bound = max(float(m_min), 0.0)
+    m_max_bound = max(float(m_max), m_min_bound + 1e-6)
+
+    k0_rev_min_bound = max(float(k0_rev_min), 1e-15)
+    k0_rev_max_bound = min(max(float(k0_rev_max), k0_rev_min_bound * 1.0001), 1e15)
+    ea_rev_min_bound = max(float(ea_rev_min_J_mol), 0.0)
+    ea_rev_max_bound = max(float(ea_rev_max_J_mol), ea_rev_min_bound + 1.0)
+    order_rev_min_bound = float(order_rev_min)
+    order_rev_max_bound = float(max(float(order_rev_max), order_rev_min_bound + 1e-6))
+
     lower_bound, upper_bound = _build_bounds(
         k0_guess=k0_guess,
         ea_guess_J_mol=ea_guess_J_mol,
@@ -2250,10 +2817,22 @@ def main() -> None:
         fit_K0_ads_flags=fit_K0_ads_flags,
         fit_Ea_K_flags=fit_Ea_K_flags,
         fit_m_flags=fit_m_flags,
+        K0_ads_min=K0_ads_min_bound,
+        K0_ads_max=K0_ads_max_bound,
+        Ea_K_min=Ea_K_min_bound,
+        Ea_K_max=Ea_K_max_bound,
+        m_min=m_min_bound,
+        m_max=m_max_bound,
         # 可逆反应参数边界
         fit_k0_rev_flags=fit_k0_rev_flags,
         fit_ea_rev_flags=fit_ea_rev_flags,
         fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
+        k0_rev_min=k0_rev_min_bound,
+        k0_rev_max=k0_rev_max_bound,
+        ea_rev_min=ea_rev_min_bound,
+        ea_rev_max=ea_rev_max_bound,
+        order_rev_min=order_rev_min_bound,
+        order_rev_max=order_rev_max_bound,
     )
 
     if initial_parameter_vector.size > 0:
@@ -2395,7 +2974,7 @@ def main() -> None:
                     "4) 检查 k0/Ea/n 的初值与边界是否合理。"
                 )
 
-        k0_fit, ea_fit_J_mol, order_fit = _unpack_parameters(
+        fitted_params = _unpack_parameters(
             parameter_vector=fitted_parameter_vector,
             k0_guess=k0_guess,
             ea_guess_J_mol=ea_guess_J_mol,
@@ -2403,7 +2982,31 @@ def main() -> None:
             fit_k0_flags=fit_k0_flags,
             fit_ea_flags=fit_ea_flags,
             fit_order_flags_matrix=fit_order_flags_matrix,
+            # L-H 参数
+            K0_ads_guess=K0_ads,
+            Ea_K_guess=Ea_K_J_mol,
+            m_inhibition_guess=m_inhibition,
+            fit_K0_ads_flags=fit_K0_ads_flags,
+            fit_Ea_K_flags=fit_Ea_K_flags,
+            fit_m_flags=fit_m_flags,
+            # 可逆反应参数
+            k0_rev_guess=k0_rev,
+            ea_rev_guess=ea_rev_J_mol,
+            order_rev_guess=order_rev,
+            fit_k0_rev_flags=fit_k0_rev_flags,
+            fit_ea_rev_flags=fit_ea_rev_flags,
+            fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
         )
+
+        k0_fit = fitted_params["k0"]
+        ea_fit_J_mol = fitted_params["ea_J_mol"]
+        order_fit = fitted_params["reaction_order_matrix"]
+        K0_ads_fit = fitted_params["K0_ads"]
+        Ea_K_fit_J_mol = fitted_params["Ea_K"]
+        m_inhibition_fit = fitted_params["m_inhibition"]
+        k0_rev_fit = fitted_params["k0_rev"]
+        ea_rev_fit_J_mol = fitted_params["ea_rev"]
+        order_rev_fit = fitted_params["order_rev"]
 
         # 结果展示区域
         st.divider()
@@ -2443,12 +3046,12 @@ def main() -> None:
                 atol=atol,
                 reactor_type=reactor_type,
                 kinetic_model=kinetic_model,
-                K0_ads=K0_ads,
-                Ea_K_J_mol=Ea_K_J_mol,
-                m_inhibition=m_inhibition,
-                k0_rev=k0_rev,
-                ea_rev_J_mol=ea_rev_J_mol,
-                order_rev_matrix=order_rev,
+                K0_ads=K0_ads_fit,
+                Ea_K_J_mol=Ea_K_fit_J_mol,
+                m_inhibition=m_inhibition_fit,
+                k0_rev=k0_rev_fit,
+                ea_rev_J_mol=ea_rev_fit_J_mol,
+                order_rev_matrix=order_rev_fit,
             )
 
             # 获取 x 轴数据：PFR 用体积，Batch 用时间
@@ -2532,7 +3135,28 @@ def main() -> None:
             )
             ax2.grid(True, linestyle=":", alpha=0.6)
             ax2.legend()
+            parity_png_bytes = _figure_to_image_bytes(fig2, "png")
+            parity_svg_bytes = _figure_to_image_bytes(fig2, "svg")
             st.pyplot(fig2, clear_figure=True)
+            plt.close(fig2)
+
+            col_par_exp1, col_par_exp2 = st.columns(2)
+            with col_par_exp1:
+                st.download_button(
+                    label="🖼️ 导出奇偶校验图 (PNG)",
+                    data=parity_png_bytes,
+                    file_name=f"parity_{reactor_type}_{plot_species}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+            with col_par_exp2:
+                st.download_button(
+                    label="🖼️ 导出奇偶校验图 (SVG)",
+                    data=parity_svg_bytes,
+                    file_name=f"parity_{reactor_type}_{plot_species}.svg",
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                )
 
         with col_plot2:
             st.markdown("##### 误差图 (Predicted - Measured)")
@@ -2550,37 +3174,240 @@ def main() -> None:
             )
             ax3.grid(True, linestyle=":", alpha=0.6)
             ax3.legend()
+            error_png_bytes = _figure_to_image_bytes(fig3, "png")
+            error_svg_bytes = _figure_to_image_bytes(fig3, "svg")
             st.pyplot(fig3, clear_figure=True)
+            plt.close(fig3)
 
-        # ========== 残差直方图 ==========
-        st.markdown("##### 残差分布直方图")
-        fig_hist, ax_hist = plt.subplots(figsize=(6, 3.5))
-        finite_errors = error_values.dropna()
-        if len(finite_errors) > 0:
-            ax_hist.hist(
-                finite_errors,
-                bins=min(20, len(finite_errors)),
-                edgecolor="black",
-                alpha=0.7,
-                color="steelblue",
-            )
-            ax_hist.axvline(
-                0, color="red", linestyle="--", linewidth=1.5, label="零误差线"
-            )
-            ax_hist.set_xlabel("残差 (Predicted - Measured)", fontsize=10)
-            ax_hist.set_ylabel("频数", fontsize=10)
-            ax_hist.legend()
-            ax_hist.grid(True, linestyle=":", alpha=0.6)
-        else:
-            ax_hist.text(
-                0.5,
-                0.5,
-                "无有效数据",
-                ha="center",
-                va="center",
-                transform=ax_hist.transAxes,
-            )
-        st.pyplot(fig_hist, clear_figure=True)
+            col_err_exp1, col_err_exp2 = st.columns(2)
+            with col_err_exp1:
+                st.download_button(
+                    label="🖼️ 导出误差图 (PNG)",
+                    data=error_png_bytes,
+                    file_name=f"error_{reactor_type}_{plot_species}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+            with col_err_exp2:
+                st.download_button(
+                    label="🖼️ 导出误差图 (SVG)",
+                    data=error_svg_bytes,
+                    file_name=f"error_{reactor_type}_{plot_species}.svg",
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                )
+
+        # ========== 沿程 / 随时间 剖面图 ==========
+        st.divider()
+        st.markdown("#### 沿程/随时间剖面（Profile）")
+        with st.expander("查看剖面图（用于诊断：哪里消耗/生成最快）", expanded=False):
+            if data_df.shape[0] == 0:
+                st.info("无数据行可用于生成剖面图。")
+            else:
+                selected_row_index = int(
+                    st.number_input(
+                        "选择实验点行号（从 0 开始）",
+                        min_value=0,
+                        max_value=int(data_df.shape[0] - 1),
+                        value=0,
+                        step=1,
+                    )
+                )
+                profile_points = int(
+                    st.slider(
+                        "剖面点数（越大越平滑，但越慢）",
+                        min_value=30,
+                        max_value=400,
+                        value=200,
+                        step=10,
+                    )
+                )
+                profile_species_list = st.multiselect(
+                    "选择要绘制的物种",
+                    options=species_names,
+                    default=species_names,
+                    help="建议先选 1~3 个关键物种，避免曲线太多不易阅读。",
+                )
+
+                if len(profile_species_list) == 0:
+                    st.warning("请至少选择一个物种。")
+                else:
+                    row_profile = data_df.iloc[selected_row_index]
+
+                    if reactor_type == "PFR":
+                        profile_quantity = st.radio(
+                            "剖面输出量",
+                            options=["F (mol/s)", "C (mol/m^3)"],
+                            index=0,
+                            help="PFR 默认以摩尔流量积分；浓度通过 C=F/vdot 计算（恒定体积流量假设）。",
+                        )
+
+                        reactor_volume_m3 = float(row_profile.get("V_m3", np.nan))
+                        temperature_K_profile = float(row_profile.get("T_K", np.nan))
+                        vdot_m3_s_profile = float(row_profile.get("vdot_m3_s", np.nan))
+                        molar_flow_inlet_mol_s = np.array(
+                            [
+                                float(row_profile.get(f"F0_{s}_mol_s", 0.0))
+                                for s in species_names
+                            ],
+                            dtype=float,
+                        )
+
+                        volume_grid_m3, flow_profile, ok, msg = integrate_pfr_profile(
+                            reactor_volume_m3=reactor_volume_m3,
+                            temperature_K=temperature_K_profile,
+                            vdot_m3_s=vdot_m3_s_profile,
+                            molar_flow_inlet_mol_s=molar_flow_inlet_mol_s,
+                            stoich_matrix=stoich_matrix,
+                            k0=k0_fit,
+                            ea_J_mol=ea_fit_J_mol,
+                            reaction_order_matrix=order_fit,
+                            solver_method=solver_method,
+                            rtol=rtol,
+                            atol=atol,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model,
+                            K0_ads=K0_ads_fit,
+                            Ea_K_J_mol=Ea_K_fit_J_mol,
+                            m_inhibition=m_inhibition_fit,
+                            k0_rev=k0_rev_fit,
+                            ea_rev_J_mol=ea_rev_fit_J_mol,
+                            order_rev_matrix=order_rev_fit,
+                        )
+
+                        if not ok:
+                            st.error(f"剖面积分失败：{msg}")
+                        else:
+                            fig_profile, ax_profile = plt.subplots(figsize=(7, 4.2))
+                            for species_name in profile_species_list:
+                                species_index = species_names.index(species_name)
+                                if profile_quantity == "F (mol/s)":
+                                    y_values = flow_profile[species_index, :]
+                                    y_label = "Molar flow $F_i$ [mol/s]"
+                                else:
+                                    y_values = flow_profile[species_index, :] / max(
+                                        vdot_m3_s_profile, 1e-30
+                                    )
+                                    y_label = "Concentration $C_i$ [mol/m$^3$]"
+                                ax_profile.plot(
+                                    volume_grid_m3,
+                                    y_values,
+                                    label=str(species_name),
+                                    linewidth=2.0,
+                                )
+
+                            ax_profile.set_xlabel("Volume $V$ [m$^3$]")
+                            ax_profile.set_ylabel(y_label)
+                            ax_profile.grid(True, linestyle=":", alpha=0.6)
+                            ax_profile.legend()
+                            _apply_plot_tick_format(
+                                ax_profile,
+                                number_style=plot_number_style,
+                                decimal_places=int(plot_decimal_places),
+                                use_auto=bool(plot_tick_auto),
+                            )
+
+                            profile_png_bytes = _figure_to_image_bytes(fig_profile, "png")
+                            profile_svg_bytes = _figure_to_image_bytes(fig_profile, "svg")
+                            st.pyplot(fig_profile, clear_figure=True)
+                            plt.close(fig_profile)
+
+                            col_prof_exp1, col_prof_exp2 = st.columns(2)
+                            with col_prof_exp1:
+                                st.download_button(
+                                    label="🖼️ 导出剖面图 (PNG)",
+                                    data=profile_png_bytes,
+                                    file_name=f"profile_{reactor_type}_row{selected_row_index}.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                )
+                            with col_prof_exp2:
+                                st.download_button(
+                                    label="🖼️ 导出剖面图 (SVG)",
+                                    data=profile_svg_bytes,
+                                    file_name=f"profile_{reactor_type}_row{selected_row_index}.svg",
+                                    mime="image/svg+xml",
+                                    use_container_width=True,
+                                )
+
+                    else:  # Batch
+                        reaction_time_s_profile = float(row_profile.get("t_s", np.nan))
+                        temperature_K_profile = float(row_profile.get("T_K", np.nan))
+                        conc_initial_mol_m3 = np.array(
+                            [
+                                float(row_profile.get(f"C0_{s}_mol_m3", 0.0))
+                                for s in species_names
+                            ],
+                            dtype=float,
+                        )
+
+                        time_grid_s, conc_profile, ok, msg = integrate_batch_profile(
+                            reaction_time_s=reaction_time_s_profile,
+                            temperature_K=temperature_K_profile,
+                            conc_initial_mol_m3=conc_initial_mol_m3,
+                            stoich_matrix=stoich_matrix,
+                            k0=k0_fit,
+                            ea_J_mol=ea_fit_J_mol,
+                            reaction_order_matrix=order_fit,
+                            solver_method=solver_method,
+                            rtol=rtol,
+                            atol=atol,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model,
+                            K0_ads=K0_ads_fit,
+                            Ea_K_J_mol=Ea_K_fit_J_mol,
+                            m_inhibition=m_inhibition_fit,
+                            k0_rev=k0_rev_fit,
+                            ea_rev_J_mol=ea_rev_fit_J_mol,
+                            order_rev_matrix=order_rev_fit,
+                        )
+
+                        if not ok:
+                            st.error(f"剖面积分失败：{msg}")
+                        else:
+                            fig_profile, ax_profile = plt.subplots(figsize=(7, 4.2))
+                            for species_name in profile_species_list:
+                                species_index = species_names.index(species_name)
+                                ax_profile.plot(
+                                    time_grid_s,
+                                    conc_profile[species_index, :],
+                                    label=str(species_name),
+                                    linewidth=2.0,
+                                )
+
+                            ax_profile.set_xlabel("Time $t$ [s]")
+                            ax_profile.set_ylabel("Concentration $C_i$ [mol/m$^3$]")
+                            ax_profile.grid(True, linestyle=":", alpha=0.6)
+                            ax_profile.legend()
+                            _apply_plot_tick_format(
+                                ax_profile,
+                                number_style=plot_number_style,
+                                decimal_places=int(plot_decimal_places),
+                                use_auto=bool(plot_tick_auto),
+                            )
+
+                            profile_png_bytes = _figure_to_image_bytes(fig_profile, "png")
+                            profile_svg_bytes = _figure_to_image_bytes(fig_profile, "svg")
+                            st.pyplot(fig_profile, clear_figure=True)
+                            plt.close(fig_profile)
+
+                            col_prof_exp1, col_prof_exp2 = st.columns(2)
+                            with col_prof_exp1:
+                                st.download_button(
+                                    label="🖼️ 导出剖面图 (PNG)",
+                                    data=profile_png_bytes,
+                                    file_name=f"profile_{reactor_type}_row{selected_row_index}.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                )
+                            with col_prof_exp2:
+                                st.download_button(
+                                    label="🖼️ 导出剖面图 (SVG)",
+                                    data=profile_svg_bytes,
+                                    file_name=f"profile_{reactor_type}_row{selected_row_index}.svg",
+                                    mime="image/svg+xml",
+                                    use_container_width=True,
+                                )
 
         st.markdown("##### 优化后动力学参数")
         col_res_p1, col_res_p2 = st.columns(2)
@@ -2617,123 +3444,72 @@ def main() -> None:
                 use_container_width=True,
             )
 
-        # ========== 置信区间计算与显示 ==========
-        if (
-            initial_parameter_vector.size > 0
-            and hasattr(result, "jac")
-            and result.jac is not None
-        ):
-            jacobian = result.jac
-            final_residuals = residual_function(fitted_parameter_vector)
-            n_params = len(fitted_parameter_vector)
-
-            std_errors, conf_half_widths, corr_matrix, ci_success, ci_message = (
-                _calculate_confidence_intervals(
-                    jacobian=jacobian,
-                    residuals=final_residuals,
-                    n_params=n_params,
-                    confidence_level=0.95,
+        if kinetic_model == "langmuir_hinshelwood":
+            st.markdown("##### Langmuir-Hinshelwood 拟合参数")
+            col_lh1, col_lh2 = st.columns(2)
+            with col_lh1:
+                st.markdown("**吸附参数 $K_i(T)$**")
+                lh_ads_df = pd.DataFrame(
+                    {"K0_ads": K0_ads_fit, "Ea_K_J_mol": Ea_K_fit_J_mol},
+                    index=species_names,
                 )
-            )
+                st.data_editor(
+                    lh_ads_df,
+                    column_config=_build_table_column_config(
+                        lh_ads_df, table_number_format
+                    ),
+                    num_rows="fixed",
+                    key="lh_ads_result_table",
+                    use_container_width=True,
+                )
+            with col_lh2:
+                st.markdown("**抑制指数 $m_j$**")
+                lh_m_df = pd.DataFrame(
+                    {"m_inhibition": m_inhibition_fit},
+                    index=[f"R{j+1}" for j in range(n_reactions)],
+                )
+                st.data_editor(
+                    lh_m_df,
+                    column_config=_build_table_column_config(lh_m_df, table_number_format),
+                    num_rows="fixed",
+                    key="lh_m_result_table",
+                    use_container_width=True,
+                )
 
-            with st.expander("📊 参数置信区间（95%）", expanded=True):
-                if ci_success:
-                    # 构建参数名称列表
-                    param_names = []
-                    param_values = []
-                    param_lower = []
-                    param_upper = []
-                    param_std_errors = []
-
-                    idx = 0
-                    # k0 参数
-                    for j in range(n_reactions):
-                        if fit_k0_flags[j]:
-                            param_names.append(f"k0_R{j+1}")
-                            param_values.append(fitted_parameter_vector[idx])
-                            param_std_errors.append(std_errors[idx])
-                            param_lower.append(
-                                fitted_parameter_vector[idx] - conf_half_widths[idx]
-                            )
-                            param_upper.append(
-                                fitted_parameter_vector[idx] + conf_half_widths[idx]
-                            )
-                            idx += 1
-                    # Ea 参数
-                    for j in range(n_reactions):
-                        if fit_ea_flags[j]:
-                            param_names.append(f"Ea_R{j+1}")
-                            param_values.append(fitted_parameter_vector[idx])
-                            param_std_errors.append(std_errors[idx])
-                            param_lower.append(
-                                fitted_parameter_vector[idx] - conf_half_widths[idx]
-                            )
-                            param_upper.append(
-                                fitted_parameter_vector[idx] + conf_half_widths[idx]
-                            )
-                            idx += 1
-                    # n 参数
-                    for j in range(n_reactions):
-                        for s_idx, s_name in enumerate(species_names):
-                            if fit_order_flags_matrix[j, s_idx]:
-                                param_names.append(f"n_R{j+1}_{s_name}")
-                                param_values.append(fitted_parameter_vector[idx])
-                                param_std_errors.append(std_errors[idx])
-                                param_lower.append(
-                                    fitted_parameter_vector[idx] - conf_half_widths[idx]
-                                )
-                                param_upper.append(
-                                    fitted_parameter_vector[idx] + conf_half_widths[idx]
-                                )
-                                idx += 1
-
-                    ci_df = pd.DataFrame(
-                        {
-                            "参数": param_names,
-                            "拟合值": param_values,
-                            "标准误差": param_std_errors,
-                            "95% CI 下界": param_lower,
-                            "95% CI 上界": param_upper,
-                        }
-                    )
-                    st.dataframe(
-                        ci_df,
-                        column_config={
-                            "拟合值": st.column_config.NumberColumn(
-                                format=table_number_format
-                            ),
-                            "标准误差": st.column_config.NumberColumn(
-                                format=table_number_format
-                            ),
-                            "95% CI 下界": st.column_config.NumberColumn(
-                                format=table_number_format
-                            ),
-                            "95% CI 上界": st.column_config.NumberColumn(
-                                format=table_number_format
-                            ),
-                        },
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-
-                    # 相关性矩阵
-                    st.markdown("**参数相关性矩阵**")
-                    corr_df = pd.DataFrame(
-                        data=corr_matrix,
-                        index=param_names,
-                        columns=param_names,
-                    )
-                    st.dataframe(
-                        corr_df.style.background_gradient(
-                            cmap="RdBu_r", vmin=-1, vmax=1
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.warning(f"无法计算置信区间: {ci_message}")
-        else:
-            ci_df = None
-            st.info("参数数为 0 或无 Jacobian 矩阵，无法计算置信区间。")
+        if kinetic_model == "reversible":
+            st.markdown("##### 可逆反应拟合参数（逆反应）")
+            col_rev1, col_rev2 = st.columns(2)
+            with col_rev1:
+                st.markdown("**$k_0^-$ & $E_a^-$**")
+                rev_param_df = pd.DataFrame(
+                    {"k0_rev": k0_rev_fit, "Ea_rev_J_mol": ea_rev_fit_J_mol},
+                    index=[f"R{j+1}" for j in range(n_reactions)],
+                )
+                st.data_editor(
+                    rev_param_df,
+                    column_config=_build_table_column_config(
+                        rev_param_df, table_number_format
+                    ),
+                    num_rows="fixed",
+                    key="rev_param_result_table",
+                    use_container_width=True,
+                )
+            with col_rev2:
+                st.markdown("**逆反应级数 $n^-$**")
+                rev_order_df = pd.DataFrame(
+                    data=order_rev_fit,
+                    index=[f"R{j+1}" for j in range(n_reactions)],
+                    columns=species_names,
+                )
+                st.data_editor(
+                    rev_order_df,
+                    column_config=_build_table_column_config(
+                        rev_order_df, table_number_format
+                    ),
+                    num_rows="fixed",
+                    key="rev_order_result_table",
+                    use_container_width=True,
+                )
 
         # ========== 导出功能 ==========
         st.divider()
@@ -2750,6 +3526,15 @@ def main() -> None:
             for s_idx, s_name in enumerate(species_names):
                 export_param_data[f"n_{s_name}"] = order_fit[:, s_idx].tolist()
 
+            if kinetic_model == "langmuir_hinshelwood":
+                export_param_data["m_inhibition"] = m_inhibition_fit.tolist()
+
+            if kinetic_model == "reversible":
+                export_param_data["k0_rev"] = k0_rev_fit.tolist()
+                export_param_data["Ea_rev_J_mol"] = ea_rev_fit_J_mol.tolist()
+                for s_idx, s_name in enumerate(species_names):
+                    export_param_data[f"n_rev_{s_name}"] = order_rev_fit[:, s_idx].tolist()
+
             export_param_df = pd.DataFrame(export_param_data)
             param_csv = export_param_df.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -2759,6 +3544,23 @@ def main() -> None:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+            if kinetic_model == "langmuir_hinshelwood":
+                export_ads_df = pd.DataFrame(
+                    {
+                        "species": species_names,
+                        "K0_ads": K0_ads_fit.tolist(),
+                        "Ea_K_J_mol": Ea_K_fit_J_mol.tolist(),
+                    }
+                )
+                ads_csv = export_ads_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📄 导出吸附参数 (CSV)",
+                    data=ads_csv,
+                    file_name="lh_adsorption_params.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
         with col_export2:
             # 导出对比数据 CSV
@@ -2779,6 +3581,81 @@ def main() -> None:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+            build_report_table = st.checkbox(
+                "生成报告表（可能较慢）",
+                value=False,
+                help="报告表会对每一行实验条件做一次预测（调用一次 solve_ivp），数据量大时会耗时。",
+            )
+            if build_report_table:
+                # 导出“报告表”：保留原始 CSV 列 + 预测/误差列（对目标物种列表）
+                report_df = data_df.copy()
+                report_status_list = []
+                predicted_rows = []
+
+                for _, row in data_df.iterrows():
+                    pred_values, ok, msg = _predict_outputs_for_row(
+                        row=row,
+                        species_names=species_names,
+                        output_mode=output_mode,
+                        output_species_list=output_species_list,
+                        stoich_matrix=stoich_matrix,
+                        k0=k0_fit,
+                        ea_J_mol=ea_fit_J_mol,
+                        reaction_order_matrix=order_fit,
+                        solver_method=solver_method,
+                        rtol=rtol,
+                        atol=atol,
+                        reactor_type=reactor_type,
+                        kinetic_model=kinetic_model,
+                        K0_ads=K0_ads_fit,
+                        Ea_K_J_mol=Ea_K_fit_J_mol,
+                        m_inhibition=m_inhibition_fit,
+                        k0_rev=k0_rev_fit,
+                        ea_rev_J_mol=ea_rev_fit_J_mol,
+                        order_rev_matrix=order_rev_fit,
+                    )
+                    report_status_list.append("OK" if ok else f"FAIL: {msg}")
+                    if ok:
+                        predicted_rows.append(pred_values.astype(float).tolist())
+                    else:
+                        predicted_rows.append([np.nan] * len(output_species_list))
+
+                report_df["solve_status"] = report_status_list
+                predicted_matrix = np.array(predicted_rows, dtype=float)
+
+                for output_index, species_name in enumerate(output_species_list):
+                    if output_mode == "Fout (mol/s)":
+                        meas_col = f"Fout_{species_name}_mol_s"
+                    elif output_mode == "Cout (mol/m^3)":
+                        meas_col = f"Cout_{species_name}_mol_m3"
+                    else:
+                        meas_col = f"X_{species_name}"
+
+                    pred_col = f"pred_{meas_col}"
+                    err_col = f"error_{meas_col}"
+                    rel_col = f"relative_error_%_{meas_col}"
+
+                    if meas_col not in report_df.columns:
+                        report_df[meas_col] = np.nan
+
+                    report_df[pred_col] = predicted_matrix[:, output_index]
+                    report_df[err_col] = report_df[pred_col] - report_df[meas_col]
+                    report_df[rel_col] = (
+                        100.0
+                        * report_df[err_col]
+                        / report_df[meas_col].replace(0, np.nan)
+                    )
+
+                report_csv = report_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📑 导出报告表 (CSV)",
+                    data=report_csv,
+                    file_name="report_table.csv",
+                    mime="text/csv",
+                    help="包含原始 CSV 列 + solve_status + pred/error/relative_error 列（针对目标物种列表）。",
+                    use_container_width=True,
+                )
 
         with st.expander("查看详细预测数据"):
             st.data_editor(
