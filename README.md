@@ -164,6 +164,10 @@ python test_data/generate_test_data.py
 ```
 Kinetics_app/
 ├── app.py                  # Streamlit 主应用程序
+├── kinetics.py             # 动力学：幂律 / L-H / 可逆速率
+├── reactors.py             # 反应器：PFR/Batch 数值积分 + 剖面
+├── fitting.py              # 拟合工具：参数打包/解包、边界、单行预测
+├── ui_help.py              # 教程/帮助页内容与示例数据
 ├── requirements.txt        # Python 依赖
 ├── README.md              # 项目说明文档
 ├── TODO.md                # 待办事项列表

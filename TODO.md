@@ -45,11 +45,11 @@
 
 ## P2（维护与工程化，保持“脚本式”简单）
 
-- [ ] **拆分 `app.py`（不引入复杂架构）**
-  - [ ] `reactors.py`：PFR/Batch 积分
-  - [ ] `kinetics.py`：幂律 / L-H / 可逆速率
-  - [ ] `fitting.py`：参数打包/解包、边界、残差函数
-  - [ ] `ui_help.py`：帮助页文本与示例数据生成
+- [x] **拆分 `app.py`（不引入复杂架构）**
+  - [x] `reactors.py`：PFR/Batch 积分
+  - [x] `kinetics.py`：幂律 / L-H / 可逆速率
+  - [x] `fitting.py`：参数打包/解包、边界、残差函数
+  - [x] `ui_help.py`：帮助页文本与示例数据生成
 
 - [ ] **基础测试与自检**
   - [ ] 最小单元测试：速率函数维度/符号、PFR/Batch 在简单体系下的可解析对照
