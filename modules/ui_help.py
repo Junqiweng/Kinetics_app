@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from pathlib import Path
 
-from kinetics import R_GAS_J_MOL_K
+from .kinetics import R_GAS_J_MOL_K
 
 
 def _build_example_batch_csv_bytes() -> bytes:
@@ -52,30 +52,53 @@ def read_file_bytes_if_exists(file_path: str) -> bytes | None:
 
 def render_help_page() -> None:
     st.title("教程 / 帮助")
-    st.caption("面向初学者：按步骤完成一次建模与拟合。")
+    st.caption("面向初学者：按步骤完成一次建模、拟合、诊断与导出。")
 
     tab_quick, tab_csv, tab_models, tab_fit, tab_trouble = st.tabs(
         ["快速上手", "CSV 列说明", "动力学模型", "拟合技巧", "常见问题"]
     )
 
     with tab_quick:
-        st.markdown(
-            "**推荐流程（一次完整的拟合）**\n"
-            "1) 在左侧选择反应器类型与动力学模型；\n"
-            "2) 输入物种名与反应数，填写化学计量数矩阵 $\\nu$；\n"
-            "3) 设置级数矩阵 $n$、k0/Ea 初值与拟合开关（Fit）；\n"
-            "4) 下载并填写 CSV 模板（或用示例数据）；\n"
-            "5) 上传 CSV，选择拟合目标变量与目标物种；\n"
-            "6) 点击“开始拟合”，查看 Parity Plot 与误差图；\n"
-            "7) 导出拟合参数与对比数据。"
+        col_q1, col_q2 = st.columns([1, 1])
+        with col_q1:
+            st.markdown(
+                "**推荐流程（一次完整的拟合）**\n"
+                "1) 在左侧选择反应器类型与动力学模型；\n"
+                "2) 输入物种名与反应数，填写化学计量数矩阵 $\\nu$；\n"
+                "3) 设置级数矩阵 $n$、k0/Ea 初值与拟合开关（Fit）；\n"
+                "4) 下载并填写 CSV 模板（或用示例数据）；\n"
+                "5) 上传 CSV，选择拟合目标变量与进入目标函数的物种；\n"
+                "6) 点击“开始拟合”，查看奇偶校验图、残差图与沿程/随时间剖面；\n"
+                "7) 导出拟合参数、预测 vs 实验对比表与图像；\n"
+                "8) （推荐）用“配置管理”导出 JSON，便于下次直接复现。"
+            )
+
+        with col_q2:
+            st.info(
+                "💡 **提示**：\n"
+                "- 你可以先用示例数据跑通流程，再替换为自己的实验数据。\n"
+                "- 若拟合不动，可尝试：增大 `diff_step`、增大 `max_nfev`、开启 `multi-start`、或切换 ODE 求解器为 `BDF/Radau`。\n"
+                "- 上传的 CSV 会被自动缓存，页面刷新/切换不会丢失；如需删除，请点“删除已上传文件”。"
+            )
+
+        st.divider()
+        st.markdown("**目标函数（拟合在最小化什么？）**")
+        st.latex(
+            r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
+        )
+        st.caption(
+            "其中：$\\theta$ 为待拟合参数向量（如 $k_0,E_a,n$ 等），$N$ 为用于拟合的数据点数（含多个物种/多行数据）。"
         )
 
+        st.divider()
         st.markdown("**示例数据下载（可直接用于上手）**")
         col_ex1, col_ex2 = st.columns(2)
         with col_ex1:
-            pfr_example_bytes = read_file_bytes_if_exists("test_data/test_data_matched.csv")
+            pfr_example_bytes = read_file_bytes_if_exists(
+                "test_data/test_data_matched.csv"
+            )
             if pfr_example_bytes is None:
-                st.info(
+                st.warning(
                     "未找到 `test_data/test_data_matched.csv`，请先运行 `test_data/generate_test_data.py` 生成。"
                 )
             else:
@@ -98,12 +121,11 @@ def render_help_page() -> None:
                 use_container_width=True,
             )
 
-        st.info(
-            "提示：你可以先用示例数据跑通流程，再替换为自己的实验数据。"
-            "若拟合不动，可尝试：增大 diff_step、增大 max_nfev、开启 multi-start、或切换 ODE 求解器为 BDF/Radau。"
-        )
-
     with tab_csv:
+        st.markdown("**核心原则：列名必须与模板一致**（大小写/下划线都要匹配）。")
+        st.caption("建议：先下载模板 → 把你的数据粘进去 → 再上传。")
+        st.divider()
+
         st.markdown("**PFR 输入列**")
         st.markdown(
             "- `V_m3`：反应器体积 [m³]\n"
@@ -124,7 +146,12 @@ def render_help_page() -> None:
             "- PFR/Batch：`X_<物种名>`（转化率）"
         )
         st.caption(
-            "允许缺测：测量值为空/NaN 时，该行会在拟合中被赋予较大惩罚残差（相当于“提醒你这行缺数据”）。"
+            "重要：当前版本不允许测量列缺失或含 NaN/非数字；否则会停止拟合并提示缺失列/问题行号。"
+        )
+        st.markdown("**常见建议**")
+        st.markdown(
+            "- 如果某个物种没有测量值：要么补齐该物种的测量列，要么在“进入目标函数的物种”里取消勾选该物种。\n"
+            "- 如果只想拟合转化率：选择 `X (conversion)`，并确保 CSV 里有 `X_<物种名>` 列。"
         )
 
     with tab_models:
@@ -144,9 +171,7 @@ def render_help_page() -> None:
         )
 
         st.markdown("**(3) 可逆反应 (Reversible)**")
-        st.latex(
-            r"r_j=k_j^+(T)\prod_i C_i^{n_{ij}^+}-k_j^-(T)\prod_i C_i^{n_{ij}^-}"
-        )
+        st.latex(r"r_j=k_j^+(T)\prod_i C_i^{n_{ij}^+}-k_j^-(T)\prod_i C_i^{n_{ij}^-}")
         st.latex(
             r"k_j^{\pm}(T)=k_{0,j}^{\pm}\exp\left(-\frac{E_{a,j}^{\pm}}{RT}\right)"
         )
@@ -157,7 +182,20 @@ def render_help_page() -> None:
         st.markdown(
             "- 初值不准/拟合不动：把 `diff_step` 调大到 `1e-2 ~ 1e-3`；并开启 `multi-start`；\n"
             "- 刚性明显（收敛困难/很慢）：ODE 求解器选 `BDF` 或 `Radau`；\n"
-            "- 多参数混合拟合：建议开启 `x_scale='jac'`。"
+            "- 多参数混合拟合：建议开启 `x_scale='jac'`；\n"
+            "- 如果看到“达到最大迭代次数上限”：增大 `Max Iterations`，或缩紧参数边界，或改进初值。"
+        )
+        st.divider()
+        st.markdown("**进度条/状态栏的含义**")
+        st.markdown(
+            "- `Max Iterations` 是外层迭代次数上限；\n"
+            "- 状态栏里的“调用≈a/b”是模型函数调用次数的估算进度（数值差分 Jacobian 会导致每次迭代调用多次），属于正常现象。"
+        )
+        st.divider()
+        st.markdown("**导入/导出配置（强烈推荐）**")
+        st.markdown(
+            "- 侧边栏“配置管理”可以导出当前全部设置为 JSON（包含反应器、动力学、求解器、参数、边界与拟合设置）；\n"
+            "- 下次打开 App 会自动恢复上次配置；也可以导入 JSON 一键复现。"
         )
 
     with tab_trouble:
@@ -166,6 +204,6 @@ def render_help_page() -> None:
             "- `solve_ivp失败`：尝试 `BDF/Radau`，或调松 `rtol/atol`，或缩紧参数边界。\n"
             "- `T_K 无效` / `vdot 无效`：检查 CSV 对应列是否为正数。\n"
             "- 负级数 + 浓度趋近 0：会导致 $C^n$ 发散；程序对负级数使用浓度下限避免 `inf`，但建议检查模型合理性。\n"
-            "- `x0 infeasible`：初值超出边界；程序会自动裁剪到边界内，但仍建议你设置更合理的初值与边界。"
+            "- `x0 infeasible`：初值超出边界；程序会自动裁剪到边界内，但仍建议你设置更合理的初值与边界。\n"
+            "- `数据表缺少所选输出测量列` / `测量列中存在 NaN`：检查 CSV 表头与缺失值；或取消选择对应物种/输出模式。"
         )
-

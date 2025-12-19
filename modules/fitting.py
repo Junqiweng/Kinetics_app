@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from reactors import integrate_batch_reactor, integrate_pfr_molar_flows
+from .reactors import integrate_batch_reactor, integrate_pfr_molar_flows
 
 
 def _to_float_or_nan(value: object) -> float:
@@ -519,4 +519,3 @@ def _predict_outputs_for_row(
         )
 
     return output_values, True, "OK"
-

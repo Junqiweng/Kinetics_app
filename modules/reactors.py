@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from kinetics import (
+from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
     calc_rate_vector_power_law,
     calc_rate_vector_reversible,
@@ -81,7 +81,9 @@ def integrate_pfr_molar_flows(
                 Ea_K_J_mol=(
                     Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
                 ),
-                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         elif kinetic_model == "reversible":
             rate_vector = calc_rate_vector_reversible(
@@ -91,7 +93,9 @@ def integrate_pfr_molar_flows(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
                     order_rev_matrix
                     if order_rev_matrix is not None
@@ -110,6 +114,10 @@ def integrate_pfr_molar_flows(
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
 
+    # Limit max_step to prevent infinite step refinement for stiff/extreme parameters
+    max_step_value = (
+        float(reactor_volume_m3) / 10.0 if reactor_volume_m3 > 0 else np.inf
+    )
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -118,6 +126,7 @@ def integrate_pfr_molar_flows(
             method=solver_method,
             rtol=rtol,
             atol=atol,
+            max_step=max_step_value,
         )
     except Exception as exc:
         return molar_flow_inlet_mol_s.copy(), False, f"solve_ivp异常: {exc}"
@@ -193,8 +202,12 @@ def integrate_batch_reactor(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
                 K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)),
-                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         elif kinetic_model == "reversible":
             rate_vector = calc_rate_vector_reversible(
@@ -204,7 +217,9 @@ def integrate_batch_reactor(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
                     order_rev_matrix
                     if order_rev_matrix is not None
@@ -223,6 +238,8 @@ def integrate_batch_reactor(
         dC_dt = stoich_matrix @ rate_vector
         return dC_dt
 
+    # Limit max_step to prevent infinite step refinement for stiff/extreme parameters
+    max_step_value = float(reaction_time_s) / 10.0 if reaction_time_s > 0 else np.inf
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -231,6 +248,7 @@ def integrate_batch_reactor(
             method=solver_method,
             rtol=rtol,
             atol=atol,
+            max_step=max_step_value,
         )
     except Exception as exc:
         return conc_initial_mol_m3.copy(), False, f"solve_ivp异常: {exc}"
@@ -274,7 +292,12 @@ def integrate_pfr_profile(
         n_points = 2
 
     if not np.isfinite(reactor_volume_m3):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "V_m3 无效（NaN/Inf）"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "V_m3 无效（NaN/Inf）",
+        )
     if reactor_volume_m3 < 0.0:
         return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "V_m3 不能为负"
     if reactor_volume_m3 == 0.0:
@@ -288,18 +311,48 @@ def integrate_pfr_profile(
     if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
         return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "温度 T_K 无效"
     if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "体积流量 vdot_m3_s 无效"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "体积流量 vdot_m3_s 无效",
+        )
 
     if not np.all(np.isfinite(molar_flow_inlet_mol_s)):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "入口摩尔流量包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "入口摩尔流量包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(stoich_matrix)):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "化学计量数矩阵 ν 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "化学计量数矩阵 ν 包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(k0)):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "k0 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "k0 包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(ea_J_mol)):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "Ea 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "Ea 包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(reaction_order_matrix)):
-        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "反应级数矩阵 n 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "反应级数矩阵 n 包含 NaN/Inf",
+        )
 
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(vdot_m3_s, 1e-30)
@@ -323,7 +376,9 @@ def integrate_pfr_profile(
                 Ea_K_J_mol=(
                     Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
                 ),
-                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         elif kinetic_model == "reversible":
             rate_vector = calc_rate_vector_reversible(
@@ -333,7 +388,9 @@ def integrate_pfr_profile(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
                     order_rev_matrix
                     if order_rev_matrix is not None
@@ -354,6 +411,10 @@ def integrate_pfr_profile(
 
     volume_grid_m3 = np.linspace(0.0, float(reactor_volume_m3), n_points, dtype=float)
 
+    # Limit max_step to prevent infinite step refinement
+    max_step_value = (
+        float(reactor_volume_m3) / 10.0 if reactor_volume_m3 > 0 else np.inf
+    )
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -363,13 +424,24 @@ def integrate_pfr_profile(
             t_eval=volume_grid_m3,
             rtol=rtol,
             atol=atol,
+            max_step=max_step_value,
         )
     except Exception as exc:
-        return volume_grid_m3, molar_flow_inlet_mol_s.astype(float)[:, None], False, f"solve_ivp异常: {exc}"
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            f"solve_ivp异常: {exc}",
+        )
 
     if not solution.success:
         message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
-        return volume_grid_m3, molar_flow_inlet_mol_s.astype(float)[:, None], False, str(message)
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            str(message),
+        )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
 
@@ -404,7 +476,12 @@ def integrate_batch_profile(
         n_points = 2
 
     if not np.isfinite(reaction_time_s):
-        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "t_s 无效（NaN/Inf）"
+        return (
+            np.array([0.0]),
+            conc_initial_mol_m3[:, None],
+            False,
+            "t_s 无效（NaN/Inf）",
+        )
     if reaction_time_s < 0.0:
         return np.array([0.0]), conc_initial_mol_m3[:, None], False, "t_s 不能为负"
     if reaction_time_s == 0.0:
@@ -419,15 +496,30 @@ def integrate_batch_profile(
         return np.array([0.0]), conc_initial_mol_m3[:, None], False, "温度 T_K 无效"
 
     if not np.all(np.isfinite(conc_initial_mol_m3)):
-        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "初始浓度包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            conc_initial_mol_m3[:, None],
+            False,
+            "初始浓度包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(stoich_matrix)):
-        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "化学计量数矩阵 ν 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            conc_initial_mol_m3[:, None],
+            False,
+            "化学计量数矩阵 ν 包含 NaN/Inf",
+        )
     if not np.all(np.isfinite(k0)):
         return np.array([0.0]), conc_initial_mol_m3[:, None], False, "k0 包含 NaN/Inf"
     if not np.all(np.isfinite(ea_J_mol)):
         return np.array([0.0]), conc_initial_mol_m3[:, None], False, "Ea 包含 NaN/Inf"
     if not np.all(np.isfinite(reaction_order_matrix)):
-        return np.array([0.0]), conc_initial_mol_m3[:, None], False, "反应级数矩阵 n 包含 NaN/Inf"
+        return (
+            np.array([0.0]),
+            conc_initial_mol_m3[:, None],
+            False,
+            "反应级数矩阵 n 包含 NaN/Inf",
+        )
 
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         conc_safe = safe_nonnegative(conc_mol_m3)
@@ -448,8 +540,12 @@ def integrate_batch_profile(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
                 K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)),
-                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         elif kinetic_model == "reversible":
             rate_vector = calc_rate_vector_reversible(
@@ -459,7 +555,9 @@ def integrate_batch_profile(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
                     order_rev_matrix
                     if order_rev_matrix is not None
@@ -479,6 +577,8 @@ def integrate_batch_profile(
         return dC_dt
 
     time_grid_s = np.linspace(0.0, float(reaction_time_s), n_points, dtype=float)
+    # Limit max_step to prevent infinite step refinement
+    max_step_value = float(reaction_time_s) / 10.0 if reaction_time_s > 0 else np.inf
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -488,13 +588,23 @@ def integrate_batch_profile(
             t_eval=time_grid_s,
             rtol=rtol,
             atol=atol,
+            max_step=max_step_value,
         )
     except Exception as exc:
-        return time_grid_s, conc_initial_mol_m3.astype(float)[:, None], False, f"solve_ivp异常: {exc}"
+        return (
+            time_grid_s,
+            conc_initial_mol_m3.astype(float)[:, None],
+            False,
+            f"solve_ivp异常: {exc}",
+        )
 
     if not solution.success:
         message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
-        return time_grid_s, conc_initial_mol_m3.astype(float)[:, None], False, str(message)
+        return (
+            time_grid_s,
+            conc_initial_mol_m3.astype(float)[:, None],
+            False,
+            str(message),
+        )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
-

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 # 配置文件保存目录（与 app.py 同目录）
-_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+_CONFIG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _AUTO_SAVE_FILE = os.path.join(_CONFIG_DIR, ".last_config.json")
 
 
@@ -385,7 +385,9 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if "output_mode" in config:
         if config["output_mode"] not in allowed_output_modes:
             return False, f"无效的 output_mode：{config['output_mode']}"
-        if (config["reactor_type"] == "Batch") and (config["output_mode"] == "Fout (mol/s)"):
+        if (config["reactor_type"] == "Batch") and (
+            config["output_mode"] == "Fout (mol/s)"
+        ):
             return False, "Batch 反应器不支持 Fout 输出模式"
 
     species_names = _parse_species_text(config["species_text"])

@@ -167,4 +167,3 @@ def calc_rate_vector_reversible(
         rate_vector[reaction_index] = rate_fwd - rate_rev
 
     return rate_vector
-
