@@ -1543,34 +1543,50 @@ def main() -> None:
             st.markdown("**选择进入目标函数的物种（复选框）**")
 
             fit_key_prefix = "fit_species__"
-            for i, name in enumerate(species_names):
+            if output_mode == "X (conversion)":
+                reactant_species = [
+                    name
+                    for idx, name in enumerate(species_names)
+                    if np.any(stoich_matrix[idx, :] < 0)
+                ]
+                if len(reactant_species) == 0:
+                    st.error(
+                        "当前化学计量数矩阵中未找到反应物（ν<0），无法计算转化率 X。请检查 ν 矩阵。"
+                    )
+                    st.stop()
+                selectable_species = reactant_species
+                st.info("转化率 X 仅适用于反应物（ν<0），已隐藏非反应物。")
+            else:
+                selectable_species = species_names
+
+            for i, name in enumerate(selectable_species):
                 key = f"{fit_key_prefix}{name}"
                 if key not in st.session_state:
                     st.session_state[key] = i == 0
 
             col_btn1, col_btn2, col_btn3 = st.columns(3)
             if col_btn1.button("全选", use_container_width=True, key="fit_species_all"):
-                for name in species_names:
+                for name in selectable_species:
                     st.session_state[f"{fit_key_prefix}{name}"] = True
             if col_btn2.button(
                 "全不选", use_container_width=True, key="fit_species_none"
             ):
-                for name in species_names:
+                for name in selectable_species:
                     st.session_state[f"{fit_key_prefix}{name}"] = False
             if col_btn3.button(
                 "只选第一个", use_container_width=True, key="fit_species_first_only"
             ):
-                for i, name in enumerate(species_names):
+                for i, name in enumerate(selectable_species):
                     st.session_state[f"{fit_key_prefix}{name}"] = i == 0
 
             output_species_list = []
-            for name in species_names:
+            for name in selectable_species:
                 key = f"{fit_key_prefix}{name}"
                 if st.checkbox(name, key=key):
                     output_species_list.append(name)
 
             st.caption(
-                f"已选择 {len(output_species_list)} / {len(species_names)} 个物种进入目标函数。"
+                f"已选择 {len(output_species_list)} / {len(selectable_species)} 个物种进入目标函数。"
             )
 
     if len(output_species_list) == 0:
@@ -1586,7 +1602,7 @@ def main() -> None:
         st.error("CSV 文件为空。")
         st.stop()
 
-    # 简单的列检查 + 缺失值处理：空单元格按 0 处理（便于快速填表）
+    # 必需列检查：缺失列直接停止并要求补齐
     # 根据反应器类型检查不同的必需列
     if reactor_type == "PFR":
         required_cols_hint = ["V_m3", "T_K", "vdot_m3_s"] + [
@@ -1597,18 +1613,17 @@ def main() -> None:
 
     missing = [c for c in required_cols_hint if c not in data_df.columns]
     if missing:
-        st.warning(
-            f"注意：CSV 中缺少以下标准列（已按 0 自动补列，可能影响计算）：{missing}"
-        )
-        for col in missing:
-            data_df[col] = 0.0
+        st.error(f"CSV 缺少必需列，请补齐后再上传：{missing}")
+        st.stop()
 
-    # 对必需输入列：强制转为数值，无法解析的填 NaN，再统一用 0 填充（便于快速填表）
+    # 对必需输入列：强制转为数值，无法解析的保持为 NaN 并报错
     input_numeric_cols = list(required_cols_hint)
     for col in input_numeric_cols:
-        if col not in data_df.columns:
-            data_df[col] = 0.0
-        data_df[col] = pd.to_numeric(data_df[col], errors="coerce").fillna(0.0)
+        data_df[col] = pd.to_numeric(data_df[col], errors="coerce")
+    invalid_cols = [col for col in input_numeric_cols if data_df[col].isna().any()]
+    if invalid_cols:
+        st.error(f"必需列包含空值/非数值，请修正后再上传：{invalid_cols}")
+        st.stop()
 
     # 对“测量值列”：只转换存在的列，不自动补列；NaN 保留表示“缺测”
     # 这样 residual_function 才能识别缺测并进行惩罚（而不是被 0.0 误当成有效测量值）。
