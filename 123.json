@@ -1,0 +1,285 @@
+{
+  "version": "1.0",
+  "reactor_type": "Batch",
+  "kinetic_model": "power_law",
+  "solver_method": "RK45",
+  "rtol": 1e-06,
+  "atol": 1e-09,
+  "species_text": "A,B,C,D,E",
+  "n_reactions": 4,
+  "stoich_matrix": [
+    [
+      -1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      -1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      -1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      -1.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "order_guess": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ]
+  ],
+  "fit_order_flags_matrix": [
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  ],
+  "k0_guess": [
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0
+  ],
+  "ea_guess_J_mol": [
+    80000.0,
+    80000.0,
+    80000.0,
+    80000.0
+  ],
+  "fit_k0_flags": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "fit_ea_flags": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "K0_ads": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "Ea_K_J_mol": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "fit_K0_ads_flags": [
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "fit_Ea_K_flags": [
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "m_inhibition": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "fit_m_flags": [
+    false,
+    false,
+    false,
+    false
+  ],
+  "k0_rev": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "ea_rev_J_mol": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "fit_k0_rev_flags": [
+    false,
+    false,
+    false,
+    false
+  ],
+  "fit_ea_rev_flags": [
+    false,
+    false,
+    false,
+    false
+  ],
+  "order_rev": [
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "fit_order_rev_flags_matrix": [
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  ],
+  "output_mode": "Cout (mol/m^3)",
+  "output_species_list": [
+    "A"
+  ],
+  "k0_min": 1e-15,
+  "k0_max": 1000000000000000.0,
+  "ea_min_J_mol": 10000.0,
+  "ea_max_J_mol": 300000.0,
+  "order_min": -2.0,
+  "order_max": 5.0,
+  "K0_ads_min": 0.0,
+  "K0_ads_max": 1.0,
+  "Ea_K_min": -200000.0,
+  "Ea_K_max": 200000.0,
+  "m_min": 0.0,
+  "m_max": 5.0,
+  "k0_rev_min": 1e-15,
+  "k0_rev_max": 1000000000000000.0,
+  "ea_rev_min_J_mol": 10000.0,
+  "ea_rev_max_J_mol": 300000.0,
+  "order_rev_min": -2.0,
+  "order_rev_max": 5.0,
+  "weight_mode": "不加权",
+  "diff_step_rel": 0.01,
+  "max_nfev": 3000,
+  "use_x_scale_jac": true,
+  "use_multi_start": true,
+  "n_starts": 10,
+  "max_nfev_coarse": 300,
+  "random_seed": 42,
+  "table_number_style": "科学计数",
+  "table_decimal_places": 3,
+  "plot_tick_auto": true,
+  "plot_number_style": "科学计数",
+  "plot_decimal_places": 3
+}
