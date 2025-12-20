@@ -22,6 +22,7 @@ import modules.reactors as reactors
 import modules.ui_help as ui_help
 import modules.config_manager as config_manager
 import modules.ui_components as ui_comp  # New module
+import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 
 
 class FittingStoppedError(Exception):
@@ -65,7 +66,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_atol"] = float(config.get("atol", 1e-9))
 
     if "species_text" in config:
-        st.session_state["cfg_species_text"] = str(config.get("species_text", "")).strip()
+        st.session_state["cfg_species_text"] = str(
+            config.get("species_text", "")
+        ).strip()
     if "n_reactions" in config:
         st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
 
@@ -81,7 +84,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
 
     output_species_list_cfg = config.get("output_species_list", None)
     if isinstance(output_species_list_cfg, list):
-        st.session_state["cfg_output_species_list"] = [str(x) for x in output_species_list_cfg]
+        st.session_state["cfg_output_species_list"] = [
+            str(x) for x in output_species_list_cfg
+        ]
 
     for key_name in [
         "k0_min",
@@ -184,12 +189,19 @@ def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
     return uploaded_bytes, uploaded_name, "OK"
 
 
-def _save_persisted_upload(uploaded_bytes: bytes, uploaded_name: str) -> tuple[bool, str]:
+def _save_persisted_upload(
+    uploaded_bytes: bytes, uploaded_name: str
+) -> tuple[bool, str]:
     csv_path, meta_path = _get_upload_file_paths()
     try:
         _atomic_write_bytes(csv_path, uploaded_bytes)
-        meta = {"name": str(uploaded_name).strip(), "saved_at_unix_s": float(time.time())}
-        _atomic_write_text(meta_path, json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        meta = {
+            "name": str(uploaded_name).strip(),
+            "saved_at_unix_s": float(time.time()),
+        }
+        _atomic_write_text(
+            meta_path, json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return True, "OK"
     except Exception as exc:
         return False, f"缓存上传文件失败: {exc}"
@@ -272,7 +284,9 @@ def _get_fitting_executor() -> ThreadPoolExecutor:
     每个会话单独的线程池（避免跨会话共享导致“任务占用/卡住”）。
     """
     executor = st.session_state.get("fitting_executor", None)
-    is_shutdown = bool(getattr(executor, "_shutdown", False)) if executor is not None else True
+    is_shutdown = (
+        bool(getattr(executor, "_shutdown", False)) if executor is not None else True
+    )
     if executor is None or is_shutdown:
         executor = ThreadPoolExecutor(max_workers=1)
         st.session_state["fitting_executor"] = executor
@@ -420,7 +434,9 @@ def _render_fitting_live_progress() -> None:
     _render_fitting_progress_panel()
 
     if not bool(st.session_state.get("fitting_auto_refresh", True)):
-        st.button("🔄 刷新进度", use_container_width=True, key="fit_manual_refresh_progress")
+        st.button(
+            "🔄 刷新进度", use_container_width=True, key="fit_manual_refresh_progress"
+        )
 
 
 def _run_fitting_job(
@@ -592,7 +608,11 @@ def _run_fitting_job(
             sample_indices_text = ", ".join([str(i) for i in invalid_row_indices[:10]])
             invalid_value_messages.append(
                 f"- 列 `{column_name}` 含 NaN/非数字/无穷大：共 {len(invalid_row_indices)} 行"
-                + (f"（示例 index: {sample_indices_text}）" if sample_indices_text else "")
+                + (
+                    f"（示例 index: {sample_indices_text}）"
+                    if sample_indices_text
+                    else ""
+                )
             )
 
     if invalid_value_messages:
@@ -602,7 +622,11 @@ def _run_fitting_job(
             + "\n请清理数据（删除/填补缺失值，或取消选择对应输出物种/输出模式）后再拟合。"
         )
 
-    typical_measured_scale = float(np.nanmedian(np.abs(measured_matrix))) if measured_matrix.size > 0 else 1.0
+    typical_measured_scale = (
+        float(np.nanmedian(np.abs(measured_matrix)))
+        if measured_matrix.size > 0
+        else 1.0
+    )
     if (not np.isfinite(typical_measured_scale)) or (typical_measured_scale <= 0.0):
         typical_measured_scale = 1.0
 
@@ -621,12 +645,16 @@ def _run_fitting_job(
         "ℹ️",
         f"失败罚项：typical_scale≈{typical_measured_scale:.3e}，penalty={residual_penalty_value:.3e}",
     )
-    timeline_add("ℹ️", f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）")
+    timeline_add(
+        "ℹ️", f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
+    )
 
     data_rows = list(data_df.itertuples(index=False))
     species_name_to_index = {name: i for i, name in enumerate(species_names)}
     try:
-        output_species_indices = [species_name_to_index[name] for name in output_species_list]
+        output_species_indices = [
+            species_name_to_index[name] for name in output_species_list
+        ]
     except Exception:
         raise ValueError("输出物种不在物种列表中（请检查物种名是否匹配）")
 
@@ -855,7 +883,9 @@ def _run_fitting_job(
         raise FittingStoppedError("Stopped by user")
 
     if int(getattr(final_res, "status", 0)) == 0:
-        timeline_add("⚠️", "达到最大迭代次数上限，拟合提前停止（可增大 Max Iterations）。")
+        timeline_add(
+            "⚠️", "达到最大迭代次数上限，拟合提前停止（可增大 Max Iterations）。"
+        )
 
     final_phi = float(final_res.cost)
     set_metric("final_phi", final_phi)
@@ -863,7 +893,8 @@ def _run_fitting_job(
 
     phi_ratio = float(final_phi / max(initial_cost, 1e-300))
     param_relative_change = float(
-        np.linalg.norm(final_res.x - param_vector) / (np.linalg.norm(param_vector) + 1e-12)
+        np.linalg.norm(final_res.x - param_vector)
+        / (np.linalg.norm(param_vector) + 1e-12)
     )
     set_metric("phi_ratio", phi_ratio)
     set_metric("param_relative_change", param_relative_change)
@@ -923,6 +954,8 @@ def _run_fitting_job(
         "phi_initial": float(initial_cost),
         "phi_final": float(final_res.cost),
     }
+
+
 def _clean_species_names(species_text: str) -> list[str]:
     parts = [p.strip() for p in species_text.split(",")]
     names = [p for p in parts if p]
@@ -981,13 +1014,19 @@ def _build_fit_comparison_long_table(
 ) -> pd.DataFrame:
     rows = []
     row_indices = data_df.index.to_numpy()
-    output_column_names = [_get_measurement_column_name(output_mode, sp) for sp in output_species_list]
+    output_column_names = [
+        _get_measurement_column_name(output_mode, sp) for sp in output_species_list
+    ]
     measured_matrix = np.zeros((len(data_df), len(output_column_names)), dtype=float)
     for col_index, column_name in enumerate(output_column_names):
-        measured_matrix[:, col_index] = pd.to_numeric(data_df[column_name], errors="coerce").to_numpy(dtype=float)
+        measured_matrix[:, col_index] = pd.to_numeric(
+            data_df[column_name], errors="coerce"
+        ).to_numpy(dtype=float)
 
     species_name_to_index = {name: i for i, name in enumerate(species_names)}
-    output_species_indices = [species_name_to_index[name] for name in output_species_list]
+    output_species_indices = [
+        species_name_to_index[name] for name in output_species_list
+    ]
     if reactor_type == "PFR":
         inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
     else:
@@ -1054,6 +1093,8 @@ def main():
         ok, message = config_manager.clear_auto_saved_config()
         if not ok:
             st.warning(message)
+        # 同时清除浏览器 LocalStorage 中的配置
+        browser_storage.clear_browser_config()
         _clear_config_related_state()
         st.success("已重置为默认配置。")
 
@@ -1066,13 +1107,18 @@ def main():
         else:
             st.session_state["imported_config"] = pending_cfg
             _apply_imported_config_to_widget_state(pending_cfg)
+            # 保存到本地文件系统
             ok, message = config_manager.auto_save_config(pending_cfg)
             if not ok:
                 st.warning(message)
+            # 同时保存到浏览器 LocalStorage
+            browser_storage.save_config_to_browser(pending_cfg)
 
     # --- Auto Load Config ---
     if "config_initialized" not in st.session_state:
         st.session_state["config_initialized"] = True
+
+        # 方案1：尝试从本地文件系统加载（用于本地运行）
         saved_config, load_message = config_manager.auto_load_config()
         if saved_config is not None:
             is_valid, error_message = config_manager.validate_config(saved_config)
@@ -1081,8 +1127,19 @@ def main():
             else:
                 st.warning(f"自动恢复配置无效，已忽略：{error_message}")
         else:
-            if str(load_message).startswith("自动加载失败"):
+            # 方案2：尝试从浏览器 LocalStorage 加载（用于 Streamlit Cloud）
+            browser_config = browser_storage.get_browser_loaded_config()
+            if browser_config is not None:
+                is_valid, error_message = config_manager.validate_config(browser_config)
+                if is_valid:
+                    st.session_state["imported_config"] = browser_config
+                else:
+                    pass  # 静默忽略无效的浏览器缓存
+            elif str(load_message).startswith("自动加载失败"):
                 st.warning(load_message)
+
+    # 注入浏览器配置加载脚本（用于 Streamlit Cloud）
+    browser_storage.inject_config_loader_script()
 
     def get_cfg(key, default):
         if "imported_config" in st.session_state:
@@ -1136,7 +1193,10 @@ def main():
 
     if "data_df_cached" not in st.session_state:
         try:
-            if "uploaded_csv_bytes" in st.session_state and st.session_state["uploaded_csv_bytes"]:
+            if (
+                "uploaded_csv_bytes" in st.session_state
+                and st.session_state["uploaded_csv_bytes"]
+            ):
                 st.session_state["data_df_cached"] = _read_csv_bytes_cached(
                     st.session_state["uploaded_csv_bytes"]
                 )
@@ -1149,21 +1209,197 @@ def main():
     st.markdown(
         """
         <style>
+        /* 基础字体设置 - 增大以提升可读性 */
         html, body, [class*="css"] {
-          font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+          font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
           color: #1e293b;
-          font-size: 15px;
+          font-size: 16px;
         }
-        .block-container { padding-top: 2rem; padding-bottom: 5rem; max-width: 1400px; }
-        [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #f1f5f9; }
-        h1, h2, h3 { background: linear-gradient(120deg, #0f172a, #334155); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .stTabs [data-baseweb="tab-list"] { gap: 2rem; border-bottom: 1px solid #e2e8f0; }
-        .stTabs [data-baseweb="tab"] { font-weight: 600; color: #64748b; }
-        .stTabs [aria-selected="true"] { color: #4f46e5; border-bottom: 2px solid #4f46e5; }
-        .stMarkdown p, .stMarkdown li { font-size: 0.98rem; line-height: 1.65; }
-        .stCaption, .stAlert p { font-size: 0.92rem; }
-        .stButton > button, .stDownloadButton > button { font-size: 0.95rem; }
-        div[role="dialog"][aria-modal="true"] { width: 92vw !important; max-width: 1200px !important; }
+        
+        /* 主容器优化 */
+        .block-container { 
+          padding-top: 1.5rem; 
+          padding-bottom: 4rem; 
+          max-width: 1440px;
+        }
+        
+        /* 侧边栏美化 */
+        [data-testid="stSidebar"] { 
+          background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
+          border-right: 2px solid #e2e8f0;
+          padding-top: 1rem;
+        }
+        
+        [data-testid="stSidebar"] .block-container {
+          padding-top: 1rem;
+        }
+        
+        /* 标题增强 - 更大更清晰 */
+        h1 { 
+          font-size: 2.25rem !important;
+          font-weight: 700 !important;
+          background: linear-gradient(135deg, #1e40af 0%, #4f46e5 50%, #7c3aed 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          margin-bottom: 0.5rem !important;
+          letter-spacing: -0.025em;
+        }
+        
+        h2 { 
+          font-size: 1.5rem !important;
+          font-weight: 600 !important;
+          color: #1e40af;
+          margin-top: 1.5rem !important;
+          margin-bottom: 0.75rem !important;
+        }
+        
+        h3 { 
+          font-size: 1.25rem !important;
+          font-weight: 600 !important;
+          color: #334155;
+          margin-top: 1rem !important;
+          margin-bottom: 0.5rem !important;
+        }
+        
+        h4 {
+          font-size: 1.1rem !important;
+          font-weight: 600 !important;
+          color: #475569;
+        }
+        
+        /* Tab 样式优化 */
+        .stTabs [data-baseweb="tab-list"] { 
+          gap: 1.5rem; 
+          border-bottom: 2px solid #e2e8f0;
+          padding-bottom: 0;
+        }
+        
+        .stTabs [data-baseweb="tab"] { 
+          font-weight: 600;
+          font-size: 1.05rem;
+          color: #64748b;
+          padding: 0.75rem 1rem;
+          transition: all 0.2s ease;
+        }
+        
+        .stTabs [data-baseweb="tab"]:hover {
+          color: #4f46e5;
+          background-color: #f1f5f9;
+        }
+        
+        .stTabs [aria-selected="true"] { 
+          color: #4f46e5 !important;
+          border-bottom: 3px solid #4f46e5 !important;
+          font-weight: 700;
+        }
+        
+        /* 文本样式优化 */
+        .stMarkdown p, .stMarkdown li { 
+          font-size: 1rem;
+          line-height: 1.7;
+          color: #334155;
+        }
+        
+        .stMarkdown ul, .stMarkdown ol {
+          margin-left: 1.25rem;
+        }
+        
+        /* Caption优化 - 更清晰 */
+        .stCaption { 
+          font-size: 0.9rem !important;
+          color: #64748b !important;
+          line-height: 1.5 !important;
+          margin-bottom: 0.5rem !important;
+        }
+        
+        /* Alert样式 */
+        .stAlert p { 
+          font-size: 0.95rem;
+          line-height: 1.6;
+        }
+        
+        /* 按钮美化 */
+        .stButton > button, .stDownloadButton > button { 
+          font-size: 1rem;
+          font-weight: 500;
+          padding: 0.5rem 1rem;
+          border-radius: 8px;
+          transition: all 0.2s ease;
+          border: 1px solid #e2e8f0;
+        }
+        
+        .stButton > button:hover, .stDownloadButton > button:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* 输入框优化 */
+        .stTextInput > div > div > input,
+        .stNumberInput > div > div > input,
+        .stSelectbox > div > div {
+          font-size: 0.95rem !important;
+          border-radius: 6px !important;
+        }
+        
+        /* 数据表格美化 */
+        .stDataFrame {
+          font-size: 0.9rem;
+        }
+        
+        [data-testid="stDataFrame"] {
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        
+        /* 容器边框美化 */
+        [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {
+          border-radius: 10px;
+        }
+        
+        div[data-testid="stExpander"] {
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          background-color: #fafbfc;
+        }
+        
+        div[data-testid="stExpander"]:hover {
+          border-color: #cbd5e1;
+        }
+        
+        /* 对话框优化 */
+        div[role="dialog"][aria-modal="true"] { 
+          width: 90vw !important; 
+          max-width: 1300px !important;
+          border-radius: 12px !important;
+        }
+        
+        /* 进度条美化 */
+        .stProgress > div > div > div > div {
+          background-color: #4f46e5;
+        }
+        
+        /* 分隔线 */
+        hr {
+          margin: 1.5rem 0 !important;
+          border-color: #e2e8f0 !important;
+        }
+        
+        /* 信息框美化 */
+        .stInfo, .stSuccess, .stWarning, .stError {
+          border-radius: 8px;
+          font-size: 0.95rem;
+        }
+        
+        /* 代码块优化 */
+        code {
+          font-size: 0.9rem !important;
+          padding: 0.2rem 0.4rem !important;
+          border-radius: 4px !important;
+        }
+        
+        pre code {
+          font-size: 0.85rem !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1249,13 +1485,19 @@ def main():
         # Config Managment
         with st.expander("⚙️ 配置管理 (导入/导出/重置)"):
             uploaded_config = st.file_uploader(
-                "导入配置", type=["json"], key="uploaded_config_json", disabled=global_disabled
+                "导入配置",
+                type=["json"],
+                key="uploaded_config_json",
+                disabled=global_disabled,
             )
             if uploaded_config:
                 try:
                     uploaded_bytes = uploaded_config.getvalue()
                     file_digest = hashlib.sha256(uploaded_bytes).hexdigest()
-                    if st.session_state.get("imported_config_digest", None) == file_digest:
+                    if (
+                        st.session_state.get("imported_config_digest", None)
+                        == file_digest
+                    ):
                         pass
                     else:
                         cfg_text = uploaded_bytes.decode("utf-8")
@@ -1287,7 +1529,6 @@ def main():
     tab_model, tab_data, tab_fit = st.tabs(
         ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
     )
-    tab_fit_results_container = tab_fit.container()
 
     # ---------------- TAB 1: MODEL ----------------
     with tab_model:
@@ -1614,10 +1855,9 @@ def main():
                     + meas_cols
                 )
             else:
-                meas_cols = (
-                    [f"Cout_{s}_mol_m3" for s in species_names]
-                    + [f"X_{s}" for s in species_names]
-                )
+                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
+                    f"X_{s}" for s in species_names
+                ]
                 cols = (
                     ["t_s", "T_K"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
@@ -1633,9 +1873,14 @@ def main():
 
         with col_d2:
             st.markdown("#### 2. 上传数据")
-            if "uploaded_csv_bytes" in st.session_state and st.session_state["uploaded_csv_bytes"]:
+            if (
+                "uploaded_csv_bytes" in st.session_state
+                and st.session_state["uploaded_csv_bytes"]
+            ):
                 cached_name = str(st.session_state.get("uploaded_csv_name", "")).strip()
-                cached_text = f"已缓存文件：{cached_name}" if cached_name else "已缓存上传文件"
+                cached_text = (
+                    f"已缓存文件：{cached_name}" if cached_name else "已缓存上传文件"
+                )
                 st.caption(cached_text + "（页面刷新/切换不会丢失，除非手动删除）")
                 if st.button("🗑️ 删除已上传文件", key="delete_uploaded_csv"):
                     for k in ["uploaded_csv_bytes", "uploaded_csv_name"]:
@@ -1651,7 +1896,10 @@ def main():
                     st.rerun()
 
             uploaded_file = st.file_uploader(
-                "上传 CSV", type=["csv"], label_visibility="collapsed", key="uploaded_csv"
+                "上传 CSV",
+                type=["csv"],
+                label_visibility="collapsed",
+                key="uploaded_csv",
             )
 
         st.divider()
@@ -1706,7 +1954,10 @@ def main():
             except Exception as exc:
                 st.error(f"读取上传文件失败: {exc}")
 
-        if uploaded_file or ("uploaded_csv_bytes" in st.session_state and st.session_state["uploaded_csv_bytes"]):
+        if uploaded_file or (
+            "uploaded_csv_bytes" in st.session_state
+            and st.session_state["uploaded_csv_bytes"]
+        ):
             try:
                 if uploaded_file:
                     csv_bytes = uploaded_file.getvalue()
@@ -1755,22 +2006,38 @@ def main():
             fit_k0_flags=np.asarray(fit_k0_flags, dtype=bool),
             fit_ea_flags=np.asarray(fit_ea_flags, dtype=bool),
             K0_ads=None if K0_ads is None else np.asarray(K0_ads, dtype=float),
-            Ea_K_J_mol=None if Ea_K_J_mol is None else np.asarray(Ea_K_J_mol, dtype=float),
+            Ea_K_J_mol=(
+                None if Ea_K_J_mol is None else np.asarray(Ea_K_J_mol, dtype=float)
+            ),
             fit_K0_ads_flags=(
-                None if fit_K0_ads_flags is None else np.asarray(fit_K0_ads_flags, dtype=bool)
+                None
+                if fit_K0_ads_flags is None
+                else np.asarray(fit_K0_ads_flags, dtype=bool)
             ),
             fit_Ea_K_flags=(
-                None if fit_Ea_K_flags is None else np.asarray(fit_Ea_K_flags, dtype=bool)
+                None
+                if fit_Ea_K_flags is None
+                else np.asarray(fit_Ea_K_flags, dtype=bool)
             ),
-            m_inhibition=None if m_inhibition is None else np.asarray(m_inhibition, dtype=float),
-            fit_m_flags=None if fit_m_flags is None else np.asarray(fit_m_flags, dtype=bool),
+            m_inhibition=(
+                None if m_inhibition is None else np.asarray(m_inhibition, dtype=float)
+            ),
+            fit_m_flags=(
+                None if fit_m_flags is None else np.asarray(fit_m_flags, dtype=bool)
+            ),
             k0_rev=None if k0_rev is None else np.asarray(k0_rev, dtype=float),
-            ea_rev_J_mol=None if ea_rev_J_mol is None else np.asarray(ea_rev_J_mol, dtype=float),
+            ea_rev_J_mol=(
+                None if ea_rev_J_mol is None else np.asarray(ea_rev_J_mol, dtype=float)
+            ),
             fit_k0_rev_flags=(
-                None if fit_k0_rev_flags is None else np.asarray(fit_k0_rev_flags, dtype=bool)
+                None
+                if fit_k0_rev_flags is None
+                else np.asarray(fit_k0_rev_flags, dtype=bool)
             ),
             fit_ea_rev_flags=(
-                None if fit_ea_rev_flags is None else np.asarray(fit_ea_rev_flags, dtype=bool)
+                None
+                if fit_ea_rev_flags is None
+                else np.asarray(fit_ea_rev_flags, dtype=bool)
             ),
             order_rev=None if order_rev is None else np.asarray(order_rev, dtype=float),
             fit_order_rev_flags_matrix=(
@@ -1796,10 +2063,15 @@ def main():
         )
         is_valid_cfg, _ = config_manager.validate_config(export_cfg)
         if is_valid_cfg:
+            # 本地文件系统保存（用于本地运行）
             ok, message = config_manager.auto_save_config(export_cfg)
             if not ok:
                 st.warning(message)
-        export_config_bytes = config_manager.export_config_to_json(export_cfg).encode("utf-8")
+            # 浏览器 LocalStorage 保存（用于 Streamlit Cloud 等云环境）
+            browser_storage.save_config_to_browser(export_cfg)
+        export_config_bytes = config_manager.export_config_to_json(export_cfg).encode(
+            "utf-8"
+        )
         export_config_placeholder.download_button(
             "📥 导出当前配置 (JSON)",
             export_config_bytes,
@@ -1957,7 +2229,9 @@ def main():
                 fit_k0_flags=np.asarray(fit_k0_flags, dtype=bool),
                 fit_ea_flags=np.asarray(fit_ea_flags, dtype=bool),
                 K0_ads=None if K0_ads is None else np.asarray(K0_ads, dtype=float),
-                Ea_K_J_mol=None if Ea_K_J_mol is None else np.asarray(Ea_K_J_mol, dtype=float),
+                Ea_K_J_mol=(
+                    None if Ea_K_J_mol is None else np.asarray(Ea_K_J_mol, dtype=float)
+                ),
                 fit_K0_ads_flags=(
                     None
                     if fit_K0_ads_flags is None
@@ -1968,10 +2242,20 @@ def main():
                     if fit_Ea_K_flags is None
                     else np.asarray(fit_Ea_K_flags, dtype=bool)
                 ),
-                m_inhibition=None if m_inhibition is None else np.asarray(m_inhibition, dtype=float),
-                fit_m_flags=None if fit_m_flags is None else np.asarray(fit_m_flags, dtype=bool),
+                m_inhibition=(
+                    None
+                    if m_inhibition is None
+                    else np.asarray(m_inhibition, dtype=float)
+                ),
+                fit_m_flags=(
+                    None if fit_m_flags is None else np.asarray(fit_m_flags, dtype=bool)
+                ),
                 k0_rev=None if k0_rev is None else np.asarray(k0_rev, dtype=float),
-                ea_rev_J_mol=None if ea_rev_J_mol is None else np.asarray(ea_rev_J_mol, dtype=float),
+                ea_rev_J_mol=(
+                    None
+                    if ea_rev_J_mol is None
+                    else np.asarray(ea_rev_J_mol, dtype=float)
+                ),
                 fit_k0_rev_flags=(
                     None
                     if fit_k0_rev_flags is None
@@ -1982,7 +2266,9 @@ def main():
                     if fit_ea_rev_flags is None
                     else np.asarray(fit_ea_rev_flags, dtype=bool)
                 ),
-                order_rev=None if order_rev is None else np.asarray(order_rev, dtype=float),
+                order_rev=(
+                    None if order_rev is None else np.asarray(order_rev, dtype=float)
+                ),
                 fit_order_rev_flags_matrix=(
                     None
                     if fit_order_rev_flags_matrix is None
@@ -2006,10 +2292,15 @@ def main():
             )
             is_valid_cfg, _ = config_manager.validate_config(export_cfg)
             if is_valid_cfg:
+                # 本地文件系统保存（用于本地运行）
                 ok, message = config_manager.auto_save_config(export_cfg)
                 if not ok:
                     st.warning(message)
-            export_config_bytes = config_manager.export_config_to_json(export_cfg).encode("utf-8")
+                # 浏览器 LocalStorage 保存（用于 Streamlit Cloud 等云环境）
+                browser_storage.save_config_to_browser(export_cfg)
+            export_config_bytes = config_manager.export_config_to_json(
+                export_cfg
+            ).encode("utf-8")
             export_config_placeholder.download_button(
                 "📥 导出当前配置 (JSON)",
                 export_config_bytes,
@@ -2032,7 +2323,9 @@ def main():
         # Self-heal: if session refreshed and Future object is lost, stop showing "running".
         if fitting_running and (fitting_future is None):
             st.session_state["fitting_running"] = False
-            st.session_state["fitting_status"] = "后台任务已丢失（可能是页面刷新导致）。请重新开始拟合。"
+            st.session_state["fitting_status"] = (
+                "后台任务已丢失（可能是页面刷新导致）。请重新开始拟合。"
+            )
             fitting_running = False
 
         if fitting_future is not None and fitting_future.done():
@@ -2044,8 +2337,12 @@ def main():
                 _drain_fitting_progress_queue()
                 st.session_state["fit_results"] = fit_results
                 st.session_state["fitting_status"] = "拟合完成。"
-                phi_value = float(fit_results.get("phi_final", fit_results.get("cost", 0.0)))
-                st.session_state["fitting_timeline"].append(("✅", f"拟合完成，最终 Φ: {phi_value:.4e}"))
+                phi_value = float(
+                    fit_results.get("phi_final", fit_results.get("cost", 0.0))
+                )
+                st.session_state["fitting_timeline"].append(
+                    ("✅", f"拟合完成，最终 Φ: {phi_value:.4e}")
+                )
                 st.success(
                     "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
                     f" 目标函数 Φ: {phi_value:.4e}"
@@ -2064,10 +2361,16 @@ def main():
 
         col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns([3, 1, 1, 1, 1])
         start_btn = col_act1.button(
-            "🚀 开始拟合", type="primary", disabled=fitting_running, use_container_width=True
+            "🚀 开始拟合",
+            type="primary",
+            disabled=fitting_running,
+            use_container_width=True,
         )
         stop_btn = col_act2.button(
-            "⏹️ 终止", type="secondary", disabled=not fitting_running, use_container_width=True
+            "⏹️ 终止",
+            type="secondary",
+            disabled=not fitting_running,
+            use_container_width=True,
         )
         auto_refresh = col_act3.checkbox(
             "自动刷新",
@@ -2119,7 +2422,9 @@ def main():
 
         if start_btn and (not fitting_running):
             if data_df is None:
-                st.error("当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。")
+                st.error(
+                    "当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。"
+                )
                 st.stop()
 
             # Ensure a fresh executor for each fitting run (avoid queued/stuck tasks from prior sessions).
@@ -2128,7 +2433,10 @@ def main():
                 try:
                     old_executor.shutdown(wait=False, cancel_futures=True)
                 except Exception as exc:
-                    _warn_once("warn_executor_shutdown", f"关闭旧的拟合线程池失败（可忽略）：{exc}")
+                    _warn_once(
+                        "warn_executor_shutdown",
+                        f"关闭旧的拟合线程池失败（可忽略）：{exc}",
+                    )
                 st.session_state["fitting_executor"] = None
 
             st.session_state.fitting_stopped = False
@@ -2224,20 +2532,29 @@ def main():
 
         if fitting_running:
             st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；若觉得卡顿可关闭。")
-            refresh_interval_s = float(st.session_state.get("fitting_refresh_interval_s", 2.0))
+            refresh_interval_s = float(
+                st.session_state.get("fitting_refresh_interval_s", 2.0)
+            )
             if bool(st.session_state.get("fitting_auto_refresh", True)):
-                st.fragment(_render_fitting_live_progress, run_every=refresh_interval_s)()
+                st.fragment(
+                    _render_fitting_live_progress, run_every=refresh_interval_s
+                )()
             else:
                 st.fragment(_render_fitting_live_progress)()
         elif st.session_state.get("fitting_timeline", []):
             _render_fitting_progress_panel()
+
+        # Create results container at the bottom of tab_fit
+        tab_fit_results_container = st.container()
 
     # --- Results Display (Optimized) ---
     if "fit_results" in st.session_state:
         res = st.session_state["fit_results"]
         tab_fit_results_container.divider()
         phi_value = float(res.get("phi_final", res.get("cost", 0.0)))
-        tab_fit_results_container.markdown(f"### 拟合结果 (目标函数 Φ: {phi_value:.4e})")
+        tab_fit_results_container.markdown(
+            f"### 拟合结果 (目标函数 Φ: {phi_value:.4e})"
+        )
         tab_fit_results_container.latex(
             r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
         )
@@ -2249,7 +2566,9 @@ def main():
         solver_method_fit = res.get("solver_method", solver_method)
         rtol_fit = float(res.get("rtol", rtol))
         atol_fit = float(res.get("atol", atol))
-        max_step_fraction_fit = float(res.get("max_step_fraction", get_cfg("max_step_fraction", 0.1)))
+        max_step_fraction_fit = float(
+            res.get("max_step_fraction", get_cfg("max_step_fraction", 0.1))
+        )
         reactor_type_fit = res.get("reactor_type", reactor_type)
         kinetic_model_fit = res.get("kinetic_model", kinetic_model)
         output_mode_fit = res.get("output_mode", output_mode)
@@ -2267,7 +2586,9 @@ def main():
             if bool(np.any(np.isfinite(numeric_series.to_numpy()))):
                 parity_species_candidates.append(sp_name)
             else:
-                parity_species_unavailable.append(f"{sp_name}（列 {meas_col} 全为 NaN/非数字）")
+                parity_species_unavailable.append(
+                    f"{sp_name}（列 {meas_col} 全为 NaN/非数字）"
+                )
 
         tab_param, tab_parity, tab_profile, tab_export = tab_fit_results_container.tabs(
             ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"]
@@ -2280,7 +2601,10 @@ def main():
             with col_p1:
                 reaction_names = [f"R{i+1}" for i in range(len(fitted_params["k0"]))]
                 df_k0_ea = pd.DataFrame(
-                    {"k0 [SI]": fitted_params["k0"], "Ea [J/mol]": fitted_params["ea_J_mol"]},
+                    {
+                        "k0 [SI]": fitted_params["k0"],
+                        "Ea [J/mol]": fitted_params["ea_J_mol"],
+                    },
                     index=reaction_names,
                 )
                 st.markdown("**k0 与 Ea**")
@@ -2299,9 +2623,10 @@ def main():
                 st.markdown("#### Langmuir-Hinshelwood 参数")
                 col_lh1, col_lh2 = st.columns([1, 1])
                 with col_lh1:
-                    if fitted_params.get("K0_ads", None) is not None and fitted_params.get(
-                        "Ea_K", None
-                    ) is not None:
+                    if (
+                        fitted_params.get("K0_ads", None) is not None
+                        and fitted_params.get("Ea_K", None) is not None
+                    ):
                         df_ads = pd.DataFrame(
                             {
                                 "K0_ads [1/(mol/m^3)]": fitted_params["K0_ads"],
@@ -2320,11 +2645,15 @@ def main():
 
             if kinetic_model_fit == "reversible":
                 st.markdown("#### 可逆反应参数（逆反应）")
-                if fitted_params.get("k0_rev", None) is not None and fitted_params.get(
-                    "ea_rev", None
-                ) is not None:
+                if (
+                    fitted_params.get("k0_rev", None) is not None
+                    and fitted_params.get("ea_rev", None) is not None
+                ):
                     df_rev = pd.DataFrame(
-                        {"k0_rev [SI]": fitted_params["k0_rev"], "Ea_rev [J/mol]": fitted_params["ea_rev"]},
+                        {
+                            "k0_rev [SI]": fitted_params["k0_rev"],
+                            "Ea_rev [J/mol]": fitted_params["ea_rev"],
+                        },
                         index=reaction_names,
                     )
                     st.dataframe(df_rev, use_container_width=True, height=250)
@@ -2342,7 +2671,10 @@ def main():
             if parity_species_unavailable:
                 show_missing = st.checkbox("显示无法绘图的物种原因", value=False)
                 if show_missing:
-                    st.caption("无法绘制奇偶校验图的物种： " + "，".join(parity_species_unavailable))
+                    st.caption(
+                        "无法绘制奇偶校验图的物种： "
+                        + "，".join(parity_species_unavailable)
+                    )
 
             cache_key = (
                 float(res.get("phi_final", res.get("cost", 0.0))),
@@ -2361,19 +2693,21 @@ def main():
             ):
                 try:
                     st.session_state["fit_compare_cache_key"] = cache_key
-                    st.session_state["fit_compare_long_df"] = _build_fit_comparison_long_table(
-                        data_df=df_fit,
-                        species_names=species_names_fit,
-                        output_mode=output_mode_fit,
-                        output_species_list=parity_species_candidates,
-                        stoich_matrix=stoich_matrix_fit,
-                        fitted_params=fitted_params,
-                        solver_method=solver_method_fit,
-                        rtol=float(rtol_fit),
-                        atol=float(atol_fit),
-                        reactor_type=reactor_type_fit,
-                        kinetic_model=kinetic_model_fit,
-                        max_step_fraction=float(max_step_fraction_fit),
+                    st.session_state["fit_compare_long_df"] = (
+                        _build_fit_comparison_long_table(
+                            data_df=df_fit,
+                            species_names=species_names_fit,
+                            output_mode=output_mode_fit,
+                            output_species_list=parity_species_candidates,
+                            stoich_matrix=stoich_matrix_fit,
+                            fitted_params=fitted_params,
+                            solver_method=solver_method_fit,
+                            rtol=float(rtol_fit),
+                            atol=float(atol_fit),
+                            reactor_type=reactor_type_fit,
+                            kinetic_model=kinetic_model_fit,
+                            max_step_fraction=float(max_step_fraction_fit),
+                        )
                     )
                 except Exception as exc:
                     st.error(f"生成对比数据失败: {exc}")
@@ -2389,10 +2723,16 @@ def main():
                     default=list(parity_species_candidates),
                 )
                 show_residual_plot = st.checkbox("显示残差图", value=True)
-                n_cols = int(st.number_input("每行子图数", min_value=1, max_value=4, value=2, step=1))
+                n_cols = int(
+                    st.number_input(
+                        "每行子图数", min_value=1, max_value=4, value=2, step=1
+                    )
+                )
 
                 df_ok = df_long[df_long["ok"]].copy()
-                df_ok = df_ok[np.isfinite(df_ok["measured"]) & np.isfinite(df_ok["predicted"])]
+                df_ok = df_ok[
+                    np.isfinite(df_ok["measured"]) & np.isfinite(df_ok["predicted"])
+                ]
                 if df_ok.empty:
                     st.error(
                         "所有实验点都无法成功预测（solve_ivp 失败或输入不合法）。\n"
@@ -2403,7 +2743,9 @@ def main():
                     if df_ok.empty:
                         st.warning("所选物种没有可用数据点。")
                     else:
-                        species_list_plot = list(dict.fromkeys(df_ok["species"].tolist()))
+                        species_list_plot = list(
+                            dict.fromkeys(df_ok["species"].tolist())
+                        )
                         n_plots = len(species_list_plot)
                         n_rows = int(np.ceil(n_plots / max(n_cols, 1)))
                         fig, axes = plt.subplots(
@@ -2425,19 +2767,31 @@ def main():
                             min_v = float(
                                 np.nanmin(
                                     np.concatenate(
-                                        [df_sp["measured"].to_numpy(), df_sp["predicted"].to_numpy()]
+                                        [
+                                            df_sp["measured"].to_numpy(),
+                                            df_sp["predicted"].to_numpy(),
+                                        ]
                                     )
                                 )
                             )
                             max_v = float(
                                 np.nanmax(
                                     np.concatenate(
-                                        [df_sp["measured"].to_numpy(), df_sp["predicted"].to_numpy()]
+                                        [
+                                            df_sp["measured"].to_numpy(),
+                                            df_sp["predicted"].to_numpy(),
+                                        ]
                                     )
                                 )
                             )
-                            if np.isfinite(min_v) and np.isfinite(max_v) and max_v > min_v:
-                                ax.plot([min_v, max_v], [min_v, max_v], "k--", label="y=x")
+                            if (
+                                np.isfinite(min_v)
+                                and np.isfinite(max_v)
+                                and max_v > min_v
+                            ):
+                                ax.plot(
+                                    [min_v, max_v], [min_v, max_v], "k--", label="y=x"
+                                )
                             ax.set_title(f"{species_name}")
                             ax.set_xlabel(f"Measured [{unit_text}]")
                             ax.set_ylabel(f"Predicted [{unit_text}]")
@@ -2459,7 +2813,11 @@ def main():
                             "📥 下载奇偶校验图",
                             ui_comp.figure_to_image_bytes(fig, image_format),
                             file_name=f"parity_plot.{image_format}",
-                            mime="image/png" if image_format == "png" else "image/svg+xml",
+                            mime=(
+                                "image/png"
+                                if image_format == "png"
+                                else "image/svg+xml"
+                            ),
                         )
                         plt.close(fig)
 
@@ -2470,7 +2828,10 @@ def main():
                     for species_name in species_selected:
                         df_sp = df_long[df_long["species"] == species_name]
                         df_sp = df_sp[df_sp["ok"]]
-                        df_sp = df_sp[np.isfinite(df_sp["residual"]) & np.isfinite(df_sp["measured"])]
+                        df_sp = df_sp[
+                            np.isfinite(df_sp["residual"])
+                            & np.isfinite(df_sp["measured"])
+                        ]
                         if not df_sp.empty:
                             ax_r.scatter(
                                 df_sp["measured"].to_numpy(dtype=float),
@@ -2496,11 +2857,17 @@ def main():
                 st.markdown("#### 拟合误差指标（按物种）")
                 rows_metric = []
                 for species_name in species_selected:
-                    df_sp = df_long[(df_long["species"] == species_name) & (df_long["ok"])].copy()
-                    df_sp = df_sp[np.isfinite(df_sp["measured"]) & np.isfinite(df_sp["predicted"])]
+                    df_sp = df_long[
+                        (df_long["species"] == species_name) & (df_long["ok"])
+                    ].copy()
+                    df_sp = df_sp[
+                        np.isfinite(df_sp["measured"]) & np.isfinite(df_sp["predicted"])
+                    ]
                     if df_sp.empty:
                         continue
-                    resid = df_sp["predicted"].to_numpy(dtype=float) - df_sp["measured"].to_numpy(dtype=float)
+                    resid = df_sp["predicted"].to_numpy(dtype=float) - df_sp[
+                        "measured"
+                    ].to_numpy(dtype=float)
                     rmse = float(np.sqrt(np.mean(resid**2)))
                     mae = float(np.mean(np.abs(resid)))
                     rows_metric.append(
@@ -2512,7 +2879,9 @@ def main():
                         }
                     )
                 if rows_metric:
-                    st.dataframe(pd.DataFrame(rows_metric), use_container_width=True, height=220)
+                    st.dataframe(
+                        pd.DataFrame(rows_metric), use_container_width=True, height=220
+                    )
 
         with tab_profile:
             st.markdown("#### 沿程/随时间剖面")
@@ -2527,7 +2896,9 @@ def main():
                     index=0,
                 )
                 profile_points = int(
-                    st.number_input("剖面点数", min_value=20, max_value=2000, value=200, step=20)
+                    st.number_input(
+                        "剖面点数", min_value=20, max_value=2000, value=200, step=20
+                    )
                 )
                 profile_species = st.multiselect(
                     "选择要画剖面的物种（可多选）",
@@ -2549,29 +2920,35 @@ def main():
 
                     molar_flow_inlet = np.zeros(len(species_names_fit), dtype=float)
                     for i, sp_name in enumerate(species_names_fit):
-                        molar_flow_inlet[i] = float(row_sel.get(f"F0_{sp_name}_mol_s", np.nan))
+                        molar_flow_inlet[i] = float(
+                            row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
+                        )
 
-                    volume_grid_m3, molar_flow_profile, ok, message = reactors.integrate_pfr_profile(
-                        reactor_volume_m3=reactor_volume_m3,
-                        temperature_K=temperature_K,
-                        vdot_m3_s=vdot_m3_s,
-                        molar_flow_inlet_mol_s=molar_flow_inlet,
-                        stoich_matrix=stoich_matrix_fit,
-                        k0=fitted_params["k0"],
-                        ea_J_mol=fitted_params["ea_J_mol"],
-                        reaction_order_matrix=fitted_params["reaction_order_matrix"],
-                        solver_method=solver_method_fit,
-                        rtol=rtol_fit,
-                        atol=atol_fit,
-                        n_points=profile_points,
-                        kinetic_model=kinetic_model_fit,
-                        max_step_fraction=max_step_fraction_fit,
-                        K0_ads=fitted_params.get("K0_ads", None),
-                        Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                        m_inhibition=fitted_params.get("m_inhibition", None),
-                        k0_rev=fitted_params.get("k0_rev", None),
-                        ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                        order_rev_matrix=fitted_params.get("order_rev", None),
+                    volume_grid_m3, molar_flow_profile, ok, message = (
+                        reactors.integrate_pfr_profile(
+                            reactor_volume_m3=reactor_volume_m3,
+                            temperature_K=temperature_K,
+                            vdot_m3_s=vdot_m3_s,
+                            molar_flow_inlet_mol_s=molar_flow_inlet,
+                            stoich_matrix=stoich_matrix_fit,
+                            k0=fitted_params["k0"],
+                            ea_J_mol=fitted_params["ea_J_mol"],
+                            reaction_order_matrix=fitted_params[
+                                "reaction_order_matrix"
+                            ],
+                            solver_method=solver_method_fit,
+                            rtol=rtol_fit,
+                            atol=atol_fit,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model_fit,
+                            max_step_fraction=max_step_fraction_fit,
+                            K0_ads=fitted_params.get("K0_ads", None),
+                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                            m_inhibition=fitted_params.get("m_inhibition", None),
+                            k0_rev=fitted_params.get("k0_rev", None),
+                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                            order_rev_matrix=fitted_params.get("order_rev", None),
+                        )
                     )
                     if not ok:
                         st.error(
@@ -2580,22 +2957,35 @@ def main():
                         )
                     else:
                         fig_pf, ax_pf = plt.subplots(figsize=(7, 4.5))
-                        name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+                        name_to_index = {
+                            name: i for i, name in enumerate(species_names_fit)
+                        }
 
                         profile_df = pd.DataFrame({"V_m3": volume_grid_m3})
                         for species_name in profile_species:
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("F"):
                                 y = molar_flow_profile[idx, :]
-                                ax_pf.plot(volume_grid_m3, y, linewidth=2, label=species_name)
+                                ax_pf.plot(
+                                    volume_grid_m3, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"F_{species_name}_mol_s"] = y
                             else:
-                                conc = molar_flow_profile[idx, :] / max(vdot_m3_s, 1e-30)
-                                ax_pf.plot(volume_grid_m3, conc, linewidth=2, label=species_name)
+                                conc = molar_flow_profile[idx, :] / max(
+                                    vdot_m3_s, 1e-30
+                                )
+                                ax_pf.plot(
+                                    volume_grid_m3,
+                                    conc,
+                                    linewidth=2,
+                                    label=species_name,
+                                )
                                 profile_df[f"C_{species_name}_mol_m3"] = conc
 
                         ax_pf.set_xlabel("Reactor volume V [m^3]")
-                        ax_pf.set_ylabel(f"{profile_kind} [{('mol/s' if profile_kind.startswith('F') else 'mol/m^3')}]")
+                        ax_pf.set_ylabel(
+                            f"{profile_kind} [{('mol/s' if profile_kind.startswith('F') else 'mol/m^3')}]"
+                        )
                         ax_pf.grid(True)
                         ax_pf.legend()
                         st.pyplot(fig_pf)
@@ -2616,7 +3006,11 @@ def main():
                             "📥 下载剖面图",
                             ui_comp.figure_to_image_bytes(fig_pf, image_format_pf),
                             file_name=f"profile_plot.{image_format_pf}",
-                            mime="image/png" if image_format_pf == "png" else "image/svg+xml",
+                            mime=(
+                                "image/png"
+                                if image_format_pf == "png"
+                                else "image/svg+xml"
+                            ),
                         )
                         plt.close(fig_pf)
 
@@ -2631,28 +3025,34 @@ def main():
                     temperature_K = float(row_sel.get("T_K", np.nan))
                     conc_initial = np.zeros(len(species_names_fit), dtype=float)
                     for i, sp_name in enumerate(species_names_fit):
-                        conc_initial[i] = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
+                        conc_initial[i] = float(
+                            row_sel.get(f"C0_{sp_name}_mol_m3", np.nan)
+                        )
 
-                    time_grid_s, conc_profile, ok, message = reactors.integrate_batch_profile(
-                        reaction_time_s=reaction_time_s,
-                        temperature_K=temperature_K,
-                        conc_initial_mol_m3=conc_initial,
-                        stoich_matrix=stoich_matrix_fit,
-                        k0=fitted_params["k0"],
-                        ea_J_mol=fitted_params["ea_J_mol"],
-                        reaction_order_matrix=fitted_params["reaction_order_matrix"],
-                        solver_method=solver_method_fit,
-                        rtol=rtol_fit,
-                        atol=atol_fit,
-                        n_points=profile_points,
-                        kinetic_model=kinetic_model_fit,
-                        max_step_fraction=max_step_fraction_fit,
-                        K0_ads=fitted_params.get("K0_ads", None),
-                        Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                        m_inhibition=fitted_params.get("m_inhibition", None),
-                        k0_rev=fitted_params.get("k0_rev", None),
-                        ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                        order_rev_matrix=fitted_params.get("order_rev", None),
+                    time_grid_s, conc_profile, ok, message = (
+                        reactors.integrate_batch_profile(
+                            reaction_time_s=reaction_time_s,
+                            temperature_K=temperature_K,
+                            conc_initial_mol_m3=conc_initial,
+                            stoich_matrix=stoich_matrix_fit,
+                            k0=fitted_params["k0"],
+                            ea_J_mol=fitted_params["ea_J_mol"],
+                            reaction_order_matrix=fitted_params[
+                                "reaction_order_matrix"
+                            ],
+                            solver_method=solver_method_fit,
+                            rtol=rtol_fit,
+                            atol=atol_fit,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model_fit,
+                            max_step_fraction=max_step_fraction_fit,
+                            K0_ads=fitted_params.get("K0_ads", None),
+                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                            m_inhibition=fitted_params.get("m_inhibition", None),
+                            k0_rev=fitted_params.get("k0_rev", None),
+                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                            order_rev_matrix=fitted_params.get("order_rev", None),
+                        )
                     )
                     if not ok:
                         st.error(
@@ -2661,13 +3061,17 @@ def main():
                         )
                     else:
                         fig_bt, ax_bt = plt.subplots(figsize=(7, 4.5))
-                        name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+                        name_to_index = {
+                            name: i for i, name in enumerate(species_names_fit)
+                        }
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
                         for species_name in profile_species:
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
+                                ax_bt.plot(
+                                    time_grid_s, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_initial[idx])
@@ -2675,7 +3079,9 @@ def main():
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_bt.plot(time_grid_s, x, linewidth=2, label=species_name)
+                                ax_bt.plot(
+                                    time_grid_s, x, linewidth=2, label=species_name
+                                )
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_bt.set_xlabel("Time t [s]")
@@ -2702,7 +3108,11 @@ def main():
                             "📥 下载剖面图",
                             ui_comp.figure_to_image_bytes(fig_bt, image_format_bt),
                             file_name=f"profile_plot.{image_format_bt}",
-                            mime="image/png" if image_format_bt == "png" else "image/svg+xml",
+                            mime=(
+                                "image/png"
+                                if image_format_bt == "png"
+                                else "image/svg+xml"
+                            ),
                         )
                         plt.close(fig_bt)
 
@@ -2724,7 +3134,10 @@ def main():
             )
 
             fitted_params_json = json.dumps(
-                {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in fitted_params.items()},
+                {
+                    k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                    for k, v in fitted_params.items()
+                },
                 ensure_ascii=False,
                 indent=2,
             ).encode("utf-8")
@@ -2745,6 +3158,7 @@ def main():
                 )
             else:
                 st.info("先在「奇偶校验图」页生成对比数据后，再导出对比表。")
+
 
 if __name__ == "__main__":
     main()
