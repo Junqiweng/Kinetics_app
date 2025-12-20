@@ -6,14 +6,32 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-# 配置文件保存目录（与 app.py 同目录）
-_CONFIG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_AUTO_SAVE_FILE = os.path.join(_CONFIG_DIR, ".last_config.json")
+# 持久化目录（跨刷新可用；避免写入代码目录导致多用户互相覆盖）
+_PERSIST_DIR = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+os.makedirs(_PERSIST_DIR, exist_ok=True)
+
+_AUTO_SAVE_FILE = os.path.join(_PERSIST_DIR, "last_config.json")
+
+def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
+    dir_name = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(dir_name, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".txt", dir=dir_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(text)
+        os.replace(temp_path, file_path)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
 
 
 def _convert_to_serializable(obj: Any) -> Any:
@@ -58,6 +76,7 @@ def collect_config(
     solver_method: str,
     rtol: float,
     atol: float,
+    max_step_fraction: float,
     # --- 物种与反应 ---
     species_text: str,
     n_reactions: int,
@@ -135,6 +154,7 @@ def collect_config(
         "solver_method": solver_method,
         "rtol": rtol,
         "atol": atol,
+        "max_step_fraction": max_step_fraction,
         # 物种与反应
         "species_text": species_text,
         "n_reactions": n_reactions,
@@ -219,52 +239,58 @@ def import_config_from_json(json_str: str) -> dict:
     return _convert_from_serializable(config)
 
 
-def auto_save_config(config: dict) -> bool:
+def auto_save_config(config: dict, client_id: str | None = None) -> tuple[bool, str]:
     """
     自动保存配置到本地文件。
 
     Returns:
-        True 表示保存成功，False 表示保存失败。
+        (ok, message)
     """
+    _ = client_id  # 保留参数以兼容旧调用；当前实现只保存“一个”配置缓存
+    file_path = _AUTO_SAVE_FILE
     try:
-        with open(_AUTO_SAVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception:
-        return False
+        text = json.dumps(config, indent=2, ensure_ascii=False)
+        _atomic_write_text(file_path, text, encoding="utf-8")
+        return True, "OK"
+    except Exception as exc:
+        return False, f"自动保存失败: {exc}"
 
 
-def auto_load_config() -> dict | None:
+def auto_load_config(client_id: str | None = None) -> tuple[dict | None, str]:
     """
     从本地文件加载上次保存的配置。
 
     Returns:
-        配置字典，如果文件不存在或加载失败则返回 None。
+        (config, message)
     """
-    if not os.path.exists(_AUTO_SAVE_FILE):
-        return None
+    _ = client_id  # 保留参数以兼容旧调用；当前实现只加载“一个”配置缓存
+    file_path = _AUTO_SAVE_FILE
+    if not os.path.exists(file_path):
+        return None, "未找到自动保存配置"
     try:
-        with open(_AUTO_SAVE_FILE, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-        return _convert_from_serializable(config)
-    except Exception:
-        return None
+        return _convert_from_serializable(config), "OK"
+    except Exception as exc:
+        return None, f"自动加载失败: {exc}"
 
 
-def clear_auto_saved_config() -> bool:
+def clear_auto_saved_config(client_id: str | None = None) -> tuple[bool, str]:
     """
     删除自动保存的配置文件（重置为默认）。
 
     Returns:
-        True 表示删除成功，False 表示删除失败或文件不存在。
+        (ok, message)
     """
-    if os.path.exists(_AUTO_SAVE_FILE):
+    _ = client_id  # 保留参数以兼容旧调用；当前实现只清理“一个”配置缓存
+    file_path = _AUTO_SAVE_FILE
+    if os.path.exists(file_path):
         try:
-            os.remove(_AUTO_SAVE_FILE)
-            return True
-        except Exception:
-            return False
-    return True
+            os.remove(file_path)
+            return True, "OK"
+        except Exception as exc:
+            return False, f"删除失败: {exc}"
+    return True, "文件不存在"
 
 
 def get_default_config() -> dict:
@@ -279,6 +305,7 @@ def get_default_config() -> dict:
         "solver_method": "RK45",
         "rtol": 1e-6,
         "atol": 1e-9,
+        "max_step_fraction": 0.1,
         # 物种与反应
         "species_text": "A,B,C",
         "n_reactions": 1,
@@ -379,6 +406,16 @@ def validate_config(config: dict) -> tuple[bool, str]:
             return False, "atol 无法转换为数值"
         if (not np.isfinite(atol)) or (atol <= 0.0):
             return False, "atol 必须为正且有限"
+
+    if "max_step_fraction" in config:
+        try:
+            value = float(config["max_step_fraction"])
+        except Exception:
+            return False, "max_step_fraction 无法转换为数值"
+        if (not np.isfinite(value)) or (value < 0.0):
+            return False, "max_step_fraction 必须为非负且有限（0 表示不限制）"
+
+    # 说明：历史版本曾导出过 residual_penalty_* 字段；当前版本不再使用，导入时忽略即可。
 
     # 可选项：输出模式与目标物种
     allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]

@@ -13,6 +13,19 @@ def _to_float_or_nan(value: object) -> float:
         return float("nan")
 
 
+def _row_get_value(row: object, key: str, default) -> object:
+    """
+    兼容 pandas.Series / dict / itertuples(namedtuple) 的取值方式。
+    """
+    if isinstance(row, pd.Series):
+        return row.get(key, default)
+    if isinstance(row, dict):
+        return row.get(key, default)
+    if hasattr(row, key):
+        return getattr(row, key)
+    return default
+
+
 def _pack_parameters(
     k0_guess: np.ndarray,
     ea_guess_J_mol: np.ndarray,
@@ -322,7 +335,7 @@ def _build_bounds(
 
 
 def _predict_outputs_for_row(
-    row: pd.Series,
+    row: object,
     species_names: list[str],
     output_mode: str,
     output_species_list: list[str],
@@ -341,11 +354,16 @@ def _predict_outputs_for_row(
     k0_rev: np.ndarray = None,
     ea_rev_J_mol: np.ndarray = None,
     order_rev_matrix: np.ndarray = None,
+    max_step_fraction: float | None = 0.1,
+    name_to_index: dict[str, int] | None = None,
+    output_species_indices: list[int] | None = None,
+    inlet_column_names: list[str] | None = None,
+    model_eval_cache: dict | None = None,
 ) -> tuple[np.ndarray, bool, str]:
     """
     根据反应器类型和动力学模型预测输出值。
     """
-    temperature_K = _to_float_or_nan(row.get("T_K", np.nan))
+    temperature_K = _to_float_or_nan(_row_get_value(row, "T_K", np.nan))
     if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
         return (
             np.zeros(len(output_species_list), dtype=float),
@@ -353,11 +371,22 @@ def _predict_outputs_for_row(
             "温度 T_K 无效（请检查 CSV 的 T_K 列）",
         )
 
-    name_to_index = {name: i for i, name in enumerate(species_names)}
+    if name_to_index is None:
+        name_to_index = {name: i for i, name in enumerate(species_names)}
+
+    if output_species_indices is None:
+        try:
+            output_species_indices = [name_to_index[name] for name in output_species_list]
+        except Exception:
+            return (
+                np.zeros(len(output_species_list), dtype=float),
+                False,
+                "输出物种不在物种列表中（请检查物种名是否匹配）",
+            )
 
     if reactor_type == "PFR":
         # PFR 需要 V_m3, vdot_m3_s, F0_*
-        reactor_volume_m3 = _to_float_or_nan(row.get("V_m3", np.nan))
+        reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
         if not np.isfinite(reactor_volume_m3):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 V_m3"
         if reactor_volume_m3 < 0.0:
@@ -367,7 +396,7 @@ def _predict_outputs_for_row(
                 "V_m3 不能为负",
             )
 
-        vdot_m3_s = _to_float_or_nan(row.get("vdot_m3_s", np.nan))
+        vdot_m3_s = _to_float_or_nan(_row_get_value(row, "vdot_m3_s", np.nan))
         if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
             return (
                 np.zeros(len(output_species_list), dtype=float),
@@ -375,10 +404,12 @@ def _predict_outputs_for_row(
                 "体积流量 vdot_m3_s 无效（请检查 CSV 的 vdot_m3_s 列）",
             )
 
+        if inlet_column_names is None:
+            inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
+
         molar_flow_inlet = np.zeros(len(species_names), dtype=float)
-        for i, name in enumerate(species_names):
-            col = f"F0_{name}_mol_s"
-            value = _to_float_or_nan(row.get(col, np.nan))
+        for i, col in enumerate(inlet_column_names):
+            value = _to_float_or_nan(_row_get_value(row, col, np.nan))
             if not np.isfinite(value):
                 return (
                     np.zeros(len(output_species_list), dtype=float),
@@ -393,33 +424,51 @@ def _predict_outputs_for_row(
                 )
             molar_flow_inlet[i] = float(value)
 
-        molar_flow_outlet, ok, message = integrate_pfr_molar_flows(
-            reactor_volume_m3=reactor_volume_m3,
-            temperature_K=temperature_K,
-            vdot_m3_s=vdot_m3_s,
-            molar_flow_inlet_mol_s=molar_flow_inlet,
-            stoich_matrix=stoich_matrix,
-            k0=k0,
-            ea_J_mol=ea_J_mol,
-            reaction_order_matrix=reaction_order_matrix,
-            solver_method=solver_method,
-            rtol=rtol,
-            atol=atol,
-            kinetic_model=kinetic_model,
-            K0_ads=K0_ads,
-            Ea_K_J_mol=Ea_K_J_mol,
-            m_inhibition=m_inhibition,
-            k0_rev=k0_rev,
-            ea_rev_J_mol=ea_rev_J_mol,
-            order_rev_matrix=order_rev_matrix,
-        )
+        molar_flow_outlet = None
+        ok = True
+        message = "OK"
+        if model_eval_cache is not None:
+            cache_key = (
+                "PFR",
+                float(reactor_volume_m3),
+                float(temperature_K),
+                float(vdot_m3_s),
+                tuple(molar_flow_inlet),
+            )
+            if cache_key in model_eval_cache:
+                cached = model_eval_cache[cache_key]
+                molar_flow_outlet, ok, message = cached
+
+        if molar_flow_outlet is None:
+            molar_flow_outlet, ok, message = integrate_pfr_molar_flows(
+                reactor_volume_m3=reactor_volume_m3,
+                temperature_K=temperature_K,
+                vdot_m3_s=vdot_m3_s,
+                molar_flow_inlet_mol_s=molar_flow_inlet,
+                stoich_matrix=stoich_matrix,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                solver_method=solver_method,
+                rtol=rtol,
+                atol=atol,
+                kinetic_model=kinetic_model,
+                max_step_fraction=max_step_fraction,
+                K0_ads=K0_ads,
+                Ea_K_J_mol=Ea_K_J_mol,
+                m_inhibition=m_inhibition,
+                k0_rev=k0_rev,
+                ea_rev_J_mol=ea_rev_J_mol,
+                order_rev_matrix=order_rev_matrix,
+            )
+            if model_eval_cache is not None:
+                model_eval_cache[cache_key] = (molar_flow_outlet, bool(ok), str(message))
         if not ok:
             return np.zeros(len(output_species_list), dtype=float), False, message
 
         # 计算输出值
         output_values = np.zeros(len(output_species_list), dtype=float)
-        for out_i, species in enumerate(output_species_list):
-            idx = name_to_index[species]
+        for out_i, idx in enumerate(output_species_indices):
             if output_mode == "Fout (mol/s)":
                 output_values[out_i] = molar_flow_outlet[idx]
             elif output_mode == "Cout (mol/m^3)":
@@ -440,7 +489,7 @@ def _predict_outputs_for_row(
 
     elif reactor_type == "Batch":
         # Batch 需要 t_s, C0_*
-        reaction_time_s = _to_float_or_nan(row.get("t_s", np.nan))
+        reaction_time_s = _to_float_or_nan(_row_get_value(row, "t_s", np.nan))
         if not np.isfinite(reaction_time_s):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 t_s"
         if reaction_time_s < 0.0:
@@ -450,10 +499,12 @@ def _predict_outputs_for_row(
                 "t_s 不能为负",
             )
 
+        if inlet_column_names is None:
+            inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
+
         conc_initial = np.zeros(len(species_names), dtype=float)
-        for i, name in enumerate(species_names):
-            col = f"C0_{name}_mol_m3"
-            value = _to_float_or_nan(row.get(col, np.nan))
+        for i, col in enumerate(inlet_column_names):
+            value = _to_float_or_nan(_row_get_value(row, col, np.nan))
             if not np.isfinite(value):
                 return (
                     np.zeros(len(output_species_list), dtype=float),
@@ -468,32 +519,49 @@ def _predict_outputs_for_row(
                 )
             conc_initial[i] = float(value)
 
-        conc_final, ok, message = integrate_batch_reactor(
-            reaction_time_s=reaction_time_s,
-            temperature_K=temperature_K,
-            conc_initial_mol_m3=conc_initial,
-            stoich_matrix=stoich_matrix,
-            k0=k0,
-            ea_J_mol=ea_J_mol,
-            reaction_order_matrix=reaction_order_matrix,
-            solver_method=solver_method,
-            rtol=rtol,
-            atol=atol,
-            kinetic_model=kinetic_model,
-            K0_ads=K0_ads,
-            Ea_K_J_mol=Ea_K_J_mol,
-            m_inhibition=m_inhibition,
-            k0_rev=k0_rev,
-            ea_rev_J_mol=ea_rev_J_mol,
-            order_rev_matrix=order_rev_matrix,
-        )
+        conc_final = None
+        ok = True
+        message = "OK"
+        if model_eval_cache is not None:
+            cache_key = (
+                "Batch",
+                float(reaction_time_s),
+                float(temperature_K),
+                tuple(conc_initial),
+            )
+            if cache_key in model_eval_cache:
+                cached = model_eval_cache[cache_key]
+                conc_final, ok, message = cached
+
+        if conc_final is None:
+            conc_final, ok, message = integrate_batch_reactor(
+                reaction_time_s=reaction_time_s,
+                temperature_K=temperature_K,
+                conc_initial_mol_m3=conc_initial,
+                stoich_matrix=stoich_matrix,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                solver_method=solver_method,
+                rtol=rtol,
+                atol=atol,
+                kinetic_model=kinetic_model,
+                max_step_fraction=max_step_fraction,
+                K0_ads=K0_ads,
+                Ea_K_J_mol=Ea_K_J_mol,
+                m_inhibition=m_inhibition,
+                k0_rev=k0_rev,
+                ea_rev_J_mol=ea_rev_J_mol,
+                order_rev_matrix=order_rev_matrix,
+            )
+            if model_eval_cache is not None:
+                model_eval_cache[cache_key] = (conc_final, bool(ok), str(message))
         if not ok:
             return np.zeros(len(output_species_list), dtype=float), False, message
 
         # 计算输出值
         output_values = np.zeros(len(output_species_list), dtype=float)
-        for out_i, species in enumerate(output_species_list):
-            idx = name_to_index[species]
+        for out_i, idx in enumerate(output_species_indices):
             if output_mode == "Cout (mol/m^3)":
                 output_values[out_i] = conc_final[idx]
             elif output_mode == "X (conversion)":

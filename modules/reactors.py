@@ -11,6 +11,24 @@ from .kinetics import (
 )
 
 
+def _compute_max_step(total_span: float, max_step_fraction: float | None) -> float:
+    """
+    将 “max_step_fraction” 转为 solve_ivp 的 max_step。
+
+    例：max_step_fraction=0.1 表示 max_step = 0.1 * total_span。
+    - 若为 0 或 None：不限制（solve_ivp 默认 np.inf）
+    """
+    if max_step_fraction is None:
+        return np.inf
+    try:
+        fraction = float(max_step_fraction)
+    except Exception:
+        return np.inf
+    if (not np.isfinite(fraction)) or (fraction <= 0.0):
+        return np.inf
+    return float(total_span) * fraction
+
+
 def integrate_pfr_molar_flows(
     reactor_volume_m3: float,
     temperature_K: float,
@@ -24,6 +42,7 @@ def integrate_pfr_molar_flows(
     rtol: float,
     atol: float,
     kinetic_model: str = "power_law",
+    max_step_fraction: float | None = 0.1,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -114,10 +133,7 @@ def integrate_pfr_molar_flows(
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
 
-    # Limit max_step to prevent infinite step refinement for stiff/extreme parameters
-    max_step_value = (
-        float(reactor_volume_m3) / 10.0 if reactor_volume_m3 > 0 else np.inf
-    )
+    max_step_value = _compute_max_step(float(reactor_volume_m3), max_step_fraction)
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -151,6 +167,7 @@ def integrate_batch_reactor(
     rtol: float,
     atol: float,
     kinetic_model: str = "power_law",
+    max_step_fraction: float | None = 0.1,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -238,8 +255,7 @@ def integrate_batch_reactor(
         dC_dt = stoich_matrix @ rate_vector
         return dC_dt
 
-    # Limit max_step to prevent infinite step refinement for stiff/extreme parameters
-    max_step_value = float(reaction_time_s) / 10.0 if reaction_time_s > 0 else np.inf
+    max_step_value = _compute_max_step(float(reaction_time_s), max_step_fraction)
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -275,6 +291,7 @@ def integrate_pfr_profile(
     atol: float,
     n_points: int = 200,
     kinetic_model: str = "power_law",
+    max_step_fraction: float | None = 0.1,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -411,10 +428,7 @@ def integrate_pfr_profile(
 
     volume_grid_m3 = np.linspace(0.0, float(reactor_volume_m3), n_points, dtype=float)
 
-    # Limit max_step to prevent infinite step refinement
-    max_step_value = (
-        float(reactor_volume_m3) / 10.0 if reactor_volume_m3 > 0 else np.inf
-    )
+    max_step_value = _compute_max_step(float(reactor_volume_m3), max_step_fraction)
     try:
         solution = solve_ivp(
             fun=ode_fun,
@@ -459,6 +473,7 @@ def integrate_batch_profile(
     atol: float,
     n_points: int = 200,
     kinetic_model: str = "power_law",
+    max_step_fraction: float | None = 0.1,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -577,8 +592,7 @@ def integrate_batch_profile(
         return dC_dt
 
     time_grid_s = np.linspace(0.0, float(reaction_time_s), n_points, dtype=float)
-    # Limit max_step to prevent infinite step refinement
-    max_step_value = float(reaction_time_s) / 10.0 if reaction_time_s > 0 else np.inf
+    max_step_value = _compute_max_step(float(reaction_time_s), max_step_fraction)
     try:
         solution = solve_ivp(
             fun=ode_fun,

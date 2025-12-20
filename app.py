@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import json
+import os
+import tempfile
+import time
+import html as html_lib
+import queue
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 from scipy.optimize import least_squares
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-import threading
-import queue
-import time
-import html as html_lib
-from concurrent.futures import ThreadPoolExecutor
-import io
-import os
-import urllib.request
-import json
+
 import modules.fitting as fitting
 import modules.reactors as reactors
 import modules.ui_help as ui_help
@@ -26,7 +28,245 @@ class FittingStoppedError(Exception):
     pass
 
 
+# 固定默认值（不在 UI 中暴露给用户）
+DEFAULT_RESIDUAL_PENALTY_MULTIPLIER = 1e3
+DEFAULT_RESIDUAL_PENALTY_MIN_ABS = 1e3
+
+
 # ========== Helper functions ==========
+def _read_csv_bytes_cached(uploaded_bytes: bytes) -> pd.DataFrame:
+    """
+    从 bytes 读取 CSV。
+    """
+    return pd.read_csv(io.BytesIO(uploaded_bytes))
+
+
+def _apply_imported_config_to_widget_state(config: dict) -> None:
+    """
+    将导入配置写入 widget 对应的 session_state。
+
+    关键点：必须在 widget 创建之前写入，否则会触发
+    “cannot be modified after the widget ... is instantiated”。
+    """
+    reactor_type_cfg = str(config.get("reactor_type", "")).strip()
+    kinetic_model_cfg = str(config.get("kinetic_model", "")).strip()
+    solver_method_cfg = str(config.get("solver_method", "")).strip()
+
+    if reactor_type_cfg in ["PFR", "Batch"]:
+        st.session_state["cfg_reactor_type"] = reactor_type_cfg
+    if kinetic_model_cfg in ["power_law", "langmuir_hinshelwood", "reversible"]:
+        st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
+    if solver_method_cfg in ["RK45", "BDF", "Radau"]:
+        st.session_state["cfg_solver_method"] = solver_method_cfg
+
+    if "rtol" in config:
+        st.session_state["cfg_rtol"] = float(config.get("rtol", 1e-6))
+    if "atol" in config:
+        st.session_state["cfg_atol"] = float(config.get("atol", 1e-9))
+
+    if "species_text" in config:
+        st.session_state["cfg_species_text"] = str(config.get("species_text", "")).strip()
+    if "n_reactions" in config:
+        st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
+
+    output_mode_cfg = str(config.get("output_mode", "")).strip()
+    if reactor_type_cfg == "Batch":
+        allowed_output_modes = ["Cout (mol/m^3)", "X (conversion)"]
+    else:
+        allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
+    if output_mode_cfg in allowed_output_modes:
+        st.session_state["cfg_output_mode"] = output_mode_cfg
+    elif allowed_output_modes:
+        st.session_state["cfg_output_mode"] = allowed_output_modes[0]
+
+    output_species_list_cfg = config.get("output_species_list", None)
+    if isinstance(output_species_list_cfg, list):
+        st.session_state["cfg_output_species_list"] = [str(x) for x in output_species_list_cfg]
+
+    for key_name in [
+        "k0_min",
+        "k0_max",
+        "ea_min_J_mol",
+        "ea_max_J_mol",
+        "order_min",
+        "order_max",
+        "diff_step_rel",
+        "max_nfev",
+        "use_x_scale_jac",
+        "use_multi_start",
+        "n_starts",
+        "max_nfev_coarse",
+        "random_seed",
+        "max_step_fraction",
+    ]:
+        if key_name in config:
+            st.session_state[f"cfg_{key_name}"] = config[key_name]
+
+
+def _get_persist_dir() -> str:
+    """
+    本地持久化目录：用于跨刷新恢复（只保留一份缓存，新内容覆盖旧内容）。
+    """
+    persist_dir = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+    os.makedirs(persist_dir, exist_ok=True)
+    return persist_dir
+
+
+def _atomic_write_bytes(file_path: str, data: bytes) -> None:
+    dir_name = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(dir_name, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".bin", dir=dir_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(temp_path, file_path)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+
+def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
+    dir_name = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(dir_name, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".txt", dir=dir_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(text)
+        os.replace(temp_path, file_path)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+
+def _get_upload_file_paths() -> tuple[str, str]:
+    """
+    Returns:
+        (csv_bytes_path, meta_json_path)
+
+    说明：只保留“一份”上传缓存，新内容覆盖旧内容。
+    """
+    persist_dir = _get_persist_dir()
+    csv_path = os.path.join(persist_dir, "uploaded.csv")
+    meta_path = os.path.join(persist_dir, "uploaded.meta.json")
+    return csv_path, meta_path
+
+
+def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
+    """
+    Returns:
+        (uploaded_csv_bytes, uploaded_csv_name, message)
+    """
+    csv_path, meta_path = _get_upload_file_paths()
+    if not os.path.exists(csv_path):
+        return None, None, "未找到已缓存上传文件"
+
+    try:
+        uploaded_bytes = open(csv_path, "rb").read()
+    except Exception as exc:
+        return None, None, f"读取缓存 CSV 失败: {exc}"
+
+    uploaded_name = ""
+    if os.path.exists(meta_path):
+        try:
+            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+            uploaded_name = str(meta.get("name", "")).strip()
+        except Exception:
+            uploaded_name = ""
+
+    if not uploaded_bytes:
+        return None, None, "缓存 CSV 为空"
+    return uploaded_bytes, uploaded_name, "OK"
+
+
+def _save_persisted_upload(uploaded_bytes: bytes, uploaded_name: str) -> tuple[bool, str]:
+    csv_path, meta_path = _get_upload_file_paths()
+    try:
+        _atomic_write_bytes(csv_path, uploaded_bytes)
+        meta = {"name": str(uploaded_name).strip(), "saved_at_unix_s": float(time.time())}
+        _atomic_write_text(meta_path, json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True, "OK"
+    except Exception as exc:
+        return False, f"缓存上传文件失败: {exc}"
+
+
+def _delete_persisted_upload() -> tuple[bool, str]:
+    csv_path, meta_path = _get_upload_file_paths()
+    try:
+        for path in [csv_path, meta_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        return True, "OK"
+    except Exception as exc:
+        return False, f"删除缓存上传文件失败: {exc}"
+
+
+def _warn_once(flag_key: str, message: str) -> None:
+    """
+    避免同一条 warning 在每次 rerun 都重复刷屏。
+    """
+    if not bool(st.session_state.get(flag_key, False)):
+        st.session_state[flag_key] = True
+        st.warning(message)
+
+
+def _clear_config_related_state() -> None:
+    """
+    清理“配置相关”的 session_state，使 UI 真正回到默认值。
+
+    说明：必须在 widgets 创建之前调用，否则会触发 Streamlit 的
+    “cannot be modified after the widget ... is instantiated” 报错。
+    """
+    keys_to_delete: list[str] = []
+
+    # 1) 所有 cfg_* 控件值（全局设置 + 高级设置）
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("cfg_"):
+            keys_to_delete.append(str(key))
+
+    # 2) data_editor / expander 动态 key（否则“回到默认尺寸”时仍可能记住旧表格）
+    for key in list(st.session_state.keys()):
+        key_str = str(key)
+        if key_str.startswith("nu_") or key_str.startswith("lh_m_"):
+            keys_to_delete.append(key_str)
+
+    # 3) 导入/导出与初始化标记
+    keys_to_delete.extend(
+        [
+            "imported_config",
+            "imported_config_digest",
+            "pending_imported_config",
+            "config_initialized",
+            # 清空 file_uploader 状态，避免“重置后又自动把同一个 JSON 重新导入”
+            "uploaded_config_json",
+        ]
+    )
+
+    # 4) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
+    keys_to_delete.extend(
+        [
+            "fit_results",
+            "fit_compare_cache_key",
+            "fit_compare_long_df",
+            "fit_compare_long_df_all",
+            "fitting_timeline",
+            "fitting_metrics",
+            "fitting_ms_summary",
+            "fitting_final_summary",
+            "fitting_job_summary",
+        ]
+    )
+
+    for key in sorted(set(keys_to_delete)):
+        if key in st.session_state:
+            del st.session_state[key]
+
+
 def _get_fitting_executor() -> ThreadPoolExecutor:
     """
     每个会话单独的线程池（避免跨会话共享导致“任务占用/卡住”）。
@@ -251,6 +491,7 @@ def _run_fitting_job(
     ea_max = job_inputs["ea_max"]
     ord_min = job_inputs["ord_min"]
     ord_max = job_inputs["ord_max"]
+    max_step_fraction = float(job_inputs.get("max_step_fraction", 0.1))
 
     if stop_event.is_set():
         raise FittingStoppedError("Stopped by user")
@@ -336,10 +577,16 @@ def _run_fitting_job(
             "请检查：输出模式/物种选择是否正确，以及数据文件表头是否匹配。"
         )
 
+    n_data_rows = int(len(data_df))
+    n_outputs = int(len(output_column_names))
+    measured_matrix = np.zeros((n_data_rows, n_outputs), dtype=float)
+
     invalid_value_messages = []
-    for column_name in output_column_names:
+    for col_index, column_name in enumerate(output_column_names):
         numeric_series = pd.to_numeric(data_df[column_name], errors="coerce")
-        invalid_mask = ~np.isfinite(numeric_series.to_numpy())
+        numeric_values = numeric_series.to_numpy(dtype=float)
+        measured_matrix[:, col_index] = numeric_values
+        invalid_mask = ~np.isfinite(numeric_values)
         if bool(np.any(invalid_mask)):
             invalid_row_indices = data_df.index[invalid_mask].tolist()
             sample_indices_text = ", ".join([str(i) for i in invalid_row_indices[:10]])
@@ -354,6 +601,39 @@ def _run_fitting_job(
             + "\n".join(invalid_value_messages)
             + "\n请清理数据（删除/填补缺失值，或取消选择对应输出物种/输出模式）后再拟合。"
         )
+
+    typical_measured_scale = float(np.nanmedian(np.abs(measured_matrix))) if measured_matrix.size > 0 else 1.0
+    if (not np.isfinite(typical_measured_scale)) or (typical_measured_scale <= 0.0):
+        typical_measured_scale = 1.0
+
+    if (not np.isfinite(max_step_fraction)) or (max_step_fraction < 0.0):
+        max_step_fraction = 0.1
+
+    residual_penalty_value = float(
+        max(
+            DEFAULT_RESIDUAL_PENALTY_MULTIPLIER * typical_measured_scale,
+            DEFAULT_RESIDUAL_PENALTY_MIN_ABS,
+        )
+    )
+    set_metric("typical_measured_scale", typical_measured_scale)
+    set_metric("residual_penalty_value", residual_penalty_value)
+    timeline_add(
+        "ℹ️",
+        f"失败罚项：typical_scale≈{typical_measured_scale:.3e}，penalty={residual_penalty_value:.3e}",
+    )
+    timeline_add("ℹ️", f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）")
+
+    data_rows = list(data_df.itertuples(index=False))
+    species_name_to_index = {name: i for i, name in enumerate(species_names)}
+    try:
+        output_species_indices = [species_name_to_index[name] for name in output_species_list]
+    except Exception:
+        raise ValueError("输出物种不在物种列表中（请检查物种名是否匹配）")
+
+    if reactor_type == "PFR":
+        inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
+    else:
+        inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
 
     # --- Progress tracking based on function evaluations (nfev) ---
     stage_label = "初始化"
@@ -396,8 +676,9 @@ def _run_fitting_job(
             fit_order_rev_flags_matrix,
         )
 
-        all_residuals = []
-        for _, row in data_df.iterrows():
+        residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
+        model_eval_cache: dict = {}
+        for row_index, row in enumerate(data_rows):
             if stop_event.is_set():
                 raise FittingStoppedError("Stopped by user")
 
@@ -421,23 +702,22 @@ def _run_fitting_job(
                 p["k0_rev"],
                 p["ea_rev"],
                 p["order_rev"],
+                max_step_fraction=max_step_fraction,
+                name_to_index=species_name_to_index,
+                output_species_indices=output_species_indices,
+                inlet_column_names=inlet_column_names,
+                model_eval_cache=model_eval_cache,
             )
 
+            base = row_index * n_outputs
             if not ok:
-                all_residuals.extend([1e6] * len(output_species_list))
-                continue
-
-            measured_values = []
-            for column_name in output_column_names:
-                measured_values.append(float(row[column_name]))
-
-            diff = np.asarray(pred, dtype=float) - np.asarray(measured_values, dtype=float)
-            if not bool(np.all(np.isfinite(diff))):
-                all_residuals.extend([1e6] * len(output_species_list))
+                residual_array[base : base + n_outputs] = residual_penalty_value
             else:
-                all_residuals.extend(diff.tolist())
-
-        residual_array = np.asarray(all_residuals, dtype=float)
+                diff = pred - measured_matrix[row_index, :]
+                if not bool(np.all(np.isfinite(diff))):
+                    residual_array[base : base + n_outputs] = residual_penalty_value
+                else:
+                    residual_array[base : base + n_outputs] = diff
         if residual_array.size > 0:
             cost_now = float(0.5 * np.sum(residual_array**2))
             if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
@@ -590,7 +870,9 @@ def _run_fitting_job(
     set_final_summary(
         "目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，r_i=y_i^pred−y_i^meas。\n"
         f"Φ：初始 {initial_cost:.3e} -> 拟合 {final_phi:.3e} (比例 {phi_ratio:.3e}); "
-        f"参数相对变化 {param_relative_change:.3e}"
+        f"参数相对变化 {param_relative_change:.3e}\n"
+        f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"
+        f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
     )
 
     set_status("解包并保存拟合结果...")
@@ -631,6 +913,7 @@ def _run_fitting_job(
         "solver_method": solver_method,
         "rtol": float(rtol),
         "atol": float(atol),
+        "max_step_fraction": float(max_step_fraction),
         "reactor_type": reactor_type,
         "kinetic_model": kinetic_model,
         # Backward compatible keys
@@ -694,9 +977,26 @@ def _build_fit_comparison_long_table(
     atol: float,
     reactor_type: str,
     kinetic_model: str,
+    max_step_fraction: float = 0.1,
 ) -> pd.DataFrame:
     rows = []
-    for row_index, row in data_df.iterrows():
+    row_indices = data_df.index.to_numpy()
+    output_column_names = [_get_measurement_column_name(output_mode, sp) for sp in output_species_list]
+    measured_matrix = np.zeros((len(data_df), len(output_column_names)), dtype=float)
+    for col_index, column_name in enumerate(output_column_names):
+        measured_matrix[:, col_index] = pd.to_numeric(data_df[column_name], errors="coerce").to_numpy(dtype=float)
+
+    species_name_to_index = {name: i for i, name in enumerate(species_names)}
+    output_species_indices = [species_name_to_index[name] for name in output_species_list]
+    if reactor_type == "PFR":
+        inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
+    else:
+        inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
+
+    model_eval_cache: dict = {}
+    data_rows = list(data_df.itertuples(index=False))
+    for row_pos, row in enumerate(data_rows):
+        row_index = row_indices[row_pos]
         pred_vals, ok, message = fitting._predict_outputs_for_row(
             row,
             species_names,
@@ -717,11 +1017,15 @@ def _build_fit_comparison_long_table(
             fitted_params.get("k0_rev", None),
             fitted_params.get("ea_rev", None),
             fitted_params.get("order_rev", None),
+            max_step_fraction=max_step_fraction,
+            name_to_index=species_name_to_index,
+            output_species_indices=output_species_indices,
+            inlet_column_names=inlet_column_names,
+            model_eval_cache=model_eval_cache,
         )
 
         for out_i, species_name in enumerate(output_species_list):
-            column_name = _get_measurement_column_name(output_mode, species_name)
-            measured_value = float(row.get(column_name, np.nan))
+            measured_value = float(measured_matrix[row_pos, out_i])
             predicted_value = float(pred_vals[out_i]) if ok else np.nan
             residual_value = predicted_value - measured_value
             rows.append(
@@ -745,19 +1049,40 @@ def main():
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
     )
 
-    last_uploaded_csv_path = os.path.join(os.path.dirname(__file__), ".last_uploaded.csv")
-    last_uploaded_csv_name_path = os.path.join(
-        os.path.dirname(__file__), ".last_uploaded_name.txt"
-    )
+    # --- 重置为默认：延迟到“下一次 rerun”再清理（避免修改已创建 widget 的 session_state）---
+    if bool(st.session_state.pop("pending_reset_to_default", False)):
+        ok, message = config_manager.clear_auto_saved_config()
+        if not ok:
+            st.warning(message)
+        _clear_config_related_state()
+        st.success("已重置为默认配置。")
+
+    # --- 手动导入配置：延迟到“下一次 rerun”再应用（避免修改已创建 widget 的 session_state）---
+    if "pending_imported_config" in st.session_state:
+        pending_cfg = st.session_state.pop("pending_imported_config")
+        is_valid, error_message = config_manager.validate_config(pending_cfg)
+        if not is_valid:
+            st.error(f"导入配置失败（配置校验未通过）：{error_message}")
+        else:
+            st.session_state["imported_config"] = pending_cfg
+            _apply_imported_config_to_widget_state(pending_cfg)
+            ok, message = config_manager.auto_save_config(pending_cfg)
+            if not ok:
+                st.warning(message)
 
     # --- Auto Load Config ---
     if "config_initialized" not in st.session_state:
         st.session_state["config_initialized"] = True
-        saved_config = config_manager.auto_load_config()
-        if saved_config:
-            is_valid, _ = config_manager.validate_config(saved_config)
+        saved_config, load_message = config_manager.auto_load_config()
+        if saved_config is not None:
+            is_valid, error_message = config_manager.validate_config(saved_config)
             if is_valid:
                 st.session_state["imported_config"] = saved_config
+            else:
+                st.warning(f"自动恢复配置无效，已忽略：{error_message}")
+        else:
+            if str(load_message).startswith("自动加载失败"):
+                st.warning(load_message)
 
     def get_cfg(key, default):
         if "imported_config" in st.session_state:
@@ -796,35 +1121,39 @@ def main():
 
     # --- Restore cached uploaded CSV (persist across browser refresh) ---
     if "uploaded_csv_bytes" not in st.session_state:
-        try:
-            if os.path.exists(last_uploaded_csv_path):
-                st.session_state["uploaded_csv_bytes"] = open(last_uploaded_csv_path, "rb").read()
-        except Exception:
-            pass
+        uploaded_bytes, uploaded_name, message = _load_persisted_upload()
+        if uploaded_bytes is not None:
+            st.session_state["uploaded_csv_bytes"] = uploaded_bytes
+            st.session_state["uploaded_csv_name"] = uploaded_name or ""
+        else:
+            if (message != "未找到已缓存上传文件") and (
+                "upload_restore_warned" not in st.session_state
+            ):
+                st.session_state["upload_restore_warned"] = True
+                st.warning(message)
     if "uploaded_csv_name" not in st.session_state:
-        try:
-            if os.path.exists(last_uploaded_csv_name_path):
-                st.session_state["uploaded_csv_name"] = (
-                    open(last_uploaded_csv_name_path, "r", encoding="utf-8").read().strip()
-                )
-        except Exception:
-            pass
+        st.session_state["uploaded_csv_name"] = ""
 
     if "data_df_cached" not in st.session_state:
         try:
             if "uploaded_csv_bytes" in st.session_state and st.session_state["uploaded_csv_bytes"]:
-                st.session_state["data_df_cached"] = pd.read_csv(
-                    io.BytesIO(st.session_state["uploaded_csv_bytes"])
+                st.session_state["data_df_cached"] = _read_csv_bytes_cached(
+                    st.session_state["uploaded_csv_bytes"]
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            if "data_restore_warned" not in st.session_state:
+                st.session_state["data_restore_warned"] = True
+                st.warning(f"恢复缓存 CSV 失败（请重新上传）：{exc}")
 
     # --- CSS Styles ---
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
-        html, body, [class*="css"] { font-family: 'Outfit', sans-serif; color: #1e293b; font-size: 15px; }
+        html, body, [class*="css"] {
+          font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+          color: #1e293b;
+          font-size: 15px;
+        }
         .block-container { padding-top: 2rem; padding-bottom: 5rem; max-width: 1400px; }
         [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #f1f5f9; }
         h1, h2, h3 { background: linear-gradient(120deg, #0f172a, #334155); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
@@ -863,63 +1192,6 @@ def main():
     def _show_help_dialog() -> None:
         ui_help.render_help_page()
 
-    def _apply_imported_config_to_widget_state(config: dict) -> None:
-        """
-        将导入配置写入 widget 对应的 session_state（用于强制刷新 selectbox 默认值）。
-        """
-        reactor_type_cfg = str(config.get("reactor_type", "")).strip()
-        kinetic_model_cfg = str(config.get("kinetic_model", "")).strip()
-        solver_method_cfg = str(config.get("solver_method", "")).strip()
-
-        if reactor_type_cfg in ["PFR", "Batch"]:
-            st.session_state["cfg_reactor_type"] = reactor_type_cfg
-        if kinetic_model_cfg in ["power_law", "langmuir_hinshelwood", "reversible"]:
-            st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
-        if solver_method_cfg in ["RK45", "BDF", "Radau"]:
-            st.session_state["cfg_solver_method"] = solver_method_cfg
-
-        if "rtol" in config:
-            st.session_state["cfg_rtol"] = float(config.get("rtol", 1e-6))
-        if "atol" in config:
-            st.session_state["cfg_atol"] = float(config.get("atol", 1e-9))
-
-        if "species_text" in config:
-            st.session_state["cfg_species_text"] = str(config.get("species_text", "")).strip()
-        if "n_reactions" in config:
-            st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
-
-        output_mode_cfg = str(config.get("output_mode", "")).strip()
-        if reactor_type_cfg == "Batch":
-            allowed_output_modes = ["Cout (mol/m^3)", "X (conversion)"]
-        else:
-            allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
-        if output_mode_cfg in allowed_output_modes:
-            st.session_state["cfg_output_mode"] = output_mode_cfg
-        elif allowed_output_modes:
-            st.session_state["cfg_output_mode"] = allowed_output_modes[0]
-
-        output_species_list_cfg = config.get("output_species_list", None)
-        if isinstance(output_species_list_cfg, list):
-            st.session_state["cfg_output_species_list"] = [str(x) for x in output_species_list_cfg]
-
-        for key_name in [
-            "k0_min",
-            "k0_max",
-            "ea_min_J_mol",
-            "ea_max_J_mol",
-            "order_min",
-            "order_max",
-            "diff_step_rel",
-            "max_nfev",
-            "use_x_scale_jac",
-            "use_multi_start",
-            "n_starts",
-            "max_nfev_coarse",
-            "random_seed",
-        ]:
-            if key_name in config:
-                st.session_state[f"cfg_{key_name}"] = config[key_name]
-
     # ========== Sidebar ==========
     export_config_placeholder = None
     with st.sidebar:
@@ -931,6 +1203,7 @@ def main():
                 _show_help_dialog()
 
         with st.container(border=True):
+            st.caption("修改任意选项会自动应用（Streamlit 会自动 rerun）。")
             st.markdown("#### 核心模型")
             reactor_type = st.selectbox(
                 "反应器",
@@ -980,23 +1253,28 @@ def main():
             )
             if uploaded_config:
                 try:
-                    cfg = config_manager.import_config_from_json(
-                        uploaded_config.read().decode("utf-8")
-                    )
-                    if config_manager.validate_config(cfg)[0]:
-                        st.session_state["imported_config"] = cfg
-                        _apply_imported_config_to_widget_state(cfg)
-                        st.success("导入成功！")
-                        st.rerun()
-                except:
-                    pass
+                    uploaded_bytes = uploaded_config.getvalue()
+                    file_digest = hashlib.sha256(uploaded_bytes).hexdigest()
+                    if st.session_state.get("imported_config_digest", None) == file_digest:
+                        pass
+                    else:
+                        cfg_text = uploaded_bytes.decode("utf-8")
+                        cfg = config_manager.import_config_from_json(cfg_text)
+                        is_valid, error_message = config_manager.validate_config(cfg)
+                        if not is_valid:
+                            st.error(f"导入配置失败（配置校验未通过）：{error_message}")
+                        else:
+                            st.session_state["imported_config_digest"] = file_digest
+                            st.session_state["pending_imported_config"] = cfg
+                            st.success("导入成功！正在应用配置并刷新页面...")
+                            st.rerun()
+                except Exception as exc:
+                    st.error(f"导入配置失败（JSON/编码错误）：{exc}")
 
             export_config_placeholder = st.empty()
 
             if st.button("重置为默认", disabled=global_disabled):
-                config_manager.clear_auto_saved_config()
-                if "imported_config" in st.session_state:
-                    del st.session_state["imported_config"]
+                st.session_state["pending_reset_to_default"] = True
                 st.rerun()
 
     # ========== Main Content ==========
@@ -1009,6 +1287,7 @@ def main():
     tab_model, tab_data, tab_fit = st.tabs(
         ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
     )
+    tab_fit_results_container = tab_fit.container()
 
     # ---------------- TAB 1: MODEL ----------------
     with tab_model:
@@ -1045,8 +1324,16 @@ def main():
                     nu_default = pd.DataFrame(
                         arr, index=nu_default.index, columns=nu_default.columns
                     )
-            except:
-                pass
+                else:
+                    _warn_once(
+                        f"warn_stoich_shape_{len(species_names)}_{n_reactions}",
+                        f"导入配置中的化学计量数矩阵尺寸不匹配，已忽略：期望 {nu_default.shape}，实际 {arr.shape}",
+                    )
+            except Exception as exc:
+                _warn_once(
+                    f"warn_stoich_parse_{len(species_names)}_{n_reactions}",
+                    f"导入配置中的化学计量数矩阵无法解析，已忽略：{exc}",
+                )
 
         nu_table = st.data_editor(
             nu_default,
@@ -1356,13 +1643,9 @@ def main():
                             del st.session_state[k]
                     if "data_df_cached" in st.session_state:
                         del st.session_state["data_df_cached"]
-                    try:
-                        if os.path.exists(last_uploaded_csv_path):
-                            os.remove(last_uploaded_csv_path)
-                        if os.path.exists(last_uploaded_csv_name_path):
-                            os.remove(last_uploaded_csv_name_path)
-                    except Exception:
-                        pass
+                    ok, message = _delete_persisted_upload()
+                    if not ok:
+                        st.warning(message)
                     if "uploaded_csv" in st.session_state:
                         del st.session_state["uploaded_csv"]
                     st.rerun()
@@ -1414,24 +1697,22 @@ def main():
         if uploaded_file:
             try:
                 uploaded_bytes = uploaded_file.getvalue()
+                uploaded_name = str(getattr(uploaded_file, "name", "")).strip()
                 st.session_state["uploaded_csv_bytes"] = uploaded_bytes
-                st.session_state["uploaded_csv_name"] = str(getattr(uploaded_file, "name", "")).strip()
-                try:
-                    open(last_uploaded_csv_path, "wb").write(uploaded_bytes)
-                    open(last_uploaded_csv_name_path, "w", encoding="utf-8").write(
-                        st.session_state.get("uploaded_csv_name", "")
-                    )
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                st.session_state["uploaded_csv_name"] = uploaded_name
+                ok, message = _save_persisted_upload(uploaded_bytes, uploaded_name)
+                if not ok:
+                    st.warning(message)
+            except Exception as exc:
+                st.error(f"读取上传文件失败: {exc}")
 
         if uploaded_file or ("uploaded_csv_bytes" in st.session_state and st.session_state["uploaded_csv_bytes"]):
             try:
                 if uploaded_file:
-                    data_df = pd.read_csv(uploaded_file)
+                    csv_bytes = uploaded_file.getvalue()
                 else:
-                    data_df = pd.read_csv(io.BytesIO(st.session_state["uploaded_csv_bytes"]))
+                    csv_bytes = st.session_state["uploaded_csv_bytes"]
+                data_df = _read_csv_bytes_cached(csv_bytes)
                 st.session_state["data_df_cached"] = data_df
                 st.markdown("#### 数据预览")
                 st.dataframe(data_df.head(50), use_container_width=True, height=200)
@@ -1455,6 +1736,7 @@ def main():
         export_n_starts = int(get_cfg("n_starts", 10))
         export_max_nfev_coarse = int(get_cfg("max_nfev_coarse", 300))
         export_random_seed = int(get_cfg("random_seed", 42))
+        export_max_step_fraction = float(get_cfg("max_step_fraction", 0.1))
 
         export_cfg = config_manager.collect_config(
             reactor_type=reactor_type,
@@ -1462,6 +1744,7 @@ def main():
             solver_method=solver_method,
             rtol=float(rtol),
             atol=float(atol),
+            max_step_fraction=export_max_step_fraction,
             species_text=str(species_text),
             n_reactions=int(n_reactions),
             stoich_matrix=np.asarray(stoich_matrix, dtype=float),
@@ -1513,7 +1796,9 @@ def main():
         )
         is_valid_cfg, _ = config_manager.validate_config(export_cfg)
         if is_valid_cfg:
-            config_manager.auto_save_config(export_cfg)
+            ok, message = config_manager.auto_save_config(export_cfg)
+            if not ok:
+                st.warning(message)
         export_config_bytes = config_manager.export_config_to_json(export_cfg).encode("utf-8")
         export_config_placeholder.download_button(
             "📥 导出当前配置 (JSON)",
@@ -1537,6 +1822,8 @@ def main():
 
         # --- Advanced Settings (Expanded) ---
         with st.expander("高级设置与边界 (点击展开)", expanded=False):
+            st.caption("修改任意参数会自动应用（Streamlit 会自动 rerun）。")
+
             st.markdown("**1. 基础边界设置**")
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
@@ -1596,6 +1883,15 @@ def main():
                     format="%.1e",
                     key="cfg_diff_step_rel",
                 )
+                max_step_fraction = st.number_input(
+                    "max_step_fraction (ODE)",
+                    value=float(get_cfg("max_step_fraction", 0.1)),
+                    min_value=0.0,
+                    max_value=10.0,
+                    step=0.05,
+                    key="cfg_max_step_fraction",
+                    help="用于 solve_ivp 的 max_step：max_step = fraction × 总时间/总体积；0 表示不限制。",
+                )
             with col_adv2:
                 use_ms = st.checkbox(
                     "Multi-start (多起点)",
@@ -1608,8 +1904,8 @@ def main():
                         value=get_cfg("n_starts", 10),
                         min_value=1,
                         step=1,
-                        disabled=not use_ms,
                         key="cfg_n_starts",
+                        help="仅当 Multi-start 勾选且 Start Points>1 时才生效。",
                     )
                 )
             with col_adv3:
@@ -1631,10 +1927,15 @@ def main():
                         "Coarse check iters",
                         value=get_cfg("max_nfev_coarse", 300),
                         step=50,
-                        disabled=not use_ms,
                         key="cfg_max_nfev_coarse",
+                        help="仅当 Multi-start 生效时用于粗拟合阶段。",
                     )
                 )
+
+            st.divider()
+            st.caption(
+                "说明：当模型计算失败（如 solve_ivp 失败）时，残差会使用系统默认罚项（不在 UI 中提供调节）。"
+            )
 
         # Update export config with advanced settings (when tab_fit is active and widgets are available)
         if export_config_placeholder is not None:
@@ -1645,6 +1946,7 @@ def main():
                 solver_method=solver_method,
                 rtol=float(rtol),
                 atol=float(atol),
+                max_step_fraction=float(max_step_fraction),
                 species_text=str(species_text),
                 n_reactions=int(n_reactions),
                 stoich_matrix=np.asarray(stoich_matrix, dtype=float),
@@ -1704,7 +2006,9 @@ def main():
             )
             is_valid_cfg, _ = config_manager.validate_config(export_cfg)
             if is_valid_cfg:
-                config_manager.auto_save_config(export_cfg)
+                ok, message = config_manager.auto_save_config(export_cfg)
+                if not ok:
+                    st.warning(message)
             export_config_bytes = config_manager.export_config_to_json(export_cfg).encode("utf-8")
             export_config_placeholder.download_button(
                 "📥 导出当前配置 (JSON)",
@@ -1720,7 +2024,10 @@ def main():
 
         fitting_future = st.session_state.get("fitting_future", None)
         fitting_running = bool(st.session_state.get("fitting_running", False))
-        fitting_stop_event = st.session_state.get("fitting_stop_event", threading.Event())
+        fitting_stop_event = st.session_state.get("fitting_stop_event", None)
+        if fitting_stop_event is None:
+            fitting_stop_event = threading.Event()
+            st.session_state["fitting_stop_event"] = fitting_stop_event
 
         # Self-heal: if session refreshed and Future object is lost, stop showing "running".
         if fitting_running and (fitting_future is None):
@@ -1820,8 +2127,8 @@ def main():
             if old_executor is not None:
                 try:
                     old_executor.shutdown(wait=False, cancel_futures=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _warn_once("warn_executor_shutdown", f"关闭旧的拟合线程池失败（可忽略）：{exc}")
                 st.session_state["fitting_executor"] = None
 
             st.session_state.fitting_stopped = False
@@ -1905,6 +2212,7 @@ def main():
                 "ea_max": ea_max,
                 "ord_min": ord_min,
                 "ord_max": ord_max,
+                "max_step_fraction": float(max_step_fraction),
             }
 
             st.session_state["fitting_running"] = True
@@ -1926,12 +2234,11 @@ def main():
 
     # --- Results Display (Optimized) ---
     if "fit_results" in st.session_state:
-        tab_fit.__enter__()
         res = st.session_state["fit_results"]
-        st.divider()
+        tab_fit_results_container.divider()
         phi_value = float(res.get("phi_final", res.get("cost", 0.0)))
-        st.markdown(f"### 拟合结果 (目标函数 Φ: {phi_value:.4e})")
-        st.latex(
+        tab_fit_results_container.markdown(f"### 拟合结果 (目标函数 Φ: {phi_value:.4e})")
+        tab_fit_results_container.latex(
             r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
         )
 
@@ -1942,6 +2249,7 @@ def main():
         solver_method_fit = res.get("solver_method", solver_method)
         rtol_fit = float(res.get("rtol", rtol))
         atol_fit = float(res.get("atol", atol))
+        max_step_fraction_fit = float(res.get("max_step_fraction", get_cfg("max_step_fraction", 0.1)))
         reactor_type_fit = res.get("reactor_type", reactor_type)
         kinetic_model_fit = res.get("kinetic_model", kinetic_model)
         output_mode_fit = res.get("output_mode", output_mode)
@@ -1961,7 +2269,7 @@ def main():
             else:
                 parity_species_unavailable.append(f"{sp_name}（列 {meas_col} 全为 NaN/非数字）")
 
-        tab_param, tab_parity, tab_profile, tab_export = st.tabs(
+        tab_param, tab_parity, tab_profile, tab_export = tab_fit_results_container.tabs(
             ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"]
         )
 
@@ -2045,25 +2353,31 @@ def main():
                 str(solver_method_fit),
                 str(reactor_type_fit),
                 str(kinetic_model_fit),
+                float(max_step_fraction_fit),
             )
             if (
                 st.session_state.get("fit_compare_cache_key", None) != cache_key
                 or "fit_compare_long_df" not in st.session_state
             ):
-                st.session_state["fit_compare_cache_key"] = cache_key
-                st.session_state["fit_compare_long_df"] = _build_fit_comparison_long_table(
-                    df_fit,
-                    species_names_fit,
-                    output_mode_fit,
-                    parity_species_candidates,
-                    stoich_matrix_fit,
-                    fitted_params,
-                    solver_method_fit,
-                    rtol_fit,
-                    atol_fit,
-                    reactor_type_fit,
-                    kinetic_model_fit,
-                )
+                try:
+                    st.session_state["fit_compare_cache_key"] = cache_key
+                    st.session_state["fit_compare_long_df"] = _build_fit_comparison_long_table(
+                        data_df=df_fit,
+                        species_names=species_names_fit,
+                        output_mode=output_mode_fit,
+                        output_species_list=parity_species_candidates,
+                        stoich_matrix=stoich_matrix_fit,
+                        fitted_params=fitted_params,
+                        solver_method=solver_method_fit,
+                        rtol=float(rtol_fit),
+                        atol=float(atol_fit),
+                        reactor_type=reactor_type_fit,
+                        kinetic_model=kinetic_model_fit,
+                        max_step_fraction=float(max_step_fraction_fit),
+                    )
+                except Exception as exc:
+                    st.error(f"生成对比数据失败: {exc}")
+                    st.session_state["fit_compare_long_df"] = pd.DataFrame()
 
             df_long = st.session_state["fit_compare_long_df"]
             if df_long.empty:
@@ -2251,6 +2565,7 @@ def main():
                         atol=atol_fit,
                         n_points=profile_points,
                         kinetic_model=kinetic_model_fit,
+                        max_step_fraction=max_step_fraction_fit,
                         K0_ads=fitted_params.get("K0_ads", None),
                         Ea_K_J_mol=fitted_params.get("Ea_K", None),
                         m_inhibition=fitted_params.get("m_inhibition", None),
@@ -2331,6 +2646,7 @@ def main():
                         atol=atol_fit,
                         n_points=profile_points,
                         kinetic_model=kinetic_model_fit,
+                        max_step_fraction=max_step_fraction_fit,
                         K0_ads=fitted_params.get("K0_ads", None),
                         Ea_K_J_mol=fitted_params.get("Ea_K", None),
                         m_inhibition=fitted_params.get("m_inhibition", None),
@@ -2429,9 +2745,6 @@ def main():
                 )
             else:
                 st.info("先在「奇偶校验图」页生成对比数据后，再导出对比表。")
-
-        tab_fit.__exit__(None, None, None)
-
 
 if __name__ == "__main__":
     main()
