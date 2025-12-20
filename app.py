@@ -1926,18 +1926,35 @@ def main():
             )
 
         with col_mz2:
+            # 读取配置中保存的物种列表，并清理无效物种
+            saved_species_list = get_cfg("output_species_list", None)
+            if saved_species_list is not None and isinstance(saved_species_list, list):
+                # 从配置中读取，过滤掉不在当前物种列表中的物种
+                valid_species = [
+                    str(x) for x in saved_species_list if str(x) in species_names
+                ]
+                if valid_species:
+                    default_species = valid_species
+                else:
+                    default_species = list(species_names)
+            else:
+                default_species = list(species_names)
+
+            # 如果 session_state 中已有值且有效，则清理后保留；否则使用配置中的默认值
             if "cfg_output_species_list" in st.session_state:
                 current_list = st.session_state.get("cfg_output_species_list", [])
                 if not isinstance(current_list, list):
                     current_list = []
                 cleaned_list = [str(x) for x in current_list if str(x) in species_names]
                 if not cleaned_list:
-                    cleaned_list = list(species_names)
-                st.session_state["cfg_output_species_list"] = cleaned_list
+                    st.session_state["cfg_output_species_list"] = default_species
+                else:
+                    st.session_state["cfg_output_species_list"] = cleaned_list
+
             fit_mask = st.multiselect(
                 "选择进入目标函数的物种",
                 species_names,
-                default=list(species_names),
+                default=default_species,
                 key="cfg_output_species_list",
             )
             output_species_list = fit_mask
