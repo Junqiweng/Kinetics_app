@@ -183,6 +183,8 @@ def main():
         if not ok:
             st.warning(message)
         _clear_config_related_state()
+        # 标记已重置，阻止本次 rerun 时从浏览器加载旧配置
+        st.session_state["_reset_just_happened"] = True
         st.success("已重置为默认配置。")
 
     # --- 手动导入配置：延迟到“下一次 rerun”再应用（避免修改已创建 widget 的 session_state）---
@@ -202,31 +204,39 @@ def main():
             browser_storage.save_config_to_browser(pending_cfg)
 
     # --- Auto Load Config ---
+    # 如果刚刚执行了重置，则跳过配置加载（避免重新加载浏览器中的旧配置）
+    just_reset = bool(st.session_state.pop("_reset_just_happened", False))
+
     if "config_initialized" not in st.session_state:
         st.session_state["config_initialized"] = True
 
-        # 方案1：尝试从本地文件系统加载（用于本地运行）
-        saved_config, load_message = config_manager.auto_load_config()
-        if saved_config is not None:
-            is_valid, error_message = config_manager.validate_config(saved_config)
-            if is_valid:
-                st.session_state["imported_config"] = saved_config
-            else:
-                st.warning(f"自动恢复配置无效，已忽略：{error_message}")
-        else:
-            # 方案2：尝试从浏览器 LocalStorage 加载（用于 Streamlit Cloud）
-            browser_config = browser_storage.get_browser_loaded_config()
-            if browser_config is not None:
-                is_valid, error_message = config_manager.validate_config(browser_config)
+        if not just_reset:
+            # 方案1：尝试从本地文件系统加载（用于本地运行）
+            saved_config, load_message = config_manager.auto_load_config()
+            if saved_config is not None:
+                is_valid, error_message = config_manager.validate_config(saved_config)
                 if is_valid:
-                    st.session_state["imported_config"] = browser_config
+                    st.session_state["imported_config"] = saved_config
                 else:
-                    pass  # 静默忽略无效的浏览器缓存
-            elif str(load_message).startswith("自动加载失败"):
-                st.warning(load_message)
+                    st.warning(f"自动恢复配置无效，已忽略：{error_message}")
+            else:
+                # 方案2：尝试从浏览器 LocalStorage 加载（用于 Streamlit Cloud）
+                browser_config = browser_storage.get_browser_loaded_config()
+                if browser_config is not None:
+                    is_valid, error_message = config_manager.validate_config(
+                        browser_config
+                    )
+                    if is_valid:
+                        st.session_state["imported_config"] = browser_config
+                    else:
+                        pass  # 静默忽略无效的浏览器缓存
+                elif str(load_message).startswith("自动加载失败"):
+                    st.warning(load_message)
 
     # 注入浏览器配置加载脚本（用于 Streamlit Cloud）
-    browser_storage.inject_config_loader_script()
+    # 如果刚刚重置，则不注入脚本，避免加载旧配置
+    if not just_reset:
+        browser_storage.inject_config_loader_script()
 
     def get_cfg(key, default):
         if "imported_config" in st.session_state:
