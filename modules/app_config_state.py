@@ -85,6 +85,13 @@ def _clear_config_related_state() -> None:
     说明：必须在 widgets 创建之前调用，否则会触发 Streamlit 的
     “cannot be modified after the widget ... is instantiated” 报错。
     """
+    # 先“切换”上传控件的 key：Streamlit 的 file_uploader 在某些情况下即使删掉 session_state，
+    # 前端仍可能显示旧文件；通过更换 key 强制创建一个全新的 uploader，从而清空显示。
+    st.session_state["uploader_ver_config_json"] = (
+        int(st.session_state.get("uploader_ver_config_json", 0)) + 1
+    )
+    st.session_state["uploader_ver_csv"] = int(st.session_state.get("uploader_ver_csv", 0)) + 1
+
     keys_to_delete: list[str] = []
 
     # 1) 所有 cfg_* 控件值（全局设置 + 高级设置）
@@ -105,10 +112,15 @@ def _clear_config_related_state() -> None:
             "imported_config_digest",
             "pending_imported_config",
             "config_initialized",
-            # 清空 file_uploader 状态，避免“重置后又自动把同一个 JSON 重新导入”
-            "uploaded_config_json",
         ]
     )
+
+    # 3.1) 上传控件 / 上传缓存（配置 JSON + 实验数据 CSV）
+    for key in list(st.session_state.keys()):
+        key_str = str(key)
+        if key_str.startswith("uploaded_config_json_") or key_str.startswith("uploaded_csv_"):
+            keys_to_delete.append(key_str)
+    keys_to_delete.extend(["data_df_cached"])
 
     # 4) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
     keys_to_delete.extend(
@@ -128,4 +140,3 @@ def _clear_config_related_state() -> None:
     for key in sorted(set(keys_to_delete)):
         if key in st.session_state:
             del st.session_state[key]
-

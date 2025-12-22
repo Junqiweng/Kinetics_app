@@ -163,8 +163,9 @@ def _render_fitting_live_progress() -> None:
     fitting_future = st.session_state.get("fitting_future", None)
     fitting_running = bool(st.session_state.get("fitting_running", False))
 
-    if fitting_running and (fitting_future is not None) and fitting_future.done():
-        st.rerun(scope="app")
+    # 不在此处触发 rerun，完全依赖 run_every 的自动刷新
+    # 拟合完成时，会在下一个刷新周期被主应用流程检测并处理（app.py 第 115-145 行）
+    # 最多有 refresh_interval_s（默认2秒）的延迟，这是可以接受的
 
     if not fitting_running:
         return
@@ -573,6 +574,76 @@ def _run_fitting_job(
     initial_cost = float(0.5 * np.sum(initial_residuals**2))
     set_metric("initial_cost", initial_cost)
     timeline_add("✅", f"初始目标函数值 Φ: {initial_cost:.4e}")
+
+    n_fit_params_total = int(np.asarray(param_vector).size)
+    if (n_data_rows <= 0) or (n_outputs <= 0) or (n_fit_params_total <= 0):
+        if n_data_rows <= 0:
+            skip_reason = "未执行拟合：当前数据表没有任何数据行（N=0），已按初值计算。"
+        elif n_outputs <= 0:
+            skip_reason = (
+                "未执行拟合：未选择任何输出变量（N_outputs=0），已按初值计算。"
+            )
+        else:
+            skip_reason = (
+                "未执行拟合：未勾选任何待拟合参数（n_fit_params=0），已按初值计算。"
+            )
+
+        set_metric("final_phi", float(initial_cost))
+        timeline_add("ℹ️", skip_reason)
+        set_status("跳过拟合（直接使用初值计算）。")
+        set_progress(1.0)
+        set_final_summary(
+            "目标函数：Φ(θ)=1/2·∑ r_i(θ)^2。\n"
+            f"本次未执行 least_squares，直接使用初值；Φ={initial_cost:.3e}\n"
+            f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"
+            f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
+        )
+
+        fitted_params = fitting._unpack_parameters(
+            param_vector,
+            k0_guess,
+            ea_guess_J_mol,
+            order_guess,
+            fit_k0_flags,
+            fit_ea_flags,
+            fit_order_flags_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            fit_K0_ads_flags,
+            fit_Ea_K_flags,
+            fit_m_flags,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev,
+            fit_k0_rev_flags,
+            fit_ea_rev_flags,
+            fit_order_rev_flags_matrix,
+        )
+
+        return {
+            "params": fitted_params,
+            "data": data_df,
+            "species_names": species_names,
+            "output_mode": output_mode,
+            "output_species": output_species_list,
+            "stoich_matrix": stoich_matrix,
+            "solver_method": solver_method,
+            "rtol": float(rtol),
+            "atol": float(atol),
+            "max_step_fraction": float(max_step_fraction),
+            "reactor_type": reactor_type,
+            "kinetic_model": kinetic_model,
+            # Backward compatible keys
+            "initial_cost": float(initial_cost),
+            "cost": float(initial_cost),
+            # Preferred objective naming
+            "phi_initial": float(initial_cost),
+            "phi_final": float(initial_cost),
+            "residual_type": str(residual_type),
+            "fit_skipped": True,
+            "fit_skipped_reason": str(skip_reason),
+        }
 
     set_status("开始 least_squares 拟合...")
     set_progress(0.05)

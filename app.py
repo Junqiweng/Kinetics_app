@@ -48,11 +48,128 @@ from modules.upload_persistence import (
     _save_persisted_upload,
 )
 
+
 # ========== Main App ==========
 def main():
     st.set_page_config(
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
     )
+
+    def _request_start_fitting() -> None:
+        """
+        Start 按钮回调：先锁定全局设置（sidebar），再在本次 rerun 中启动后台任务。
+
+        说明：回调会在脚本执行前触发，因此可以避免“点开始拟合后需要额外 st.rerun 导致跳 Tab”的问题。
+        """
+        data_df_cached = st.session_state.get("data_df_cached", None)
+        output_species_list_cached = st.session_state.get("cfg_output_species_list", [])
+
+        if data_df_cached is None:
+            st.session_state["fit_notice"] = {
+                "kind": "error",
+                "text": "当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。",
+            }
+            return
+
+        if not output_species_list_cached:
+            st.session_state["fit_notice"] = {
+                "kind": "error",
+                "text": "请选择至少一个目标物种。",
+            }
+            return
+
+        if bool(st.session_state.get("fitting_running", False)):
+            return
+
+        st.session_state["start_fit_requested"] = True
+        st.session_state["fitting_running"] = True
+        st.session_state["fitting_stopped"] = False
+
+    def _request_stop_fitting() -> None:
+        """
+        Stop 按钮回调：请求后台停止（不额外触发 st.rerun，避免跳 Tab）。
+        """
+        if not bool(st.session_state.get("fitting_running", False)):
+            return
+        st.session_state["stop_fit_requested"] = True
+        stop_event = st.session_state.get("fitting_stop_event", None)
+        if stop_event is not None:
+            try:
+                stop_event.set()
+            except Exception:
+                pass
+
+    # --- 在渲染 sidebar 之前处理“后台拟合完成/异常/丢失”等状态，确保全局设置能及时解锁 ---
+    _drain_fitting_progress_queue()
+    fitting_future = st.session_state.get("fitting_future", None)
+    fitting_running = bool(st.session_state.get("fitting_running", False))
+
+    # --- 优先处理停止请求，以便在本次 rerun 中立即生效 ---
+    if bool(st.session_state.pop("stop_fit_requested", False)) and fitting_running:
+        st.session_state["fitting_stopped"] = True
+        st.session_state["fitting_status"] = "已发送终止请求，等待后台停止..."
+
+        fitting_stop_event = st.session_state.get("fitting_stop_event", None)
+        try:
+            if fitting_stop_event:
+                fitting_stop_event.set()
+        except Exception:
+            pass
+        st.session_state["fitting_timeline"].append(("⏹️", "用户请求终止拟合..."))
+
+        # 等待一小会儿，让后台任务有机会退出
+        # 这样下面的 fitting_future.done() 就能立即检测到，无需第二次 rerun
+        import time
+
+        for _ in range(10):  # 最多等待 0.5 秒
+            if fitting_future and fitting_future.done():
+                break
+            time.sleep(0.05)
+
+    # 检查后台任务是否丢失（但排除“刚刚请求启动”的情况）
+    start_fit_requested = bool(st.session_state.get("start_fit_requested", False))
+    if fitting_running and (fitting_future is None) and (not start_fit_requested):
+        st.session_state["fitting_running"] = False
+        st.session_state["fitting_status"] = (
+            "后台任务已丢失（可能是页面刷新导致）。请重新开始拟合。"
+        )
+        fitting_running = False
+
+    if fitting_future is not None and fitting_future.done():
+        st.session_state["fitting_running"] = False
+        st.session_state["fitting_future"] = None
+
+        try:
+            fit_results = fitting_future.result()
+            _drain_fitting_progress_queue()
+            st.session_state["fit_results"] = fit_results
+            st.session_state["fitting_status"] = "拟合完成。"
+            phi_value = float(
+                fit_results.get("phi_final", fit_results.get("cost", 0.0))
+            )
+            st.session_state["fitting_timeline"].append(
+                ("✅", f"拟合完成，最终 Φ: {phi_value:.4e}")
+            )
+            st.session_state["fit_notice"] = {
+                "kind": "success",
+                "text": "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
+                f" 目标函数 Φ: {phi_value:.4e}",
+            }
+        except FittingStoppedError:
+            st.session_state["fitting_status"] = "用户终止。"
+            st.session_state["fitting_timeline"].append(("⚠️", "拟合已终止。"))
+            st.session_state["fit_notice"] = {"kind": "warning", "text": "拟合已终止。"}
+        except Exception as exc:
+            st.session_state["fitting_status"] = "拟合失败。"
+            st.session_state["fitting_timeline"].append(("❌", f"拟合失败: {exc}"))
+            st.session_state["fit_notice"] = {
+                "kind": "error",
+                "text": f"Fitting Error: {exc}",
+            }
+
+    # --- 一次性提示（用于"拟合完成/失败/终止"/按钮回调报错等消息）---
+    # 注意：fit_notice 会在 tab_fit 内部显示，而不是在这里
+    # 这是为了避免在 tabs 之前动态添加元素导致 tabs 状态重置
 
     # --- 重置为默认：延迟到“下一次 rerun”再清理（避免修改已创建 widget 的 session_state）---
     if bool(st.session_state.pop("pending_reset_to_default", False)):
@@ -61,6 +178,10 @@ def main():
             st.warning(message)
         # 同时清除浏览器 LocalStorage 中的配置
         browser_storage.clear_browser_config()
+        # 同时删除“实验数据”中已缓存的上传文件（否则下次启动会被自动恢复）
+        ok, message = _delete_persisted_upload()
+        if not ok:
+            st.warning(message)
         _clear_config_related_state()
         st.success("已重置为默认配置。")
 
@@ -190,7 +311,6 @@ def main():
                 _show_help_dialog()
 
         with st.container(border=True):
-            st.caption("修改任意选项会自动应用（Streamlit 会自动 rerun）。")
             st.markdown("#### 核心模型")
             reactor_type = st.selectbox(
                 "反应器",
@@ -235,10 +355,11 @@ def main():
 
         # Config Managment
         with st.expander("⚙️ 配置管理 (导入/导出/重置)"):
+            config_uploader_key = f"uploaded_config_json_{int(st.session_state.get('uploader_ver_config_json', 0))}"
             uploaded_config = st.file_uploader(
                 "导入配置",
                 type=["json"],
-                key="uploaded_config_json",
+                key=config_uploader_key,
                 disabled=global_disabled,
             )
             if uploaded_config:
@@ -624,6 +745,9 @@ def main():
 
         with col_d2:
             st.markdown("#### 2. 上传数据")
+            csv_uploader_key = (
+                f"uploaded_csv_{int(st.session_state.get('uploader_ver_csv', 0))}"
+            )
             if (
                 "uploaded_csv_bytes" in st.session_state
                 and st.session_state["uploaded_csv_bytes"]
@@ -642,15 +766,18 @@ def main():
                     ok, message = _delete_persisted_upload()
                     if not ok:
                         st.warning(message)
-                    if "uploaded_csv" in st.session_state:
-                        del st.session_state["uploaded_csv"]
+                    if csv_uploader_key in st.session_state:
+                        del st.session_state[csv_uploader_key]
+                    st.session_state["uploader_ver_csv"] = (
+                        int(st.session_state.get("uploader_ver_csv", 0)) + 1
+                    )
                     st.rerun()
 
             uploaded_file = st.file_uploader(
                 "上传 CSV",
                 type=["csv"],
                 label_visibility="collapsed",
-                key="uploaded_csv",
+                key=csv_uploader_key,
             )
 
         st.divider()
@@ -1175,48 +1302,10 @@ def main():
 
         _drain_fitting_progress_queue()
 
-        fitting_future = st.session_state.get("fitting_future", None)
-        fitting_running = bool(st.session_state.get("fitting_running", False))
         fitting_stop_event = st.session_state.get("fitting_stop_event", None)
         if fitting_stop_event is None:
             fitting_stop_event = threading.Event()
             st.session_state["fitting_stop_event"] = fitting_stop_event
-
-        # Self-heal: if session refreshed and Future object is lost, stop showing "running".
-        if fitting_running and (fitting_future is None):
-            st.session_state["fitting_running"] = False
-            st.session_state["fitting_status"] = (
-                "后台任务已丢失（可能是页面刷新导致）。请重新开始拟合。"
-            )
-            fitting_running = False
-
-        if fitting_future is not None and fitting_future.done():
-            st.session_state["fitting_running"] = False
-            st.session_state["fitting_future"] = None
-
-            try:
-                fit_results = fitting_future.result()
-                _drain_fitting_progress_queue()
-                st.session_state["fit_results"] = fit_results
-                st.session_state["fitting_status"] = "拟合完成。"
-                phi_value = float(
-                    fit_results.get("phi_final", fit_results.get("cost", 0.0))
-                )
-                st.session_state["fitting_timeline"].append(
-                    ("✅", f"拟合完成，最终 Φ: {phi_value:.4e}")
-                )
-                st.success(
-                    "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
-                    f" 目标函数 Φ: {phi_value:.4e}"
-                )
-            except FittingStoppedError:
-                st.session_state["fitting_status"] = "用户终止。"
-                st.session_state["fitting_timeline"].append(("⚠️", "拟合已终止。"))
-                st.warning("拟合已终止。")
-            except Exception as exc:
-                st.session_state["fitting_status"] = "拟合失败。"
-                st.session_state["fitting_timeline"].append(("❌", f"拟合失败: {exc}"))
-                st.error(f"Fitting Error: {exc}")
 
         fitting_future = st.session_state.get("fitting_future", None)
         fitting_running = bool(st.session_state.get("fitting_running", False))
@@ -1227,12 +1316,14 @@ def main():
             type="primary",
             disabled=fitting_running,
             use_container_width=True,
+            on_click=_request_start_fitting,
         )
         stop_btn = col_act2.button(
             "⏹️ 终止",
             type="secondary",
             disabled=not fitting_running,
             use_container_width=True,
+            on_click=_request_stop_fitting,
         )
         auto_refresh = col_act3.checkbox(
             "自动刷新",
@@ -1260,6 +1351,19 @@ def main():
         st.session_state["fitting_auto_refresh"] = bool(auto_refresh)
         st.session_state["fitting_refresh_interval_s"] = float(refresh_interval_s)
 
+        # --- 显示拟合相关的通知（在 tab 内部显示，避免 tabs 状态重置）---
+        fit_notice = st.session_state.pop("fit_notice", None)
+        if isinstance(fit_notice, dict):
+            notice_kind = str(fit_notice.get("kind", "")).strip().lower()
+            notice_text = str(fit_notice.get("text", "")).strip()
+            if notice_text:
+                if notice_kind == "success":
+                    st.success(notice_text)
+                elif notice_kind == "warning":
+                    st.warning(notice_text)
+                elif notice_kind == "error":
+                    st.error(notice_text)
+
         if clear_btn and (not fitting_running):
             for key in [
                 "fit_results",
@@ -1275,128 +1379,129 @@ def main():
                     del st.session_state[key]
             st.rerun()
 
-        if stop_btn and fitting_running:
-            st.session_state.fitting_stopped = True
-            st.session_state["fitting_status"] = "已发送终止请求，等待后台停止..."
-            fitting_stop_event.set()
-            st.session_state["fitting_timeline"].append(("⏹️", "用户请求终止拟合..."))
-            st.rerun()
-
-        if start_btn and (not fitting_running):
+        # --- Handle start request (from callback) ---
+        if bool(st.session_state.pop("start_fit_requested", False)) and (
+            not fitting_future
+        ):
             if data_df is None:
-                st.error(
-                    "当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。"
+                st.session_state["fitting_running"] = False
+                st.session_state["fit_notice"] = {
+                    "kind": "error",
+                    "text": "当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。",
+                }
+            elif not output_species_list:
+                st.session_state["fitting_running"] = False
+                st.session_state["fit_notice"] = {
+                    "kind": "error",
+                    "text": "请选择至少一个目标物种。",
+                }
+            else:
+                # Ensure a fresh executor for each fitting run (avoid queued/stuck tasks from prior sessions).
+                old_executor = st.session_state.get("fitting_executor", None)
+                if old_executor is not None:
+                    try:
+                        old_executor.shutdown(wait=False, cancel_futures=True)
+                    except Exception as exc:
+                        _warn_once(
+                            "warn_executor_shutdown",
+                            f"关闭旧的拟合线程池失败（可忽略）：{exc}",
+                        )
+                    st.session_state["fitting_executor"] = None
+
+                st.session_state["fitting_stopped"] = False
+                st.session_state["fitting_progress"] = 0.0
+                st.session_state["fitting_status"] = "准备启动..."
+
+                stop_event = threading.Event()
+                st.session_state["fitting_stop_event"] = stop_event
+
+                progress_queue = queue.Queue()
+                st.session_state["fitting_progress_queue"] = progress_queue
+
+                _reset_fitting_progress_ui_state()
+                n_fit_params = _count_fitted_parameters(
+                    fit_k0_flags,
+                    fit_ea_flags,
+                    fit_order_flags_matrix,
+                    fit_K0_ads_flags,
+                    fit_Ea_K_flags,
+                    fit_m_flags,
+                    fit_k0_rev_flags,
+                    fit_ea_rev_flags,
+                    fit_order_rev_flags_matrix,
                 )
-                st.stop()
+                st.session_state["fitting_job_summary"] = {
+                    "title": "📊 拟合任务概览",
+                    "lines": [
+                        f"数据点数量: {int(len(data_df))} 行",
+                        f"待拟合参数: {int(n_fit_params)} 个",
+                        f"反应器类型: {reactor_type}",
+                        f"动力学模型: {kinetic_model}",
+                        f"残差类型: {residual_type}",
+                        "优化算法: Trust Region Reflective (trf)",
+                        f"最大函数评估次数: {int(max_nfev)}",
+                        (
+                            f"多起点拟合: {int(n_starts)} 个起点"
+                            if (use_ms and int(n_starts) > 1)
+                            else "多起点拟合: 关闭"
+                        ),
+                    ],
+                }
 
-            # Ensure a fresh executor for each fitting run (avoid queued/stuck tasks from prior sessions).
-            old_executor = st.session_state.get("fitting_executor", None)
-            if old_executor is not None:
-                try:
-                    old_executor.shutdown(wait=False, cancel_futures=True)
-                except Exception as exc:
-                    _warn_once(
-                        "warn_executor_shutdown",
-                        f"关闭旧的拟合线程池失败（可忽略）：{exc}",
-                    )
-                st.session_state["fitting_executor"] = None
+                job_inputs = {
+                    "data_df": data_df,
+                    "species_names": species_names,
+                    "output_mode": output_mode,
+                    "output_species_list": output_species_list,
+                    "stoich_matrix": stoich_matrix,
+                    "k0_guess": k0_guess,
+                    "ea_guess_J_mol": ea_guess_J_mol,
+                    "order_guess": order_guess,
+                    "fit_k0_flags": fit_k0_flags,
+                    "fit_ea_flags": fit_ea_flags,
+                    "fit_order_flags_matrix": fit_order_flags_matrix,
+                    "K0_ads": K0_ads,
+                    "Ea_K_J_mol": Ea_K_J_mol,
+                    "m_inhibition": m_inhibition,
+                    "fit_K0_ads_flags": fit_K0_ads_flags,
+                    "fit_Ea_K_flags": fit_Ea_K_flags,
+                    "fit_m_flags": fit_m_flags,
+                    "k0_rev": k0_rev,
+                    "ea_rev_J_mol": ea_rev_J_mol,
+                    "order_rev": order_rev,
+                    "fit_k0_rev_flags": fit_k0_rev_flags,
+                    "fit_ea_rev_flags": fit_ea_rev_flags,
+                    "fit_order_rev_flags_matrix": fit_order_rev_flags_matrix,
+                    "solver_method": solver_method,
+                    "rtol": rtol,
+                    "atol": atol,
+                    "reactor_type": reactor_type,
+                    "kinetic_model": kinetic_model,
+                    "use_ms": use_ms,
+                    "n_starts": n_starts,
+                    "random_seed": random_seed,
+                    "max_nfev": max_nfev,
+                    "max_nfev_coarse": max_nfev_coarse,
+                    "diff_step_rel": diff_step_rel,
+                    "use_x_scale_jac": use_x_scale_jac,
+                    "k0_min": k0_min,
+                    "k0_max": k0_max,
+                    "ea_min": ea_min,
+                    "ea_max": ea_max,
+                    "ord_min": ord_min,
+                    "ord_max": ord_max,
+                    "K0_ads_min": float(K0_ads_min),
+                    "K0_ads_max": float(K0_ads_max),
+                    "Ea_K_min": float(Ea_K_min),
+                    "Ea_K_max": float(Ea_K_max),
+                    "max_step_fraction": float(max_step_fraction),
+                    "residual_type": str(residual_type),
+                }
 
-            st.session_state.fitting_stopped = False
-            st.session_state["fitting_progress"] = 0.0
-            st.session_state["fitting_status"] = "准备启动..."
-
-            stop_event = threading.Event()
-            st.session_state["fitting_stop_event"] = stop_event
-
-            progress_queue = queue.Queue()
-            st.session_state["fitting_progress_queue"] = progress_queue
-
-            _reset_fitting_progress_ui_state()
-            n_fit_params = _count_fitted_parameters(
-                fit_k0_flags,
-                fit_ea_flags,
-                fit_order_flags_matrix,
-                fit_K0_ads_flags,
-                fit_Ea_K_flags,
-                fit_m_flags,
-                fit_k0_rev_flags,
-                fit_ea_rev_flags,
-                fit_order_rev_flags_matrix,
-            )
-            st.session_state["fitting_job_summary"] = {
-                "title": "📊 拟合任务概览",
-                "lines": [
-                    f"数据点数量: {int(len(data_df))} 行",
-                    f"待拟合参数: {int(n_fit_params)} 个",
-                    f"反应器类型: {reactor_type}",
-                    f"动力学模型: {kinetic_model}",
-                    f"残差类型: {residual_type}",
-                    "优化算法: Trust Region Reflective (trf)",
-                    f"最大函数评估次数: {int(max_nfev)}",
-                    (
-                        f"多起点拟合: {int(n_starts)} 个起点"
-                        if (use_ms and int(n_starts) > 1)
-                        else "多起点拟合: 关闭"
-                    ),
-                ],
-            }
-
-            job_inputs = {
-                "data_df": data_df,
-                "species_names": species_names,
-                "output_mode": output_mode,
-                "output_species_list": output_species_list,
-                "stoich_matrix": stoich_matrix,
-                "k0_guess": k0_guess,
-                "ea_guess_J_mol": ea_guess_J_mol,
-                "order_guess": order_guess,
-                "fit_k0_flags": fit_k0_flags,
-                "fit_ea_flags": fit_ea_flags,
-                "fit_order_flags_matrix": fit_order_flags_matrix,
-                "K0_ads": K0_ads,
-                "Ea_K_J_mol": Ea_K_J_mol,
-                "m_inhibition": m_inhibition,
-                "fit_K0_ads_flags": fit_K0_ads_flags,
-                "fit_Ea_K_flags": fit_Ea_K_flags,
-                "fit_m_flags": fit_m_flags,
-                "k0_rev": k0_rev,
-                "ea_rev_J_mol": ea_rev_J_mol,
-                "order_rev": order_rev,
-                "fit_k0_rev_flags": fit_k0_rev_flags,
-                "fit_ea_rev_flags": fit_ea_rev_flags,
-                "fit_order_rev_flags_matrix": fit_order_rev_flags_matrix,
-                "solver_method": solver_method,
-                "rtol": rtol,
-                "atol": atol,
-                "reactor_type": reactor_type,
-                "kinetic_model": kinetic_model,
-                "use_ms": use_ms,
-                "n_starts": n_starts,
-                "random_seed": random_seed,
-                "max_nfev": max_nfev,
-                "max_nfev_coarse": max_nfev_coarse,
-                "diff_step_rel": diff_step_rel,
-                "use_x_scale_jac": use_x_scale_jac,
-                "k0_min": k0_min,
-                "k0_max": k0_max,
-                "ea_min": ea_min,
-                "ea_max": ea_max,
-                "ord_min": ord_min,
-                "ord_max": ord_max,
-                "K0_ads_min": float(K0_ads_min),
-                "K0_ads_max": float(K0_ads_max),
-                "Ea_K_min": float(Ea_K_min),
-                "Ea_K_max": float(Ea_K_max),
-                "max_step_fraction": float(max_step_fraction),
-                "residual_type": str(residual_type),
-            }
-
-            st.session_state["fitting_running"] = True
-            executor = _get_fitting_executor()
-            st.session_state["fitting_future"] = executor.submit(
-                _run_fitting_job, job_inputs, stop_event, progress_queue
-            )
-            st.rerun()
+                executor = _get_fitting_executor()
+                st.session_state["fitting_future"] = executor.submit(
+                    _run_fitting_job, job_inputs, stop_event, progress_queue
+                )
 
         if fitting_running:
             st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；若觉得卡顿可关闭。")
