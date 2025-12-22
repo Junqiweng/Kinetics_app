@@ -1,9 +1,9 @@
 {
   "version": "1.0",
-  "reactor_type": "PFR",
-  "kinetic_model": "langmuir_hinshelwood",
+  "reactor_type": "Batch",
+  "kinetic_model": "power_law",
   "solver_method": "RK45",
-  "rtol": 1e-06,
+  "rtol": 9.999999999992654e-07,
   "atol": 1e-09,
   "max_step_fraction": 0.1,
   "species_text": "A,B,C,D,E",
@@ -12,7 +12,7 @@
     [
       -1.0,
       0.0,
-      -1.0,
+      0.0,
       0.0
     ],
     [
@@ -24,7 +24,7 @@
     [
       0.0,
       1.0,
-      0.0,
+      -1.0,
       0.0
     ],
     [
@@ -56,9 +56,9 @@
       0.0
     ],
     [
+      0.0,
+      0.0,
       1.0,
-      0.0,
-      0.0,
       0.0,
       0.0
     ],
@@ -107,10 +107,10 @@
     1000.0
   ],
   "ea_guess_J_mol": [
-    80000.0,
-    80000.0,
-    80000.0,
-    80000.0
+    50000.0,
+    50000.0,
+    50000.0,
+    50000.0
   ],
   "fit_k0_flags": [
     true,
@@ -125,28 +125,28 @@
     true
   ],
   "K0_ads": [
-    1.0,
+    0.0,
     0.0,
     0.0,
     0.0,
     0.0
   ],
   "Ea_K_J_mol": [
-    -20000.0,
+    0.0,
     0.0,
     0.0,
     0.0,
     0.0
   ],
   "fit_K0_ads_flags": [
-    true,
+    false,
     false,
     false,
     false,
     false
   ],
   "fit_Ea_K_flags": [
-    true,
+    false,
     false,
     false,
     false,
@@ -155,8 +155,8 @@
   "m_inhibition": [
     1.0,
     1.0,
-    0.0,
-    0.0
+    1.0,
+    1.0
   ],
   "fit_m_flags": [
     false,
@@ -248,7 +248,7 @@
       false
     ]
   ],
-  "output_mode": "Fout (mol/s)",
+  "output_mode": "Cout (mol/m^3)",
   "output_species_list": [
     "A",
     "B",
@@ -256,16 +256,16 @@
     "D",
     "E"
   ],
-  "k0_min": 1000.0,
-  "k0_max": 1000000000000.0,
-  "ea_min_J_mol": 50000.0,
+  "k0_min": 1.0,
+  "k0_max": 10000000.0,
+  "ea_min_J_mol": 40000.0,
   "ea_max_J_mol": 100000.0,
   "order_min": -2.0,
   "order_max": 5.0,
-  "K0_ads_min": 1e-08,
-  "K0_ads_max": 1.0,
-  "Ea_K_min": -20000.0,
-  "Ea_K_max": 20000.0,
+  "K0_ads_min": 0.0,
+  "K0_ads_max": 10000000000.0,
+  "Ea_K_min": -200000.0,
+  "Ea_K_max": 200000.0,
   "m_min": 0.0,
   "m_max": 5.0,
   "k0_rev_min": 1e-15,
@@ -275,7 +275,7 @@
   "order_rev_min": -2.0,
   "order_rev_max": 5.0,
   "residual_type": "百分比残差",
-  "diff_step_rel": 1e-05,
+  "diff_step_rel": 0.01,
   "max_nfev": 3000,
   "use_x_scale_jac": true,
   "use_multi_start": false,
