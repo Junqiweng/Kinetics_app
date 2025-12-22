@@ -95,6 +95,10 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         "ea_max_J_mol",
         "order_min",
         "order_max",
+        "K0_ads_min",
+        "K0_ads_max",
+        "Ea_K_min",
+        "Ea_K_max",
         "diff_step_rel",
         "max_nfev",
         "use_x_scale_jac",
@@ -507,6 +511,10 @@ def _run_fitting_job(
     ea_max = job_inputs["ea_max"]
     ord_min = job_inputs["ord_min"]
     ord_max = job_inputs["ord_max"]
+    K0_ads_min = job_inputs.get("K0_ads_min", 0.0)
+    K0_ads_max = job_inputs.get("K0_ads_max", 1e10)
+    Ea_K_min = job_inputs.get("Ea_K_min", -2e5)
+    Ea_K_max = job_inputs.get("Ea_K_max", 2e5)
     max_step_fraction = float(job_inputs.get("max_step_fraction", 0.1))
 
     if stop_event.is_set():
@@ -552,10 +560,10 @@ def _run_fitting_job(
         fit_K0_ads_flags,
         fit_Ea_K_flags,
         fit_m_flags,
-        0,
-        1e10,
-        -2e5,
-        2e5,
+        K0_ads_min,
+        K0_ads_max,
+        Ea_K_min,
+        Ea_K_max,
         0,
         5,
         fit_k0_rev_flags,
@@ -1996,6 +2004,10 @@ def main():
         export_ea_max = float(get_cfg("ea_max_J_mol", 3e5))
         export_ord_min = float(get_cfg("order_min", -2.0))
         export_ord_max = float(get_cfg("order_max", 5.0))
+        export_K0_ads_min = float(get_cfg("K0_ads_min", 0.0))
+        export_K0_ads_max = float(get_cfg("K0_ads_max", 1e10))
+        export_Ea_K_min = float(get_cfg("Ea_K_min", -2e5))
+        export_Ea_K_max = float(get_cfg("Ea_K_max", 2e5))
 
         export_diff_step_rel = float(get_cfg("diff_step_rel", 1e-2))
         export_max_nfev = int(get_cfg("max_nfev", 3000))
@@ -2070,6 +2082,10 @@ def main():
             ea_max_J_mol=export_ea_max,
             order_min=export_ord_min,
             order_max=export_ord_max,
+            K0_ads_min=export_K0_ads_min,
+            K0_ads_max=export_K0_ads_max,
+            Ea_K_min=export_Ea_K_min,
+            Ea_K_max=export_Ea_K_max,
             diff_step_rel=export_diff_step_rel,
             max_nfev=export_max_nfev,
             use_x_scale_jac=export_use_x_scale_jac,
@@ -2152,6 +2168,40 @@ def main():
                     value=float(get_cfg("order_max", 5.0)),
                     key="cfg_order_max",
                 )
+
+            K0_ads_min = float(get_cfg("K0_ads_min", 0.0))
+            K0_ads_max = float(get_cfg("K0_ads_max", 1e10))
+            Ea_K_min = float(get_cfg("Ea_K_min", -2e5))
+            Ea_K_max = float(get_cfg("Ea_K_max", 2e5))
+            if kinetic_model == "langmuir_hinshelwood":
+                st.markdown("**1.2 L-H 边界设置**")
+                col_lh_b1, col_lh_b2 = st.columns(2)
+                with col_lh_b1:
+                    K0_ads_min = st.number_input(
+                        "K0_ads Min",
+                        value=K0_ads_min,
+                        format="%.1e",
+                        key="cfg_K0_ads_min",
+                    )
+                    K0_ads_max = st.number_input(
+                        "K0_ads Max",
+                        value=K0_ads_max,
+                        format="%.1e",
+                        key="cfg_K0_ads_max",
+                    )
+                with col_lh_b2:
+                    Ea_K_min = st.number_input(
+                        "Ea_K Min",
+                        value=Ea_K_min,
+                        format="%.1e",
+                        key="cfg_Ea_K_min",
+                    )
+                    Ea_K_max = st.number_input(
+                        "Ea_K Max",
+                        value=Ea_K_max,
+                        format="%.1e",
+                        key="cfg_Ea_K_max",
+                    )
 
             st.divider()
             st.markdown("**2. 算法与鲁棒性**")
@@ -2299,6 +2349,10 @@ def main():
                 ea_max_J_mol=float(ea_max),
                 order_min=float(ord_min),
                 order_max=float(ord_max),
+                K0_ads_min=float(K0_ads_min),
+                K0_ads_max=float(K0_ads_max),
+                Ea_K_min=float(Ea_K_min),
+                Ea_K_max=float(Ea_K_max),
                 diff_step_rel=float(diff_step_rel),
                 max_nfev=int(max_nfev),
                 use_x_scale_jac=bool(use_x_scale_jac),
@@ -2537,6 +2591,10 @@ def main():
                 "ea_max": ea_max,
                 "ord_min": ord_min,
                 "ord_max": ord_max,
+                "K0_ads_min": float(K0_ads_min),
+                "K0_ads_max": float(K0_ads_max),
+                "Ea_K_min": float(Ea_K_min),
+                "Ea_K_max": float(Ea_K_max),
                 "max_step_fraction": float(max_step_fraction),
             }
 

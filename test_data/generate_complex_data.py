@@ -139,78 +139,66 @@ def generate_pfr_data():
 
 
 # ==========================================
-# 场景 2: CSTR 反应器 (4个反应, L-H 吸附动力学)
+# 场景 2: PFR 反应器 (4个反应, L-H 吸附动力学)
 # ==========================================
 # 反应网络:
 # 1. A -> B  (L-H: r1 = k1*CA / (1 + K1*CA))
-# 2. B -> C  (L-H: r2 = k2*CB / (1 + K2*CB))
+# 2. B -> C  (L-H: r2 = k2*CB / (1 + K1*CA))
 # 3. A -> D  (Power: r3 = k3*CA)
 # 4. D -> E  (Power: r4 = k4*CD)
 
 
-def generate_cstr_data():
-    log("正在生成 CSTR 验证数据 (CSTR_LH_Kinetics)...")
+def generate_pfr_lh_data():
+    log("正在生成 PFR 验证数据 (PFR_LH_Kinetics)...")
 
     # 参数
-    k0_1, Ea_1 = 5e6, 60000
+    k0_1, Ea_1 = 5e10, 60000
     K_ads0_1, dH_ads_1 = 1e-2, -10000  # 吸附常数 Arrhenius形式 K = K0 * exp(-dH/RT)
 
-    k0_2, Ea_2 = 4e6, 62000
-    K_ads0_2, dH_ads_2 = 2e-2, -12000
+    k0_2, Ea_2 = 4e11, 62000
 
     k0_3, Ea_3 = 1e5, 70000
     k0_4, Ea_4 = 2e5, 72000
 
-    def solve_cstr(V, T, vdot, F_in):
-        CA0 = F_in[0] / vdot  # A进料浓度
+    def pfr_ode(V, F, T, vdot):
+        # 解包摩尔流量
+        FA, FB, FC, FD, FE = F
 
+        # 计算浓度
+        CA = FA / vdot
+        CB = FB / vdot
+        CC = FC / vdot
+        CD = FD / vdot
+        CE = FE / vdot
+
+        # 速率常数
         k1 = k0_1 * np.exp(-Ea_1 / (R_GAS * T))
         K1 = K_ads0_1 * np.exp(-dH_ads_1 / (R_GAS * T))
 
         k2 = k0_2 * np.exp(-Ea_2 / (R_GAS * T))
-        K2 = K_ads0_2 * np.exp(-dH_ads_2 / (R_GAS * T))
 
         k3 = k0_3 * np.exp(-Ea_3 / (R_GAS * T))
         k4 = k0_4 * np.exp(-Ea_4 / (R_GAS * T))
 
-        # 求解方程: F_in - F_out + r * V = 0
-        # F_out = C_out * vdot
-        # 0 = F_in/vdot - C_out + r * (V/vdot)
-        # 0 = C_in - C_out + r * tau
-        tau = V / vdot
+        # 反应速率（L-H 动力学）
+        r1 = k1 * CA / (1 + K1 * CA)
+        r2 = k2 * CB / (1 + K1 * CA)
+        r3 = k3 * CA
+        r4 = k4 * CD
 
-        def equations(C):
-            CA, CB, CC, CD, CE = C
+        # 物料衡算 (dFi/dV = sum(nu_ij * r_j))
+        dFA = -r1 - r3
+        dFB = r1 - r2
+        dFC = r2
+        dFD = r3 - r4
+        dFE = r4
 
-            # 速率
-            r1 = k1 * CA / (1 + K1 * CA)
-            r2 = k2 * CB / (1 + K2 * CB)
-            r3 = k3 * CA
-            r4 = k4 * CD
-
-            # 物料衡算
-            # A:
-            eqA = (F_in[0] / vdot) - CA + (-r1 - r3) * tau
-            # B:
-            eqB = (F_in[1] / vdot) - CB + (r1 - r2) * tau
-            # C:
-            eqC = (F_in[2] / vdot) - CC + (r2) * tau
-            # D:
-            eqD = (F_in[3] / vdot) - CD + (r3 - r4) * tau
-            # E:
-            eqE = (F_in[4] / vdot) - CE + (r4) * tau
-
-            return [eqA, eqB, eqC, eqD, eqE]
-
-        # 初始猜测
-        guess = [CA0 / 2, CA0 / 4, CA0 / 4, CA0 / 10, CA0 / 10]
-        C_out = fsolve(equations, guess)
-        C_out = np.maximum(C_out, 0)  # 物理约束
-        return C_out * vdot  # 返回流量
+        return [dFA, dFB, dFC, dFD, dFE]
 
     # 数据生成
-    vdot = 0.005  # m3/s
-    F0_A = 2.0  # mol/s
+    vdot = 0.00005  # m3/s
+    F0_A = 1000  # mol/s
+    F0_others = 0.0
 
     data = []
     # 更多工况
@@ -219,14 +207,22 @@ def generate_cstr_data():
 
     for T in T_list:
         for V_vol in V_list:
-            F_out = solve_cstr(V_vol, T, vdot, [F0_A, 0, 0, 0, 0])
+            # 使用 solve_ivp 积分 PFR ODE
+            sol = solve_ivp(
+                lambda V, F: pfr_ode(V, F, T, vdot),
+                [0, V_vol],
+                [F0_A, F0_others, F0_others, F0_others, F0_others],
+                method="RK45",
+            )
 
-            # 噪声
-            noise = 1 + 0.01 * np.random.randn(5)
+            F_out = sol.y[:, -1]
+
+            # 添加 1% 随机噪声
+            noise = 1 + 0.00000001 * np.random.randn(5)
             F_out_noisy = F_out * noise
-            F_out_noisy = np.maximum(F_out_noisy, 0)
+            F_out_noisy = np.maximum(F_out_noisy, 0)  # 物理约束
 
-            # CSTR 也使用 PFR 格式列名以便 App 读取(视为 Fout)
+            # PFR 格式列名
             row = {
                 "V_m3": V_vol,
                 "T_K": T,
@@ -245,8 +241,8 @@ def generate_cstr_data():
             data.append(row)
 
     df = pd.DataFrame(data)
-    df.to_csv("test_data/validation_CSTR_LH.csv", index=False)
-    log("  -> 已保存 validation_CSTR_LH.csv, 数据点数: " + str(len(df)))
+    df.to_csv("test_data/validation_PFR_LH.csv", index=False)
+    log("  -> 已保存 validation_PFR_LH.csv, 数据点数: " + str(len(df)))
 
 
 # ==========================================
@@ -338,5 +334,5 @@ def generate_batch_data():
 
 if __name__ == "__main__":
     generate_pfr_data()
-    generate_cstr_data()
+    generate_pfr_lh_data()
     generate_batch_data()
