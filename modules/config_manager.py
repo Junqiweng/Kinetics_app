@@ -18,6 +18,7 @@ os.makedirs(_PERSIST_DIR, exist_ok=True)
 
 _AUTO_SAVE_FILE = os.path.join(_PERSIST_DIR, "last_config.json")
 
+
 def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
     dir_name = os.path.dirname(os.path.abspath(file_path))
     os.makedirs(dir_name, exist_ok=True)
@@ -127,8 +128,8 @@ def collect_config(
     ea_rev_max_J_mol: float = 3e5,
     order_rev_min: float = -2.0,
     order_rev_max: float = 5.0,
-    # --- 加权与高级设置 ---
-    weight_mode: str = "不加权",
+    # --- 残差类型与高级设置 ---
+    residual_type: str = "绝对残差",
     diff_step_rel: float = 1e-2,
     max_nfev: int = 3000,
     use_x_scale_jac: bool = True,
@@ -205,8 +206,8 @@ def collect_config(
         "ea_rev_max_J_mol": ea_rev_max_J_mol,
         "order_rev_min": order_rev_min,
         "order_rev_max": order_rev_max,
-        # 加权与高级设置
-        "weight_mode": weight_mode,
+        # 残差类型与高级设置
+        "residual_type": residual_type,
         "diff_step_rel": diff_step_rel,
         "max_nfev": max_nfev,
         "use_x_scale_jac": use_x_scale_jac,
@@ -325,8 +326,8 @@ def get_default_config() -> dict:
         "ea_max_J_mol": 3e5,
         "order_min": -2.0,
         "order_max": 5.0,
-        # 加权与高级设置
-        "weight_mode": "不加权",
+        # 残差类型与高级设置
+        "residual_type": "绝对残差",
         "diff_step_rel": 1e-2,
         "max_nfev": 3000,
         "use_x_scale_jac": True,

@@ -516,6 +516,7 @@ def _run_fitting_job(
     Ea_K_min = job_inputs.get("Ea_K_min", -2e5)
     Ea_K_max = job_inputs.get("Ea_K_max", 2e5)
     max_step_fraction = float(job_inputs.get("max_step_fraction", 0.1))
+    residual_type = str(job_inputs.get("residual_type", "绝对残差"))
 
     if stop_event.is_set():
         raise FittingStoppedError("Stopped by user")
@@ -657,6 +658,22 @@ def _run_fitting_job(
         "ℹ️", f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
     )
 
+    # 计算 epsilon（用于百分比残差，避免除零）
+    residual_epsilon = float(typical_measured_scale * 0.01)  # 典型值的 1%
+    if residual_epsilon < 1e-15:
+        residual_epsilon = 1e-15
+
+    # 残差类型信息
+    residual_type_names = {
+        "绝对残差": "Absolute: r = y_pred - y_meas",
+        "相对残差": "Relative: r = (y_pred - y_meas) / y_meas",
+        "百分比残差": f"Percentage: r = (y_pred - y_meas) / (|y_meas| + ε), ε≈{residual_epsilon:.2e}",
+    }
+    timeline_add(
+        "ℹ️",
+        f"残差类型：{residual_type} — {residual_type_names.get(residual_type, '')}",
+    )
+
     data_rows = list(data_df.itertuples(index=False))
     species_name_to_index = {name: i for i, name in enumerate(species_names)}
     try:
@@ -749,11 +766,37 @@ def _run_fitting_job(
             if not ok:
                 residual_array[base : base + n_outputs] = residual_penalty_value
             else:
-                diff = pred - measured_matrix[row_index, :]
-                if not bool(np.all(np.isfinite(diff))):
-                    residual_array[base : base + n_outputs] = residual_penalty_value
+                measured_row = measured_matrix[row_index, :]
+                diff = pred - measured_row
+
+                # 根据残差类型计算残差
+                if residual_type == "相对残差":
+                    # 相对残差: r = (y_pred - y_meas) / y_meas
+                    # 当 y_meas 接近零时，设置罚值
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        rel_residual = diff / measured_row
+                    # 检查是否有无效值（除零导致）
+                    invalid_mask = ~np.isfinite(rel_residual)
+                    if np.any(invalid_mask):
+                        # 对于无效位置，使用罚值
+                        rel_residual[invalid_mask] = residual_penalty_value
+                    residual_array[base : base + n_outputs] = rel_residual
+                elif residual_type == "百分比残差":
+                    # 百分比残差: r = (y_pred - y_meas) / (|y_meas| + epsilon)
+                    denominator = np.abs(measured_row) + residual_epsilon
+                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                        pct_residual = diff / denominator
+                    invalid_mask = ~np.isfinite(pct_residual)
+                    if np.any(invalid_mask):
+                        pct_residual[invalid_mask] = residual_penalty_value
+                    residual_array[base : base + n_outputs] = pct_residual
                 else:
-                    residual_array[base : base + n_outputs] = diff
+                    # 默认：绝对残差 r = y_pred - y_meas
+                    if not bool(np.all(np.isfinite(diff))):
+                        residual_array[base : base + n_outputs] = residual_penalty_value
+                    else:
+                        residual_array[base : base + n_outputs] = diff
+
         if residual_array.size > 0:
             cost_now = float(0.5 * np.sum(residual_array**2))
             if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
@@ -961,6 +1004,7 @@ def _run_fitting_job(
         # Preferred objective naming
         "phi_initial": float(initial_cost),
         "phi_final": float(final_res.cost),
+        "residual_type": str(residual_type),
     }
 
 
@@ -2272,6 +2316,52 @@ def main():
                 )
 
             st.divider()
+            st.markdown("**3. 目标函数设置**")
+            st.caption("目标函数定义残差的计算方式，不同类型适用于不同数据特征：")
+
+            residual_type_options = [
+                "绝对残差",
+                "相对残差",
+                "百分比残差",
+            ]
+            residual_type_default = str(get_cfg("residual_type", "绝对残差"))
+            if residual_type_default not in residual_type_options:
+                residual_type_default = "绝对残差"
+            residual_type_index = residual_type_options.index(residual_type_default)
+
+            residual_type = st.selectbox(
+                "残差类型",
+                options=residual_type_options,
+                index=residual_type_index,
+                key="cfg_residual_type",
+                help="选择用于构建目标函数的残差计算方式",
+            )
+
+            # 显示当前残差类型的公式说明
+            residual_formula_info = {
+                "绝对残差": (
+                    "**绝对残差** (Absolute Residual)\n\n"
+                    r"$r_i = y_i^{pred} - y_i^{meas}$"
+                    "\n\n适用于：测量值数量级相近的数据。当测量值范围差异大时，大值主导拟合。"
+                ),
+                "相对残差": (
+                    "**相对残差** (Relative Residual)\n\n"
+                    r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{y_i^{meas}}$"
+                    "\n\n适用于：测量值跨越多个数量级的数据。对所有数据点给予相近权重。\n\n"
+                    r"⚠️ 注意：若 $y_i^{meas}$ 接近零，残差会变得非常大，可能导致数值不稳定。"
+                ),
+                "百分比残差": (
+                    "**百分比残差** (Percentage Residual with offset)\n\n"
+                    r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{|y_i^{meas}| + \epsilon}$"
+                    "\n\n"
+                    r"其中 $\epsilon$ 为小正数（典型值的 1%），避免除零。"
+                    "\n\n适用于：测量值可能接近零的数据。兼顾相对误差与数值稳定性。"
+                ),
+            }
+            with st.container(border=True):
+                st.markdown(residual_formula_info.get(residual_type, ""))
+
+            st.divider()
             st.caption(
                 "说明：当模型计算失败（如 solve_ivp 失败）时，残差会使用系统默认罚项（不在 UI 中提供调节）。"
             )
@@ -2353,6 +2443,7 @@ def main():
                 K0_ads_max=float(K0_ads_max),
                 Ea_K_min=float(Ea_K_min),
                 Ea_K_max=float(Ea_K_max),
+                residual_type=str(residual_type),
                 diff_step_rel=float(diff_step_rel),
                 max_nfev=int(max_nfev),
                 use_x_scale_jac=bool(use_x_scale_jac),
@@ -2382,6 +2473,7 @@ def main():
             )
 
         # --- Action Buttons ---
+
         _drain_fitting_progress_queue()
 
         fitting_future = st.session_state.get("fitting_future", None)
@@ -2539,6 +2631,7 @@ def main():
                     f"待拟合参数: {int(n_fit_params)} 个",
                     f"反应器类型: {reactor_type}",
                     f"动力学模型: {kinetic_model}",
+                    f"残差类型: {residual_type}",
                     "优化算法: Trust Region Reflective (trf)",
                     f"最大函数评估次数: {int(max_nfev)}",
                     (
@@ -2596,6 +2689,7 @@ def main():
                 "Ea_K_min": float(Ea_K_min),
                 "Ea_K_max": float(Ea_K_max),
                 "max_step_fraction": float(max_step_fraction),
+                "residual_type": str(residual_type),
             }
 
             st.session_state["fitting_running"] = True
