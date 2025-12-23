@@ -155,11 +155,11 @@ def render_help_page() -> None:
         col_ex1, col_ex2, col_ex3 = st.columns(3)
         with col_ex1:
             pfr_example_bytes = read_file_bytes_if_exists(
-                str(_project_root_dir() / "test_data" / "test_data_matched.csv")
+                str(_project_root_dir() / "test_data" / "orthogonal_design_data.csv")
             )
             if pfr_example_bytes is None:
                 st.warning(
-                    "未找到 `test_data/test_data_matched.csv`，请先运行 `test_data/generate_test_data.py` 生成。"
+                    "未找到 `test_data/orthogonal_design_data.csv`，请先运行 `test_data/generate_orthogonal_design.py` 生成。"
                 )
             else:
                 st.download_button(
