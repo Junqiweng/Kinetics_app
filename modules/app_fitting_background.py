@@ -118,9 +118,12 @@ def _render_fitting_overview_box(job_summary: dict) -> None:
     bullet_html = "\n".join([f"<li>{html_lib.escape(str(x))}</li>" for x in lines])
     st.markdown(
         f"""
-        <div style="background:#eff6ff; border:1px solid #dbeafe; padding:16px 18px; border-radius:14px;">
-          <div style="font-weight:700; color:#1e40af; margin-bottom:8px;">{title}</div>
-          <ul style="margin:0 0 0 18px; color:#0f172a; line-height:1.7;">
+        <div style="background:var(--card-bg,#fff); border:1px solid var(--border,rgba(0,0,0,.10)); border-radius:var(--radius,16px); box-shadow:var(--shadow-soft,0 1px 1px rgba(0,0,0,.04)); padding:14px 16px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <div style="width:8px; height:8px; border-radius:999px; background:var(--accent,#007AFF);"></div>
+            <div style="font-weight:650; color:var(--text,#1D1D1F);">{title}</div>
+          </div>
+          <ul style="margin:0 0 0 18px; color:var(--text,#1D1D1F); line-height:1.65;">
             {bullet_html}
           </ul>
         </div>
@@ -140,17 +143,27 @@ def _render_fitting_progress_panel() -> None:
 
     if timeline:
         st.write("")
-        for icon, text in timeline:
-            if str(text).strip():
-                st.markdown(f"{icon} {text}")
+        with st.container(border=True):
+            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### 进度日志")
+            for icon, text in timeline:
+                text = str(text).strip()
+                if text:
+                    st.markdown(f"- {icon} {text}")
 
     if ms_summary:
         st.write("")
         with st.container(border=True):
+            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### Multi-start 摘要")
             st.code(ms_summary, language="text")
 
     if final_summary:
-        st.caption(final_summary)
+        st.write("")
+        with st.container(border=True):
+            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### 拟合摘要")
+            st.caption(final_summary)
 
 
 def _render_fitting_live_progress() -> None:
@@ -177,11 +190,14 @@ def _render_fitting_live_progress() -> None:
     if not fitting_running:
         return
 
-    st.info("拟合正在后台运行中（页面可继续操作）。")
-    st.progress(float(st.session_state.get("fitting_progress", 0.0)))
-    status_text = str(st.session_state.get("fitting_status", "")).strip()
-    if status_text:
-        st.caption(status_text)
+    with st.container(border=True):
+        st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+        st.markdown("#### 后台拟合中")
+        st.caption("拟合正在后台运行中（页面可继续操作）。")
+        st.progress(float(st.session_state.get("fitting_progress", 0.0)))
+        status_text = str(st.session_state.get("fitting_status", "")).strip()
+        if status_text:
+            st.caption(status_text)
 
     _render_fitting_progress_panel()
 

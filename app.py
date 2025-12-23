@@ -56,7 +56,7 @@ def main():
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
     )
 
-    MAIN_TAB_LABELS = ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
+    MAIN_TAB_LABELS = ["反应与模型", "实验数据", "拟合与结果"]
 
     def _set_active_main_tab(tab_label: str) -> None:
         tab_label = str(tab_label).strip()
@@ -443,11 +443,17 @@ def main():
         st.markdown("### 全局设置")
         global_disabled = bool(st.session_state.get("fitting_running", False))
         with st.container(border=True):
-            help_btn = st.button("📖 教程/帮助", use_container_width=True)
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+            )
+            help_btn = st.button("教程/帮助", use_container_width=True)
             if help_btn:
                 _show_help_dialog()
 
         with st.container(border=True):
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+            )
             st.markdown("#### 核心模型")
             reactor_type_default = str(get_cfg("reactor_type", "PFR")).strip()
             if reactor_type_default == "Batch":
@@ -535,7 +541,7 @@ def main():
                 st.rerun()
 
     # ========== Main Content ==========
-    st.title(f"⚗️ {reactor_type} 反应动力学参数拟合")
+    st.title(f"{reactor_type} 反应动力学参数拟合")
     if reactor_type == "PFR":
         st.caption("模型：PFR (solve_ivp) + least_squares")
     elif reactor_type == "CSTR":
@@ -543,9 +549,7 @@ def main():
     else:
         st.caption("模型：BSTR (solve_ivp) + least_squares")
 
-    tab_model, tab_data, tab_fit = st.tabs(
-        ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
-    )
+    tab_model, tab_data, tab_fit = st.tabs(MAIN_TAB_LABELS)
     _restore_active_main_tab()
 
     # ---------------- TAB 1: MODEL ----------------
@@ -862,20 +866,18 @@ def main():
         with col_d1:
             st.markdown("#### 1. 下载模板")
             if reactor_type == "PFR":
-                meas_cols = (
-                    [f"Cout_{s}_mol_m3" for s in species_names]
-                    + [f"Fout_{s}_mol_s" for s in species_names]
-                )
+                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
+                    f"Fout_{s}_mol_s" for s in species_names
+                ]
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
                     + [f"F0_{s}_mol_s" for s in species_names]
                     + meas_cols
                 )
             elif reactor_type == "CSTR":
-                meas_cols = (
-                    [f"Cout_{s}_mol_m3" for s in species_names]
-                    + [f"Fout_{s}_mol_s" for s in species_names]
-                )
+                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
+                    f"Fout_{s}_mol_s" for s in species_names
+                ]
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
@@ -1160,7 +1162,6 @@ def main():
 
         # --- Advanced Settings (Expanded) ---
         with st.expander("高级设置与边界 (点击展开)", expanded=False):
-            st.caption("修改任意参数会自动应用（Streamlit 会自动 rerun）。")
 
             st.markdown("**1. 基础边界设置**")
             col_b1, col_b2, col_b3 = st.columns(3)
@@ -1254,6 +1255,7 @@ def main():
                     value=get_cfg("diff_step_rel", 1e-2),
                     format="%.1e",
                     key="cfg_diff_step_rel",
+                    help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值。",
                 )
                 max_step_fraction = st.number_input(
                     "max_step_fraction (ODE)",
@@ -1348,6 +1350,9 @@ def main():
                 ),
             }
             with st.container(border=True):
+                st.markdown(
+                    '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+                )
                 st.markdown(residual_formula_info.get(residual_type, ""))
 
             st.divider()
@@ -1473,44 +1478,61 @@ def main():
         fitting_future = st.session_state.get("fitting_future", None)
         fitting_running = bool(st.session_state.get("fitting_running", False))
 
-        col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns([3, 1, 1, 1, 1])
-        start_btn = col_act1.button(
-            "🚀 开始拟合",
-            type="primary",
-            disabled=fitting_running,
-            use_container_width=True,
-            on_click=_request_start_fitting,
-        )
-        stop_btn = col_act2.button(
-            "⏹️ 终止",
-            type="secondary",
-            disabled=not fitting_running,
-            use_container_width=True,
-            on_click=_request_stop_fitting,
-        )
-        auto_refresh = col_act3.checkbox(
-            "自动刷新",
-            value=bool(st.session_state.get("fitting_auto_refresh", True)),
-            disabled=not fitting_running,
-            help="开启后，页面会每隔约 1 秒自动刷新一次，用于持续更新拟合进度与阶段信息；关闭可减少卡顿/CPU 占用。",
-        )
-        refresh_interval_s = float(
-            col_act5.number_input(
-                "间隔(s)",
-                value=float(st.session_state.get("fitting_refresh_interval_s", 2.0)),
-                min_value=0.5,
-                max_value=10.0,
-                step=0.5,
-                disabled=(not fitting_running) or (not auto_refresh),
+        with st.container(border=True):
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
-        )
-        clear_btn = col_act4.button(
-            "🧹 清除结果",
-            type="secondary",
-            disabled=fitting_running,
-            use_container_width=True,
-            help="清除上一次拟合的结果、对比表缓存与时间线（不影响当前输入配置）。",
-        )
+            col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(
+                [3, 1, 1, 1, 1], vertical_alignment="center"
+            )
+            start_btn = col_act1.button(
+                "🚀 开始拟合",
+                type="primary",
+                disabled=fitting_running,
+                use_container_width=True,
+                on_click=_request_start_fitting,
+            )
+            stop_btn = col_act2.button(
+                "⏹️ 终止",
+                type="secondary",
+                disabled=not fitting_running,
+                use_container_width=True,
+                on_click=_request_stop_fitting,
+            )
+            auto_refresh = col_act3.checkbox(
+                "自动刷新",
+                value=bool(st.session_state.get("fitting_auto_refresh", True)),
+                disabled=not fitting_running,
+                help="开启后，页面会每隔约 2 秒自动刷新一次，用于持续更新拟合进度与阶段信息；关闭可减少卡顿/CPU 占用。",
+            )
+            col_interval_label, col_interval_input = col_act5.columns(
+                [1.1, 1.4], vertical_alignment="center"
+            )
+            col_interval_label.markdown(
+                '<div style="font-size:0.8rem; color:var(--muted,#6E6E73); white-space:nowrap;">间隔(s)</div>',
+                unsafe_allow_html=True,
+            )
+            refresh_interval_s = float(
+                col_interval_input.number_input(
+                    "间隔(s)",
+                    label_visibility="collapsed",
+                    value=float(
+                        st.session_state.get("fitting_refresh_interval_s", 2.0)
+                    ),
+                    min_value=0.5,
+                    max_value=10.0,
+                    step=0.5,
+                    disabled=(not fitting_running) or (not auto_refresh),
+                    help="自动刷新间隔 [s]",
+                )
+            )
+            clear_btn = col_act4.button(
+                "🧹 清除结果",
+                type="secondary",
+                disabled=fitting_running,
+                use_container_width=True,
+                help="清除上一次拟合的结果、对比表缓存与时间线（不影响当前输入配置）。",
+            )
         st.session_state["fitting_auto_refresh"] = bool(auto_refresh)
         st.session_state["fitting_refresh_interval_s"] = float(refresh_interval_s)
 
@@ -2163,7 +2185,9 @@ def main():
 
                     conc_inlet = np.zeros(len(species_names_fit), dtype=float)
                     for i, sp_name in enumerate(species_names_fit):
-                        conc_inlet[i] = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
+                        conc_inlet[i] = float(
+                            row_sel.get(f"C0_{sp_name}_mol_m3", np.nan)
+                        )
 
                     tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)
                     simulation_time_s = float(5.0 * tau_s)
@@ -2177,7 +2201,9 @@ def main():
                             stoich_matrix=stoich_matrix_fit,
                             k0=fitted_params["k0"],
                             ea_J_mol=fitted_params["ea_J_mol"],
-                            reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                            reaction_order_matrix=fitted_params[
+                                "reaction_order_matrix"
+                            ],
                             solver_method=solver_method_fit,
                             rtol=rtol_fit,
                             atol=atol_fit,
@@ -2199,13 +2225,17 @@ def main():
                         )
                     else:
                         fig_cs, ax_cs = plt.subplots(figsize=(7, 4.5))
-                        name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+                        name_to_index = {
+                            name: i for i, name in enumerate(species_names_fit)
+                        }
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
                         for species_name in profile_species:
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
+                                ax_cs.plot(
+                                    time_grid_s, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_inlet[idx])
@@ -2213,7 +2243,9 @@ def main():
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_cs.plot(time_grid_s, x, linewidth=2, label=species_name)
+                                ax_cs.plot(
+                                    time_grid_s, x, linewidth=2, label=species_name
+                                )
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_cs.set_xlabel("Time t [s]")
@@ -2240,7 +2272,11 @@ def main():
                             "📥 下载剖面图",
                             ui_comp.figure_to_image_bytes(fig_cs, image_format_cs),
                             file_name=f"profile_plot.{image_format_cs}",
-                            mime=("image/png" if image_format_cs == "png" else "image/svg+xml"),
+                            mime=(
+                                "image/png"
+                                if image_format_cs == "png"
+                                else "image/svg+xml"
+                            ),
                         )
                         plt.close(fig_cs)
 
