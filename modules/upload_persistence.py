@@ -13,7 +13,12 @@ def _read_csv_bytes_cached(uploaded_bytes: bytes) -> pd.DataFrame:
     """
     从 bytes 读取 CSV。
     """
-    return pd.read_csv(io.BytesIO(uploaded_bytes))
+    data_df = pd.read_csv(io.BytesIO(uploaded_bytes))
+    try:
+        data_df.columns = [str(c).strip() for c in list(data_df.columns)]
+    except Exception:
+        pass
+    return data_df
 
 
 def _get_persist_dir() -> str:
@@ -122,4 +127,3 @@ def _delete_persisted_upload() -> tuple[bool, str]:
         return True, "OK"
     except Exception as exc:
         return False, f"删除缓存上传文件失败: {exc}"
-

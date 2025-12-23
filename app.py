@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
 import modules.fitting as fitting
 import modules.reactors as reactors
@@ -55,6 +56,52 @@ def main():
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
     )
 
+    MAIN_TAB_LABELS = ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
+
+    def _set_active_main_tab(tab_label: str) -> None:
+        tab_label = str(tab_label).strip()
+        if tab_label:
+            st.session_state["active_main_tab_label"] = tab_label
+
+    def _restore_active_main_tab() -> None:
+        """
+        Streamlit 原生 st.tabs 在 rerun 后可能会回到第一个 tab。
+
+        这里用一个很小的前端脚本，把当前会话记录的 tab 自动切回去，避免：
+        - 上传数据后跳回首页
+        - 拟合完成/报错后用户看不到结果/提示
+        """
+        active_label = str(
+            st.session_state.get("active_main_tab_label", MAIN_TAB_LABELS[0])
+        ).strip()
+        if active_label not in MAIN_TAB_LABELS:
+            active_label = MAIN_TAB_LABELS[0]
+            st.session_state["active_main_tab_label"] = active_label
+
+        active_label_json = json.dumps(active_label, ensure_ascii=False)
+        components.html(
+            f"""
+            <script>
+              const activeLabel = {active_label_json};
+              function norm(s) {{ return (s || '').replace(/\\s+/g, ' ').trim(); }}
+              function trySelect() {{
+                const buttons = window.parent.document.querySelectorAll('button[data-baseweb=\"tab\"]');
+                for (const btn of buttons) {{
+                  if (norm(btn.innerText) === norm(activeLabel)) {{
+                    btn.click();
+                    return true;
+                  }}
+                }}
+                return false;
+              }}
+              setTimeout(trySelect, 30);
+              setTimeout(trySelect, 150);
+              setTimeout(trySelect, 600);
+            </script>
+            """,
+            height=0,
+        )
+
     def _request_start_fitting() -> None:
         """
         Start 按钮回调：先锁定全局设置（sidebar），再在本次 rerun 中启动后台任务。
@@ -81,6 +128,7 @@ def main():
         if bool(st.session_state.get("fitting_running", False)):
             return
 
+        _set_active_main_tab(MAIN_TAB_LABELS[2])
         st.session_state["start_fit_requested"] = True
         st.session_state["fitting_running"] = True
         st.session_state["fitting_stopped"] = False
@@ -91,6 +139,7 @@ def main():
         """
         if not bool(st.session_state.get("fitting_running", False)):
             return
+        _set_active_main_tab(MAIN_TAB_LABELS[2])
         st.session_state["stop_fit_requested"] = True
         stop_event = st.session_state.get("fitting_stop_event", None)
         if stop_event is not None:
@@ -155,10 +204,12 @@ def main():
                 "text": "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
                 f" 目标函数 Φ: {phi_value:.4e}",
             }
+            _set_active_main_tab(MAIN_TAB_LABELS[2])
         except FittingStoppedError:
             st.session_state["fitting_status"] = "用户终止。"
             st.session_state["fitting_timeline"].append(("⚠️", "拟合已终止。"))
             st.session_state["fit_notice"] = {"kind": "warning", "text": "拟合已终止。"}
+            _set_active_main_tab(MAIN_TAB_LABELS[2])
         except Exception as exc:
             st.session_state["fitting_status"] = "拟合失败。"
             st.session_state["fitting_timeline"].append(("❌", f"拟合失败: {exc}"))
@@ -166,6 +217,7 @@ def main():
                 "kind": "error",
                 "text": f"Fitting Error: {exc}",
             }
+            _set_active_main_tab(MAIN_TAB_LABELS[2])
 
     # --- 一次性提示（用于"拟合完成/失败/终止"/按钮回调报错等消息）---
     # 注意：fit_notice 会在 tab_fit 内部显示，而不是在这里
@@ -411,6 +463,7 @@ def main():
     tab_model, tab_data, tab_fit = st.tabs(
         ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
     )
+    _restore_active_main_tab()
 
     # ---------------- TAB 1: MODEL ----------------
     with tab_model:
@@ -420,6 +473,8 @@ def main():
                 "物种列表 (逗号分隔)",
                 value=get_cfg("species_text", "A,B,C"),
                 key="cfg_species_text",
+                on_change=_set_active_main_tab,
+                args=(MAIN_TAB_LABELS[0],),
             )
         with col_def2:
             n_reactions = int(
@@ -428,6 +483,8 @@ def main():
                     value=get_cfg("n_reactions", 1),
                     min_value=1,
                     key="cfg_n_reactions",
+                    on_change=_set_active_main_tab,
+                    args=(MAIN_TAB_LABELS[0],),
                 )
             )
 
@@ -462,6 +519,8 @@ def main():
             nu_default,
             use_container_width=True,
             key=f"nu_{len(species_names)}_{n_reactions}",
+            on_change=_set_active_main_tab,
+            args=(MAIN_TAB_LABELS[0],),
         )
         stoich_matrix = nu_table.to_numpy(dtype=float)
 
@@ -768,6 +827,7 @@ def main():
                 )
                 st.caption(cached_text + "（页面刷新/切换不会丢失，除非手动删除）")
                 if st.button("🗑️ 删除已上传文件", key="delete_uploaded_csv"):
+                    _set_active_main_tab(MAIN_TAB_LABELS[1])
                     for k in ["uploaded_csv_bytes", "uploaded_csv_name"]:
                         if k in st.session_state:
                             del st.session_state[k]
@@ -788,6 +848,8 @@ def main():
                 type=["csv"],
                 label_visibility="collapsed",
                 key=csv_uploader_key,
+                on_change=_set_active_main_tab,
+                args=(MAIN_TAB_LABELS[1],),
             )
 
         st.divider()
@@ -811,6 +873,8 @@ def main():
                     else 0
                 ),
                 key="cfg_output_mode",
+                on_change=_set_active_main_tab,
+                args=(MAIN_TAB_LABELS[1],),
             )
 
         with col_mz2:
@@ -844,6 +908,8 @@ def main():
                 species_names,
                 default=default_species,
                 key="cfg_output_species_list",
+                on_change=_set_active_main_tab,
+                args=(MAIN_TAB_LABELS[1],),
             )
             output_species_list = fit_mask
 
@@ -996,14 +1062,24 @@ def main():
 
     # ---------------- TAB 3: FITTING ----------------
     with tab_fit:
+        fit_results_cached = st.session_state.get("fit_results", None)
+
+        # 允许“无当前数据”时仍能查看历史拟合结果（避免被 st.stop 截断或 len(None) 报错）
+        if (data_df is None) and isinstance(fit_results_cached, dict):
+            data_df = fit_results_cached.get("data", None)
+        if (not output_species_list) and isinstance(fit_results_cached, dict):
+            output_species_list = list(fit_results_cached.get("output_species", []))
+
         if data_df is None:
             st.info("请先在「实验数据」页面上传 CSV 文件（或恢复已缓存的文件）。")
-            st.stop()
+            if fit_results_cached is None:
+                st.stop()
         if not output_species_list:
             st.error("请选择至少一个目标物种。")
-            st.stop()
+            if fit_results_cached is None:
+                st.stop()
 
-        data_len = len(data_df)
+        data_len = len(data_df) if data_df is not None else 0
 
         # --- Advanced Settings (Expanded) ---
         with st.expander("高级设置与边界 (点击展开)", expanded=False):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html as html_lib
+import difflib
 import queue
 import threading
 import time
@@ -163,9 +164,12 @@ def _render_fitting_live_progress() -> None:
     fitting_future = st.session_state.get("fitting_future", None)
     fitting_running = bool(st.session_state.get("fitting_running", False))
 
-    # 不在此处触发 rerun，完全依赖 run_every 的自动刷新
-    # 拟合完成时，会在下一个刷新周期被主应用流程检测并处理（app.py 第 115-145 行）
-    # 最多有 refresh_interval_s（默认2秒）的延迟，这是可以接受的
+    # 重要：st.fragment(run_every=...) 只会重跑 fragment 本身，不会执行整页脚本。
+    # 因此，如果后台任务已结束（成功/失败/终止），这里需要触发一次整页 rerun，
+    # 才能让 app.py 的“future.done() 处理逻辑”生效并展示结果/错误。
+    if fitting_running and (fitting_future is not None) and bool(fitting_future.done()):
+        st.session_state["fitting_status"] = "后台任务已结束，正在刷新页面以展示结果..."
+        st.rerun()
 
     if not fitting_running:
         return
@@ -336,16 +340,107 @@ def _run_fitting_job(
 
     if missing_output_columns:
         missing_columns_text = ", ".join(missing_output_columns)
+        available_cols = [str(c) for c in list(data_df.columns)]
+        available_cols_text = ", ".join(available_cols[:40])
+        suggestions = []
+        for missing_name in missing_output_columns:
+            matches = difflib.get_close_matches(missing_name, available_cols, n=3, cutoff=0.6)
+            if matches:
+                suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
+        suggestion_text = ("\n" + "\n".join(suggestions)) if suggestions else ""
         raise ValueError(
             "数据表缺少所选输出测量列，无法构建残差并进行拟合。\n"
             f"- 当前输出模式: {output_mode}\n"
             f"- 需要的列名: {missing_columns_text}\n"
+            f"- 当前 CSV 列名（前 40 个）: {available_cols_text}\n"
+            "提示：系统会自动去掉列名首尾空格；请优先使用「下载 CSV 模板」生成的表头。\n"
             "请检查：输出模式/物种选择是否正确，以及数据文件表头是否匹配。"
+            f"{suggestion_text}"
+        )
+
+    # --- 必要输入列检查（避免所有行都“失败罚项”，看起来像卡住）---
+    if reactor_type == "PFR":
+        required_input_columns = (
+            ["V_m3", "T_K", "vdot_m3_s"]
+            + [f"F0_{name}_mol_s" for name in species_names]
+        )
+    else:
+        required_input_columns = ["t_s", "T_K"] + [
+            f"C0_{name}_mol_m3" for name in species_names
+        ]
+
+    missing_input_columns = [c for c in required_input_columns if c not in data_df.columns]
+    if missing_input_columns:
+        missing_text = ", ".join(missing_input_columns)
+        available_cols = [str(c) for c in list(data_df.columns)]
+        available_cols_text = ", ".join(available_cols[:40])
+        suggestions = []
+        for missing_name in missing_input_columns:
+            matches = difflib.get_close_matches(missing_name, available_cols, n=3, cutoff=0.6)
+            if matches:
+                suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
+        suggestion_text = ("\n" + "\n".join(suggestions)) if suggestions else ""
+        raise ValueError(
+            "数据表缺少必要输入列，无法进行模型计算与拟合。\n"
+            f"- 反应器类型: {reactor_type}\n"
+            f"- 缺少列名: {missing_text}\n"
+            f"- 当前 CSV 列名（前 40 个）: {available_cols_text}\n"
+            "请使用「下载 CSV 模板」生成的表头，或检查列名是否拼写一致（含单位后缀）。"
+            f"{suggestion_text}"
         )
 
     n_data_rows = int(len(data_df))
     n_outputs = int(len(output_column_names))
     measured_matrix = np.zeros((n_data_rows, n_outputs), dtype=float)
+
+    invalid_input_messages = []
+    for column_name in required_input_columns:
+        numeric_series = pd.to_numeric(data_df[column_name], errors="coerce")
+        numeric_values = numeric_series.to_numpy(dtype=float)
+
+        invalid_mask = ~np.isfinite(numeric_values)
+        if bool(np.any(invalid_mask)):
+            invalid_row_indices = data_df.index[invalid_mask].tolist()
+            sample_indices_text = ", ".join([str(i) for i in invalid_row_indices[:10]])
+            invalid_input_messages.append(
+                f"- 列 `{column_name}` 含 NaN/非数字/无穷大：共 {len(invalid_row_indices)} 行"
+                + (
+                    f"（示例 index: {sample_indices_text}）"
+                    if sample_indices_text
+                    else ""
+                )
+            )
+            continue
+
+        # 基本物理约束（单位见模板列名）
+        if column_name == "T_K":
+            bad_mask = numeric_values <= 0.0
+            bad_desc = "必须 > 0"
+        elif column_name == "vdot_m3_s":
+            bad_mask = numeric_values <= 0.0
+            bad_desc = "必须 > 0"
+        elif column_name == "V_m3":
+            bad_mask = numeric_values < 0.0
+            bad_desc = "不能为负"
+        elif column_name == "t_s":
+            bad_mask = numeric_values < 0.0
+            bad_desc = "不能为负"
+        else:
+            # F0_* 或 C0_*
+            bad_mask = numeric_values < 0.0
+            bad_desc = "不能为负"
+
+        if bool(np.any(bad_mask)):
+            bad_row_indices = data_df.index[bad_mask].tolist()
+            sample_indices_text = ", ".join([str(i) for i in bad_row_indices[:10]])
+            invalid_input_messages.append(
+                f"- 列 `{column_name}` {bad_desc}：共 {len(bad_row_indices)} 行"
+                + (
+                    f"（示例 index: {sample_indices_text}）"
+                    if sample_indices_text
+                    else ""
+                )
+            )
 
     invalid_value_messages = []
     for col_index, column_name in enumerate(output_column_names):
@@ -370,6 +465,13 @@ def _run_fitting_job(
             "所选输出测量列中存在 NaN/非数字值，拟合已停止（避免残差被静默当作 0）。\n"
             + "\n".join(invalid_value_messages)
             + "\n请清理数据（删除/填补缺失值，或取消选择对应输出物种/输出模式）后再拟合。"
+        )
+
+    if invalid_input_messages:
+        raise ValueError(
+            "输入条件列存在 NaN/非数字/不合理值，拟合已停止。\n"
+            + "\n".join(invalid_input_messages)
+            + "\n请先修正输入条件列（V_m3, T_K, vdot_m3_s, F0_* 或 t_s, T_K, C0_*），再开始拟合。"
         )
 
     typical_measured_scale = (
@@ -501,6 +603,7 @@ def _run_fitting_job(
                 output_species_indices=output_species_indices,
                 inlet_column_names=inlet_column_names,
                 model_eval_cache=model_eval_cache,
+                stop_event=stop_event,
             )
 
             base = row_index * n_outputs

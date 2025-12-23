@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -49,6 +52,8 @@ def integrate_pfr_molar_flows(
     k0_rev: np.ndarray = None,
     ea_rev_J_mol: np.ndarray = None,
     order_rev_matrix: np.ndarray = None,
+    stop_event: threading.Event | None = None,
+    max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
     """
     PFR design equation (liquid / constant volumetric flow):
@@ -78,7 +83,21 @@ def integrate_pfr_molar_flows(
     if not np.all(np.isfinite(reaction_order_matrix)):
         return molar_flow_inlet_mol_s.copy(), False, "反应级数矩阵 n 包含 NaN/Inf"
 
+    start_time_s = time.monotonic()
+    if max_wall_time_s is not None:
+        try:
+            max_wall_time_s = float(max_wall_time_s)
+        except Exception:
+            max_wall_time_s = None
+        if (max_wall_time_s is not None) and (not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0):
+            max_wall_time_s = None
+
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("用户终止（stop_event）")
+        if (max_wall_time_s is not None) and ((time.monotonic() - start_time_s) > max_wall_time_s):
+            raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
+
         conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(vdot_m3_s, 1e-30)
 
         if kinetic_model == "power_law":
@@ -298,6 +317,8 @@ def integrate_pfr_profile(
     k0_rev: np.ndarray = None,
     ea_rev_J_mol: np.ndarray = None,
     order_rev_matrix: np.ndarray = None,
+    stop_event: threading.Event | None = None,
+    max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, bool, str]:
     """
     返回 PFR 沿程剖面：
@@ -536,7 +557,21 @@ def integrate_batch_profile(
             "反应级数矩阵 n 包含 NaN/Inf",
         )
 
+    start_time_s = time.monotonic()
+    if max_wall_time_s is not None:
+        try:
+            max_wall_time_s = float(max_wall_time_s)
+        except Exception:
+            max_wall_time_s = None
+        if (max_wall_time_s is not None) and (not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0):
+            max_wall_time_s = None
+
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("用户终止（stop_event）")
+        if (max_wall_time_s is not None) and ((time.monotonic() - start_time_s) > max_wall_time_s):
+            raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
+
         conc_safe = safe_nonnegative(conc_mol_m3)
 
         if kinetic_model == "power_law":

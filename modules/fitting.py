@@ -359,6 +359,8 @@ def _predict_outputs_for_row(
     output_species_indices: list[int] | None = None,
     inlet_column_names: list[str] | None = None,
     model_eval_cache: dict | None = None,
+    stop_event=None,
+    max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
     """
     根据反应器类型和动力学模型预测输出值。
@@ -460,6 +462,8 @@ def _predict_outputs_for_row(
                 k0_rev=k0_rev,
                 ea_rev_J_mol=ea_rev_J_mol,
                 order_rev_matrix=order_rev_matrix,
+                stop_event=stop_event,
+                max_wall_time_s=max_wall_time_s,
             )
             if model_eval_cache is not None:
                 model_eval_cache[cache_key] = (molar_flow_outlet, bool(ok), str(message))
@@ -553,6 +557,8 @@ def _predict_outputs_for_row(
                 k0_rev=k0_rev,
                 ea_rev_J_mol=ea_rev_J_mol,
                 order_rev_matrix=order_rev_matrix,
+                stop_event=stop_event,
+                max_wall_time_s=max_wall_time_s,
             )
             if model_eval_cache is not None:
                 model_eval_cache[cache_key] = (conc_final, bool(ok), str(message))
