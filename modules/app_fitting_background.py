@@ -333,7 +333,9 @@ def _run_fitting_job(
         elif output_mode.startswith("C"):
             column_name = f"Cout_{species_name}_mol_m3"
         else:
-            column_name = f"X_{species_name}"
+            raise ValueError(
+                "当前版本已移除 X (conversion) 作为拟合目标变量；请改用 Cout 或 Fout。"
+            )
         output_column_names.append(column_name)
 
     missing_output_columns = []
@@ -366,6 +368,10 @@ def _run_fitting_job(
         required_input_columns = (
             ["V_m3", "T_K", "vdot_m3_s"]
             + [f"F0_{name}_mol_s" for name in species_names]
+        )
+    elif reactor_type == "CSTR":
+        required_input_columns = (
+            ["V_m3", "T_K", "vdot_m3_s"] + [f"C0_{name}_mol_m3" for name in species_names]
         )
     else:
         required_input_columns = ["t_s", "T_K"] + [

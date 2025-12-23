@@ -36,6 +36,7 @@ def _get_measurement_column_name(output_mode: str, species_name: str) -> str:
         return f"Fout_{species_name}_mol_s"
     if output_mode.startswith("C"):
         return f"Cout_{species_name}_mol_m3"
+    # 兼容旧版本：曾支持 X (conversion)
     return f"X_{species_name}"
 
 
@@ -128,4 +129,3 @@ def _build_fit_comparison_long_table(
             )
 
     return pd.DataFrame(rows)
-

@@ -865,7 +865,6 @@ def main():
                 meas_cols = (
                     [f"Cout_{s}_mol_m3" for s in species_names]
                     + [f"Fout_{s}_mol_s" for s in species_names]
-                    + [f"X_{s}" for s in species_names]
                 )
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
@@ -876,7 +875,6 @@ def main():
                 meas_cols = (
                     [f"Cout_{s}_mol_m3" for s in species_names]
                     + [f"Fout_{s}_mol_s" for s in species_names]
-                    + [f"X_{s}" for s in species_names]
                 )
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
@@ -884,9 +882,7 @@ def main():
                     + meas_cols
                 )
             else:
-                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
-                    f"X_{s}" for s in species_names
-                ]
+                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names]
                 cols = (
                     ["t_s", "T_K"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
@@ -941,9 +937,9 @@ def main():
         col_mz1, col_mz2 = st.columns(2)
         with col_mz1:
             opts = (
-                ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
+                ["Fout (mol/s)", "Cout (mol/m^3)"]
                 if reactor_type in ("PFR", "CSTR")
-                else ["Cout (mol/m^3)", "X (conversion)"]
+                else ["Cout (mol/m^3)"]
             )
             if ("cfg_output_mode" in st.session_state) and (
                 str(st.session_state["cfg_output_mode"]) not in opts

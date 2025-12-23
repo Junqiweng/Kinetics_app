@@ -424,14 +424,18 @@ def validate_config(config: dict) -> tuple[bool, str]:
     # 说明：历史版本曾导出过 residual_penalty_* 字段；当前版本不再使用，导入时忽略即可。
 
     # 可选项：输出模式与目标物种
-    allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
     if "output_mode" in config:
-        if config["output_mode"] not in allowed_output_modes:
-            return False, f"无效的 output_mode：{config['output_mode']}"
-        if (reactor_type == "BSTR") and (
-            config["output_mode"] == "Fout (mol/s)"
-        ):
-            return False, "BSTR 反应器不支持 Fout 输出模式"
+        output_mode = str(config["output_mode"])
+        if output_mode == "X (conversion)":
+            return False, "当前版本已移除 X (conversion) 作为拟合目标变量"
+
+        if reactor_type == "BSTR":
+            allowed_output_modes = ["Cout (mol/m^3)"]
+        else:
+            allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)"]
+
+        if output_mode not in allowed_output_modes:
+            return False, f"无效的 output_mode：{output_mode}"
 
     species_names = _parse_species_text(config["species_text"])
     if len(species_names) < 1:

@@ -35,9 +35,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
 
     output_mode_cfg = str(config.get("output_mode", "")).strip()
     if reactor_type_cfg == "BSTR":
-        allowed_output_modes = ["Cout (mol/m^3)", "X (conversion)"]
+        allowed_output_modes = ["Cout (mol/m^3)"]
     else:
-        allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
+        allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)"]
     if output_mode_cfg in allowed_output_modes:
         st.session_state["cfg_output_mode"] = output_mode_cfg
     elif allowed_output_modes:
