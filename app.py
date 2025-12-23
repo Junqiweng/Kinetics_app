@@ -374,10 +374,13 @@ def main():
 
         with st.container(border=True):
             st.markdown("#### 核心模型")
+            reactor_type_default = str(get_cfg("reactor_type", "PFR")).strip()
+            if reactor_type_default == "Batch":
+                reactor_type_default = "BSTR"
             reactor_type = st.selectbox(
                 "反应器",
-                ["PFR", "Batch"],
-                index=0 if get_cfg("reactor_type", "PFR") == "PFR" else 1,
+                ["PFR", "BSTR"],
+                index=0 if reactor_type_default == "PFR" else 1,
                 key="cfg_reactor_type",
                 disabled=global_disabled,
             )
@@ -458,7 +461,7 @@ def main():
     if reactor_type == "PFR":
         st.caption("模型：PFR (solve_ivp) + least_squares")
     else:
-        st.caption("模型：Batch (solve_ivp) + least_squares")
+        st.caption("模型：BSTR (solve_ivp) + least_squares")
 
     tab_model, tab_data, tab_fit = st.tabs(
         ["① 反应与模型", "② 实验数据", "③ 拟合与结果"]
@@ -2115,7 +2118,7 @@ def main():
                     )
                     if not ok:
                         st.error(
-                            f"Batch 剖面计算失败: {message}\n"
+                            f"BSTR 剖面计算失败: {message}\n"
                             "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
                         )
                     else:

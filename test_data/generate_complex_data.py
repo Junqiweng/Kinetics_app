@@ -246,7 +246,7 @@ def generate_pfr_lh_data():
 
 
 # ==========================================
-# 场景 3: 间歇反应器 (Batch) (4个反应, 连串反应)
+# 场景 3: 间歇搅拌釜反应器 (BSTR) (4个反应, 连串反应)
 # ==========================================
 # 反应网络:
 # 1. A ->B
@@ -256,7 +256,7 @@ def generate_pfr_lh_data():
 
 
 def generate_batch_data():
-    log("正在生成 Batch 验证数据 (Batch_Series)...")
+    log("正在生成 BSTR 验证数据 (Batch_Series)...")
 
     # 参数
     k0_list = [1e4, 5e4, 2e4, 1e4]
@@ -289,7 +289,7 @@ def generate_batch_data():
     data = []
 
     T_list = [298, 308, 318, 328]
-    # Batch里自变量是 时间 Time
+    # BSTR 里自变量是时间 Time
     Time_list = [60, 120, 240, 480, 960, 1500]  # seconds
 
     for T in T_list:
@@ -309,7 +309,7 @@ def generate_batch_data():
             C_out_noisy = C_out * noise
             C_out_noisy = np.maximum(C_out_noisy, 0)
 
-            # Batch Required: t_s, T_K, C0_{spec}_mol_m3
+            # BSTR Required: t_s, T_K, C0_{spec}_mol_m3
             # Measured: Cout_{spec}_mol_m3
             row = {
                 "t_s": t_val,

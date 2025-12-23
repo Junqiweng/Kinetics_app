@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "reactor_type": "Batch",
+  "reactor_type": "BSTR",
   "kinetic_model": "power_law",
   "solver_method": "RK45",
   "rtol": 9.999999999992654e-07,

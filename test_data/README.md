@@ -2,7 +2,7 @@
 
 本目录用于提供**可直接上传到 App** 的示例 CSV，以及生成脚本，帮助你先跑通流程再替换真实实验数据。
 
-> 注意：当前 App 仅支持 **PFR** 与 **Batch** 两类反应器（不支持 CSTR）。
+> 注意：当前 App 仅支持 **PFR** 与 **BSTR** 两类反应器（不支持 CSTR）。
 
 ## 1) 快速示例（推荐）
 
@@ -31,7 +31,7 @@ python test_data/generate_complex_data.py
    - 工况：不同温度 `T_K` 与体积 `V_m3`
 
 2. `validation_Batch_Series.csv`
-   - 反应器：Batch
+   - 反应器：BSTR
    - 反应数：4（连串反应 A→B→C→D→E）
    - 工况：不同温度 `T_K` 与时间点 `t_s`
 

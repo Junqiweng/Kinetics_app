@@ -1,9 +1,9 @@
-# Kinetics_app - 反应动力学参数拟合工具（PFR / Batch）
+# Kinetics_app - 反应动力学参数拟合工具（PFR / BSTR）
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.34+-red.svg)](https://streamlit.io/)
 
-一个基于 **Python + Streamlit** 的网页工具，用于 **PFR（平推流）** 与 **Batch（间歇釜）** 的反应动力学参数拟合与模拟。
+一个基于 **Python + Streamlit** 的网页工具，用于 **PFR（平推流）** 与 **BSTR（间歇搅拌釜）** 的反应动力学参数拟合与模拟。
 
 ## 文档（建议从这里开始）
 
@@ -13,12 +13,12 @@
 ## 功能特性
 
 - 📊 **多物种、多反应系统**：支持自定义物种数量和反应数量
-- 🧪 **多反应器类型**：支持 PFR 与 Batch
+- 🧪 **多反应器类型**：支持 PFR 与 BSTR
 - 🔬 **多种动力学模型**：幂律（Power-law）、Langmuir-Hinshelwood（吸附抑制）、可逆反应（Reversible）
 - 🎯 **灵活的参数拟合**：可选择性拟合 k₀、Eₐ 和反应级数
 - 📈 **多种目标变量**：支持出口摩尔流量、出口浓度或转化率作为拟合目标
 - 🚀 **高级拟合选项**：多起点拟合、参数缩放、可调有限差分步长
-- 📉 **可视化结果**：奇偶校验图（Parity Plot）、误差图，以及沿程/随时间剖面图（PFR: $F_i(V)$/$C_i(V)$；Batch: $C_i(t)$）
+- 📉 **可视化结果**：奇偶校验图（Parity Plot）、误差图，以及沿程/随时间剖面图（PFR: $F_i(V)$/$C_i(V)$；BSTR: $C_i(t)$）
 - 📥 **一键导出**：拟合参数/对比数据/报告表（CSV）与图像（PNG/SVG）
 - ⚙️ **配置管理**：配置导入/导出（JSON），并可在启动时自动恢复上次配置
 
@@ -111,7 +111,7 @@ python test_data/generate_test_data.py
 ### 1. 反应定义
 
 - 输入物种名称（逗号分隔，如 `A,B,C`）
-- 选择反应器类型（PFR / Batch）与动力学模型（Power-law / L-H / Reversible）
+- 选择反应器类型（PFR / BSTR）与动力学模型（Power-law / L-H / Reversible）
 - 设置反应数量
 - 填写化学计量数矩阵 ν（反应物为负，生成物为正）
 - 设置反应级数矩阵 n
@@ -130,7 +130,7 @@ python test_data/generate_test_data.py
 | `vdot_m3_s` | 体积流量 | m³/s |
 | `F0_<物种名>_mol_s` | 各物种入口摩尔流量 | mol/s |
 
-**Batch 输入列**
+**BSTR 输入列**
 
 | 列名 | 含义 | 单位 |
 |:---|:---|:---|
@@ -164,7 +164,7 @@ python test_data/generate_test_data.py
 ## 重要假设与限制（建议使用前确认）
 
 - **PFR**：采用液相/恒定体积流量假设 $C_i = F_i/\\dot{v}$，未包含压降与体积流量沿程变化。
-- **Batch**：采用恒体积、无进出料的 $dC/dt=\\nu r$ 模型；Batch 模式不支持 `Fout` 作为拟合输出。
+- **BSTR**：采用恒体积、无进出料的 $dC/dt=\\nu r$ 模型；BSTR 模式不支持 `Fout` 作为拟合输出。
 - **测量缺失**：所选测量列不允许出现 NaN/空值；若某物种/某些行缺测，建议拆分数据文件或取消选择对应目标物种。
 - **结果缓存**：拟合完成后会缓存拟合参数与当次配置/数据，结果展示与导出将锁定于该次拟合；如需应用新配置/新数据，请清除缓存并重新拟合。
 - **负级数**：当反应级数为负且浓度趋近 0 时，为避免 $0^{n<0}$ 发散，内部会对浓度加很小的下限（`1e-30 mol/m³`）；这可能影响极低浓度区间的拟合稳定性。
@@ -182,7 +182,7 @@ Kinetics_app/
 ├── app.py                  # Streamlit 主应用程序
 ├── modules/                # 核心计算与 UI 辅助模块
 │   ├── kinetics.py         # 动力学：幂律 / L-H / 可逆速率
-│   ├── reactors.py         # 反应器：PFR/Batch 数值积分 + 剖面
+│   ├── reactors.py         # 反应器：PFR/BSTR 数值积分 + 剖面
 │   ├── fitting.py          # 拟合工具：参数打包/解包、单行预测
 │   ├── config_manager.py   # 配置导入/导出/自动保存
 │   ├── ui_help.py          # 教程/帮助（渲染 docs/help_*.md）
@@ -203,7 +203,7 @@ Kinetics_app/
 
 - **`test_data_matched.csv`**：A → B 一级反应的模拟实验数据
 - **`generate_test_data.py`**：数据生成脚本，可自定义动力学参数
-- **更多验证数据**：见 `test_data/README.md`（注意：当前 App 仅支持 PFR/Batch）
+- **更多验证数据**：见 `test_data/README.md`（注意：当前 App 仅支持 PFR/BSTR）
 
 测试参数：
 - 反应：A → B（一级反应）

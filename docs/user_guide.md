@@ -10,7 +10,7 @@
 - 3. 界面总览（3 个页面）
 - 4. 从 0 跑通一次（推荐流程）
 - 5. 反应模型输入：物种、反应数、$\nu$ 矩阵、级数、参数
-- 6. CSV 数据格式：PFR / Batch（最容易出错）
+- 6. CSV 数据格式：PFR / BSTR（最容易出错）
 - 7. 拟合设置：边界、求解器、Multi-start、diff_step
 - 8. 结果解读：奇偶校验图、残差、剖面、导出
 - 9. 常见问题（故障排查）
@@ -22,14 +22,14 @@
 
 Kinetics_app 是一个基于 **Streamlit** 的网页工具，用于：
 
-- **PFR（平推流）**与**Batch（间歇釜）**反应器的动力学参数拟合与模拟
+- **PFR（平推流）**与**BSTR（间歇搅拌釜）**反应器的动力学参数拟合与模拟
 - 多物种、多反应（任意 $\nu$ 矩阵）
 - 动力学模型：幂律（power-law）、Langmuir–Hinshelwood（L-H）、可逆反应（reversible）
 - 拟合参数可选择：$k_0$、$E_a$、反应级数 $n$；L-H 的 $K_0$、$E_{a,K}$、抑制指数 $m$；可逆的逆向参数
 
 ### 1.1 支持与不支持（重要）
 
-- 支持：**PFR、Batch**
+- 支持：**PFR、BSTR**
 - 不支持：CSTR、压降、体积流量沿程变化、气相非理想、能量方程（非等温沿程/随时间）
 - PFR 默认假设：液相/恒定体积流量 $\dot{v}$，因此 $C_i = F_i/\dot{v}$
 
@@ -80,10 +80,10 @@ streamlit run app.py
 streamlit run app.py
 ```
 
-**Step 2：点左侧 `📖 教程/帮助`，下载示例 CSV（PFR 或 Batch）**
+**Step 2：点左侧 `📖 教程/帮助`，下载示例 CSV（PFR 或 BSTR）**
 
 - PFR 示例：`test_data/test_data_matched.csv`
-- Batch 示例：App 内自动生成（下载即可）
+- BSTR 示例：App 内自动生成（下载即可）
 
 **Step 3：按示例配置输入模型**
 
@@ -98,7 +98,7 @@ streamlit run app.py
 **Step 5：选择拟合目标变量与目标物种**
 
 - PFR 示例通常选：`Fout (mol/s)`，目标物种选 `A`
-- Batch 示例通常选：`Cout (mol/m^3)` 或 `X (conversion)`
+- BSTR 示例通常选：`Cout (mol/m^3)` 或 `X (conversion)`
 
 **Step 6：到「③ 拟合与结果」点 `🚀 开始拟合`**
 
@@ -184,7 +184,7 @@ App 中：
 ### 6.1 一行数据代表什么？
 
 - **PFR**：一行 = 一个实验工况（给定 $V,T,\dot{v}$ 与入口 $F_{0,i}$），测量是该工况下的出口  
-- **Batch**：一行 = 在同一组初始浓度 $C_{0,i}$ 与温度 $T$ 下，某个时间点 $t$ 的测量
+- **BSTR**：一行 = 在同一组初始浓度 $C_{0,i}$ 与温度 $T$ 下，某个时间点 $t$ 的测量
 
 ### 6.2 PFR 必要输入列（每行都要有）
 
@@ -193,7 +193,7 @@ App 中：
 - `vdot_m3_s`：体积流量 [m³/s]
 - `F0_<物种名>_mol_s`：入口摩尔流量 [mol/s]（每个物种一列）
 
-### 6.3 Batch 必要输入列（每行都要有）
+### 6.3 BSTR 必要输入列（每行都要有）
 
 - `t_s`：时间 [s]
 - `T_K`：温度 [K]
@@ -304,7 +304,7 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 剖面是**模型预测**（不是实验测量值）：
 
 - PFR：沿体积 $V$ 的 $F_i(V)$、$C_i(V)$、$X_i(V)$
-- Batch：随时间 $t$ 的 $C_i(t)$、$X_i(t)$
+- BSTR：随时间 $t$ 的 $C_i(t)$、$X_i(t)$
 
 ### 8.5 导出
 

@@ -376,8 +376,13 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if key not in config:
             return False, f"缺少必需的配置项：{key}"
 
-    if config["reactor_type"] not in ["PFR", "Batch"]:
-        return False, f"无效的反应器类型：{config['reactor_type']}"
+    reactor_type = str(config.get("reactor_type", "")).strip()
+    if reactor_type == "Batch":
+        reactor_type = "BSTR"
+        config["reactor_type"] = reactor_type
+
+    if reactor_type not in ["PFR", "BSTR"]:
+        return False, f"无效的反应器类型：{reactor_type}"
 
     if config["kinetic_model"] not in [
         "power_law",
@@ -423,10 +428,10 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if "output_mode" in config:
         if config["output_mode"] not in allowed_output_modes:
             return False, f"无效的 output_mode：{config['output_mode']}"
-        if (config["reactor_type"] == "Batch") and (
+        if (reactor_type == "BSTR") and (
             config["output_mode"] == "Fout (mol/s)"
         ):
-            return False, "Batch 反应器不支持 Fout 输出模式"
+            return False, "BSTR 反应器不支持 Fout 输出模式"
 
     species_names = _parse_species_text(config["species_text"])
     if len(species_names) < 1:

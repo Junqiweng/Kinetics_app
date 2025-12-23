@@ -18,7 +18,7 @@ def _docs_dir() -> Path:
 
 def _build_example_batch_csv_bytes() -> bytes:
     """
-    生成一个 Batch 示例数据（A -> B 一级反应，幂律 n=1）。
+    生成一个 BSTR 示例数据（A -> B 一级反应，幂律 n=1）。
     用于帮助页面下载示例 CSV。
     """
     temperature_K = 350.0  # Temperature [K]
@@ -131,7 +131,7 @@ def render_help_page() -> None:
         with col_ex2:
             batch_example_bytes = _build_example_batch_csv_bytes()
             st.download_button(
-                "📥 下载 Batch 示例数据 (CSV)",
+                "📥 下载 BSTR 示例数据 (CSV)",
                 data=batch_example_bytes,
                 file_name="batch_example.csv",
                 mime="text/csv",

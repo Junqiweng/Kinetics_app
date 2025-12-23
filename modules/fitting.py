@@ -491,8 +491,8 @@ def _predict_outputs_for_row(
                     "未知输出模式",
                 )
 
-    elif reactor_type == "Batch":
-        # Batch 需要 t_s, C0_*
+    elif reactor_type in ("BSTR", "Batch"):
+        # BSTR 需要 t_s, C0_*
         reaction_time_s = _to_float_or_nan(_row_get_value(row, "t_s", np.nan))
         if not np.isfinite(reaction_time_s):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 t_s"
@@ -528,7 +528,7 @@ def _predict_outputs_for_row(
         message = "OK"
         if model_eval_cache is not None:
             cache_key = (
-                "Batch",
+                "BSTR",
                 float(reaction_time_s),
                 float(temperature_K),
                 tuple(conc_initial),
@@ -578,11 +578,11 @@ def _predict_outputs_for_row(
                 else:
                     output_values[out_i] = (c0 - c_final) / c0
             else:
-                # Batch 不支持 Fout 模式
+                # BSTR 不支持 Fout 模式
                 return (
                     np.zeros(len(output_species_list), dtype=float),
                     False,
-                    "Batch 反应器不支持 Fout 输出模式，请选择 Cout 或 X",
+                    "BSTR 反应器不支持 Fout 输出模式，请选择 Cout 或 X",
                 )
 
     else:

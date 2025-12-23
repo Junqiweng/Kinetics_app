@@ -608,6 +608,8 @@ def _run_fitting_job(
                 model_eval_cache=model_eval_cache,
                 stop_event=stop_event,
             )
+            if stop_event.is_set():
+                raise FittingStoppedError("Stopped by user")
 
             base = row_index * n_outputs
             if not ok:

@@ -14,7 +14,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
     kinetic_model_cfg = str(config.get("kinetic_model", "")).strip()
     solver_method_cfg = str(config.get("solver_method", "")).strip()
 
-    if reactor_type_cfg in ["PFR", "Batch"]:
+    if reactor_type_cfg == "Batch":
+        reactor_type_cfg = "BSTR"
+    if reactor_type_cfg in ["PFR", "BSTR"]:
         st.session_state["cfg_reactor_type"] = reactor_type_cfg
     if kinetic_model_cfg in ["power_law", "langmuir_hinshelwood", "reversible"]:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
@@ -32,7 +34,7 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
 
     output_mode_cfg = str(config.get("output_mode", "")).strip()
-    if reactor_type_cfg == "Batch":
+    if reactor_type_cfg == "BSTR":
         allowed_output_modes = ["Cout (mol/m^3)", "X (conversion)"]
     else:
         allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
