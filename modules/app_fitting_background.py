@@ -168,8 +168,11 @@ def _render_fitting_live_progress() -> None:
     # 因此，如果后台任务已结束（成功/失败/终止），这里需要触发一次整页 rerun，
     # 才能让 app.py 的“future.done() 处理逻辑”生效并展示结果/错误。
     if fitting_running and (fitting_future is not None) and bool(fitting_future.done()):
+        # 先把 running 置为 False，避免 full-app rerun 后仍继续调度 fragment(run_every)，
+        # 否则可能出现“旧 fragment id 不存在”的控制台警告。
+        st.session_state["fitting_running"] = False
         st.session_state["fitting_status"] = "后台任务已结束，正在刷新页面以展示结果..."
-        st.rerun()
+        st.rerun(scope="app")
 
     if not fitting_running:
         return
