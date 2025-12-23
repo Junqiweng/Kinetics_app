@@ -67,36 +67,116 @@ def main():
         """
         Streamlit 原生 st.tabs 在 rerun 后可能会回到第一个 tab。
 
-        这里用一个很小的前端脚本，把当前会话记录的 tab 自动切回去，避免：
-        - 上传数据后跳回首页
-        - 拟合完成/报错后用户看不到结果/提示
-        """
-        active_label = str(
-            st.session_state.get("active_main_tab_label", MAIN_TAB_LABELS[0])
-        ).strip()
-        if active_label not in MAIN_TAB_LABELS:
-            active_label = MAIN_TAB_LABELS[0]
-            st.session_state["active_main_tab_label"] = active_label
+        关键改动：只允许“用户手动点击 Tab”改变当前页面。
 
-        active_label_json = json.dumps(active_label, ensure_ascii=False)
+        做法：在前端监听 Tab 按钮的 click 事件，将当前 Tab 文本写入
+        sessionStorage；每次 rerun 时从 sessionStorage 读取并恢复。
+
+        这样可以保证：重置默认/改反应数/拟合状态更新等任何 rerun 都不会导致
+        “自动跳到别的页面”，除非用户自己点了 Tab。
+        """
+        tab_labels_json = json.dumps(MAIN_TAB_LABELS, ensure_ascii=False)
+        default_label_json = json.dumps(MAIN_TAB_LABELS[0], ensure_ascii=False)
         components.html(
             f"""
             <script>
-              const activeLabel = {active_label_json};
+              const TAB_LABELS = {tab_labels_json};
+              const DEFAULT_LABEL = {default_label_json};
+              const STORAGE_KEY = "kinetics_active_main_tab_label_v1";
               function norm(s) {{ return (s || '').replace(/\\s+/g, ' ').trim(); }}
-              function trySelect() {{
-                const buttons = window.parent.document.querySelectorAll('button[data-baseweb=\"tab\"]');
+
+              function getButtons() {{
+                // 页面里可能还有其它 st.tabs（例如帮助页的 tab），这里需要只锁定“主 Tabs”。
+                const tabLists = window.parent.document.querySelectorAll('div[data-baseweb="tab-list"]');
+                for (const tabList of tabLists) {{
+                  const buttons = tabList.querySelectorAll('button[data-baseweb="tab"]');
+                  if (!buttons || buttons.length === 0) continue;
+
+                  const texts = Array.from(buttons).map(b => norm(b.innerText));
+                  let isMain = true;
+                  for (const label of TAB_LABELS) {{
+                    if (texts.indexOf(norm(label)) < 0) {{
+                      isMain = false;
+                      break;
+                    }}
+                  }}
+                  if (isMain) return buttons;
+                }}
+
+                // 兜底：若找不到明确的主 tabList，则返回全部（避免完全失效）。
+                return window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+              }}
+
+              function getActiveLabelFromDom() {{
+                const buttons = getButtons();
                 for (const btn of buttons) {{
-                  if (norm(btn.innerText) === norm(activeLabel)) {{
+                  const selected = btn.getAttribute("aria-selected");
+                  if (selected === "true") {{
+                    return norm(btn.innerText);
+                  }}
+                }}
+                return "";
+              }}
+
+              function loadStoredLabel() {{
+                try {{
+                  const stored = window.parent.sessionStorage.getItem(STORAGE_KEY);
+                  return norm(stored);
+                }} catch (e) {{
+                  return "";
+                }}
+              }}
+
+              function saveStoredLabel(label) {{
+                const labelNorm = norm(label);
+                if (!labelNorm) return;
+                try {{
+                  window.parent.sessionStorage.setItem(STORAGE_KEY, labelNorm);
+                }} catch (e) {{}}
+              }}
+
+              function installClickListeners() {{
+                const buttons = getButtons();
+                for (const btn of buttons) {{
+                  if (btn.dataset.kineticsTabListenerInstalled === "1") continue;
+                  btn.dataset.kineticsTabListenerInstalled = "1";
+                  btn.addEventListener("click", () => {{
+                    saveStoredLabel(btn.innerText);
+                  }});
+                }}
+              }}
+
+              function tryRestore() {{
+                installClickListeners();
+
+                // 第一次进入页面时，先把“当前激活 Tab”写入 storage，避免空值。
+                const currentActive = getActiveLabelFromDom();
+                if (currentActive) {{
+                  const stored = loadStoredLabel();
+                  if (!stored) saveStoredLabel(currentActive);
+                }}
+
+                let target = loadStoredLabel();
+                if (!target) target = norm(DEFAULT_LABEL);
+                if (TAB_LABELS.map(norm).indexOf(target) < 0) target = norm(DEFAULT_LABEL);
+
+                // 如果当前已在目标 Tab，则不做任何动作（避免抖动）。
+                const nowActive = getActiveLabelFromDom();
+                if (nowActive && norm(nowActive) === norm(target)) return true;
+
+                const buttons = getButtons();
+                for (const btn of buttons) {{
+                  if (norm(btn.innerText) === norm(target)) {{
                     btn.click();
                     return true;
                   }}
                 }}
                 return false;
               }}
-              setTimeout(trySelect, 30);
-              setTimeout(trySelect, 150);
-              setTimeout(trySelect, 600);
+
+              setTimeout(tryRestore, 30);
+              setTimeout(tryRestore, 150);
+              setTimeout(tryRestore, 600);
             </script>
             """,
             height=0,
@@ -128,7 +208,6 @@ def main():
         if bool(st.session_state.get("fitting_running", False)):
             return
 
-        _set_active_main_tab(MAIN_TAB_LABELS[2])
         st.session_state["start_fit_requested"] = True
         st.session_state["fitting_running"] = True
         st.session_state["fitting_stopped"] = False
@@ -139,7 +218,6 @@ def main():
         """
         if not bool(st.session_state.get("fitting_running", False)):
             return
-        _set_active_main_tab(MAIN_TAB_LABELS[2])
         st.session_state["stop_fit_requested"] = True
         stop_event = st.session_state.get("fitting_stop_event", None)
         if stop_event is not None:
@@ -204,12 +282,10 @@ def main():
                 "text": "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
                 f" 目标函数 Φ: {phi_value:.4e}",
             }
-            _set_active_main_tab(MAIN_TAB_LABELS[2])
         except FittingStoppedError:
             st.session_state["fitting_status"] = "用户终止。"
             st.session_state["fitting_timeline"].append(("⚠️", "拟合已终止。"))
             st.session_state["fit_notice"] = {"kind": "warning", "text": "拟合已终止。"}
-            _set_active_main_tab(MAIN_TAB_LABELS[2])
         except Exception as exc:
             st.session_state["fitting_status"] = "拟合失败。"
             st.session_state["fitting_timeline"].append(("❌", f"拟合失败: {exc}"))
@@ -217,7 +293,6 @@ def main():
                 "kind": "error",
                 "text": f"Fitting Error: {exc}",
             }
-            _set_active_main_tab(MAIN_TAB_LABELS[2])
 
     # --- 一次性提示（用于"拟合完成/失败/终止"/按钮回调报错等消息）---
     # 注意：fit_notice 会在 tab_fit 内部显示，而不是在这里
@@ -476,8 +551,6 @@ def main():
                 "物种列表 (逗号分隔)",
                 value=get_cfg("species_text", "A,B,C"),
                 key="cfg_species_text",
-                on_change=_set_active_main_tab,
-                args=(MAIN_TAB_LABELS[0],),
             )
         with col_def2:
             n_reactions = int(
@@ -486,8 +559,6 @@ def main():
                     value=get_cfg("n_reactions", 1),
                     min_value=1,
                     key="cfg_n_reactions",
-                    on_change=_set_active_main_tab,
-                    args=(MAIN_TAB_LABELS[0],),
                 )
             )
 
@@ -522,8 +593,6 @@ def main():
             nu_default,
             use_container_width=True,
             key=f"nu_{len(species_names)}_{n_reactions}",
-            on_change=_set_active_main_tab,
-            args=(MAIN_TAB_LABELS[0],),
         )
         stoich_matrix = nu_table.to_numpy(dtype=float)
 
@@ -830,7 +899,6 @@ def main():
                 )
                 st.caption(cached_text + "（页面刷新/切换不会丢失，除非手动删除）")
                 if st.button("🗑️ 删除已上传文件", key="delete_uploaded_csv"):
-                    _set_active_main_tab(MAIN_TAB_LABELS[1])
                     for k in ["uploaded_csv_bytes", "uploaded_csv_name"]:
                         if k in st.session_state:
                             del st.session_state[k]
@@ -851,8 +919,6 @@ def main():
                 type=["csv"],
                 label_visibility="collapsed",
                 key=csv_uploader_key,
-                on_change=_set_active_main_tab,
-                args=(MAIN_TAB_LABELS[1],),
             )
 
         st.divider()
@@ -876,8 +942,6 @@ def main():
                     else 0
                 ),
                 key="cfg_output_mode",
-                on_change=_set_active_main_tab,
-                args=(MAIN_TAB_LABELS[1],),
             )
 
         with col_mz2:
@@ -911,8 +975,6 @@ def main():
                 species_names,
                 default=default_species,
                 key="cfg_output_species_list",
-                on_change=_set_active_main_tab,
-                args=(MAIN_TAB_LABELS[1],),
             )
             output_species_list = fit_mask
 
