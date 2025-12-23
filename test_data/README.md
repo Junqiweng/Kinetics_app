@@ -2,7 +2,7 @@
 
 本目录用于提供**可直接上传到 App** 的示例 CSV，以及生成脚本，帮助你先跑通流程再替换真实实验数据。
 
-> 注意：当前 App 仅支持 **PFR** 与 **BSTR** 两类反应器（不支持 CSTR）。
+> 注意：当前 App 支持 **PFR / CSTR / BSTR** 三类反应器。
 
 ## 1) 快速示例（推荐）
 
@@ -35,6 +35,4 @@ python test_data/generate_complex_data.py
    - 反应数：4（连串反应 A→B→C→D→E）
    - 工况：不同温度 `T_K` 与时间点 `t_s`
 
-3. `validation_CSTR_LH.csv`（仅供对照/留存）
-   - 该文件是 CSTR 稳态数据，列名格式被“伪装成 PFR 的 Fout”以便读取
-   - 由于 App 没有 CSTR 模型，**不建议用于拟合**（除非你刻意做“错误模型拟合”的对照实验）
+3. （如需 CSTR 示例）可在 App 的“教程/帮助”页直接下载 CSTR 示例 CSV。

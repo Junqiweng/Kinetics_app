@@ -452,10 +452,13 @@ def main():
             reactor_type_default = str(get_cfg("reactor_type", "PFR")).strip()
             if reactor_type_default == "Batch":
                 reactor_type_default = "BSTR"
+            reactor_type_options = ["PFR", "CSTR", "BSTR"]
+            if reactor_type_default not in reactor_type_options:
+                reactor_type_default = "PFR"
             reactor_type = st.selectbox(
                 "反应器",
-                ["PFR", "BSTR"],
-                index=0 if reactor_type_default == "PFR" else 1,
+                reactor_type_options,
+                index=reactor_type_options.index(reactor_type_default),
                 key="cfg_reactor_type",
                 disabled=global_disabled,
             )
@@ -535,6 +538,8 @@ def main():
     st.title(f"⚗️ {reactor_type} 反应动力学参数拟合")
     if reactor_type == "PFR":
         st.caption("模型：PFR (solve_ivp) + least_squares")
+    elif reactor_type == "CSTR":
+        st.caption("模型：CSTR (steady-state) + least_squares")
     else:
         st.caption("模型：BSTR (solve_ivp) + least_squares")
 
@@ -867,6 +872,17 @@ def main():
                     + [f"F0_{s}_mol_s" for s in species_names]
                     + meas_cols
                 )
+            elif reactor_type == "CSTR":
+                meas_cols = (
+                    [f"Cout_{s}_mol_m3" for s in species_names]
+                    + [f"Fout_{s}_mol_s" for s in species_names]
+                    + [f"X_{s}" for s in species_names]
+                )
+                cols = (
+                    ["V_m3", "T_K", "vdot_m3_s"]
+                    + [f"C0_{s}_mol_m3" for s in species_names]
+                    + meas_cols
+                )
             else:
                 meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
                     f"X_{s}" for s in species_names
@@ -926,7 +942,7 @@ def main():
         with col_mz1:
             opts = (
                 ["Fout (mol/s)", "Cout (mol/m^3)", "X (conversion)"]
-                if reactor_type == "PFR"
+                if reactor_type in ("PFR", "CSTR")
                 else ["Cout (mol/m^3)", "X (conversion)"]
             )
             if ("cfg_output_mode" in st.session_state) and (
@@ -2137,6 +2153,100 @@ def main():
                             ),
                         )
                         plt.close(fig_pf)
+
+                elif reactor_type_fit == "CSTR":
+                    profile_kind = st.radio(
+                        "剖面变量",
+                        ["C (mol/m^3)", "X (conversion)"],
+                        index=0,
+                        horizontal=True,
+                    )
+                    reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
+                    temperature_K = float(row_sel.get("T_K", np.nan))
+                    vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
+
+                    conc_inlet = np.zeros(len(species_names_fit), dtype=float)
+                    for i, sp_name in enumerate(species_names_fit):
+                        conc_inlet[i] = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
+
+                    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)
+                    simulation_time_s = float(5.0 * tau_s)
+                    time_grid_s, conc_profile, ok, message = (
+                        reactors.integrate_cstr_profile(
+                            simulation_time_s=simulation_time_s,
+                            temperature_K=temperature_K,
+                            reactor_volume_m3=reactor_volume_m3,
+                            vdot_m3_s=vdot_m3_s,
+                            conc_inlet_mol_m3=conc_inlet,
+                            stoich_matrix=stoich_matrix_fit,
+                            k0=fitted_params["k0"],
+                            ea_J_mol=fitted_params["ea_J_mol"],
+                            reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                            solver_method=solver_method_fit,
+                            rtol=rtol_fit,
+                            atol=atol_fit,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model_fit,
+                            max_step_fraction=max_step_fraction_fit,
+                            K0_ads=fitted_params.get("K0_ads", None),
+                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                            m_inhibition=fitted_params.get("m_inhibition", None),
+                            k0_rev=fitted_params.get("k0_rev", None),
+                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                            order_rev_matrix=fitted_params.get("order_rev", None),
+                        )
+                    )
+                    if not ok:
+                        st.error(
+                            f"CSTR 剖面计算失败: {message}\n"
+                            "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
+                        )
+                    else:
+                        fig_cs, ax_cs = plt.subplots(figsize=(7, 4.5))
+                        name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+                        profile_df = pd.DataFrame({"t_s": time_grid_s})
+                        for species_name in profile_species:
+                            idx = name_to_index[species_name]
+                            if profile_kind.startswith("C"):
+                                y = conc_profile[idx, :]
+                                ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
+                                profile_df[f"C_{species_name}_mol_m3"] = y
+                            else:
+                                c0 = float(conc_inlet[idx])
+                                if c0 < 1e-30:
+                                    x = np.full_like(time_grid_s, np.nan, dtype=float)
+                                else:
+                                    x = (c0 - conc_profile[idx, :]) / c0
+                                ax_cs.plot(time_grid_s, x, linewidth=2, label=species_name)
+                                profile_df[f"X_{species_name}"] = x
+
+                        ax_cs.set_xlabel("Time t [s]")
+                        ax_cs.set_ylabel(
+                            f"{profile_kind} [{('mol/m^3' if profile_kind.startswith('C') else '-')}]"
+                        )
+                        ax_cs.grid(True)
+                        ax_cs.legend()
+                        st.pyplot(fig_cs)
+
+                        st.download_button(
+                            "📥 下载剖面数据 CSV",
+                            profile_df.to_csv(index=False).encode("utf-8"),
+                            file_name="profile_data.csv",
+                            mime="text/csv",
+                        )
+                        image_format_cs = st.selectbox(
+                            "剖面图格式",
+                            ["png", "svg"],
+                            index=0,
+                            key="cstr_profile_image_format",
+                        )
+                        st.download_button(
+                            "📥 下载剖面图",
+                            ui_comp.figure_to_image_bytes(fig_cs, image_format_cs),
+                            file_name=f"profile_plot.{image_format_cs}",
+                            mime=("image/png" if image_format_cs == "png" else "image/svg+xml"),
+                        )
+                        plt.close(fig_cs)
 
                 else:
                     profile_kind = st.radio(

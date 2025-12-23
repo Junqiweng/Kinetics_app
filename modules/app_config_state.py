@@ -16,7 +16,7 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
 
     if reactor_type_cfg == "Batch":
         reactor_type_cfg = "BSTR"
-    if reactor_type_cfg in ["PFR", "BSTR"]:
+    if reactor_type_cfg in ["PFR", "CSTR", "BSTR"]:
         st.session_state["cfg_reactor_type"] = reactor_type_cfg
     if kinetic_model_cfg in ["power_law", "langmuir_hinshelwood", "reversible"]:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg

@@ -381,7 +381,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
         reactor_type = "BSTR"
         config["reactor_type"] = reactor_type
 
-    if reactor_type not in ["PFR", "BSTR"]:
+    if reactor_type not in ["PFR", "CSTR", "BSTR"]:
         return False, f"无效的反应器类型：{reactor_type}"
 
     if config["kinetic_model"] not in [

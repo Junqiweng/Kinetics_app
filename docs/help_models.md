@@ -36,6 +36,14 @@ App 中把“正向”和“逆向”的 $k_0,E_a,n$ 分开输入、分开勾选
 
 $$\frac{dF_i}{dV} = \sum_j \nu_{i,j} r_j,\quad C_i=\frac{F_i}{\dot{v}}$$
 
+### CSTR（稳态连续搅拌釜）
+
+$$0=\dot{v}(C_{0,i}-C_i)+V\sum_j \nu_{i,j} r_j$$
+
+也可写成：
+
+$$C_i=C_{0,i}+\tau\sum_j \nu_{i,j} r_j,\quad \tau=\frac{V}{\dot{v}}$$
+
 ### BSTR（恒体积、无进出料）
 
 $$\frac{dC_i}{dt} = \sum_j \nu_{i,j} r_j$$

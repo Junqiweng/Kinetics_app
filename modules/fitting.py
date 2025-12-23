@@ -3,7 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .reactors import integrate_batch_reactor, integrate_pfr_molar_flows
+from .reactors import (
+    integrate_batch_reactor,
+    integrate_pfr_molar_flows,
+    solve_cstr_steady_state_concentrations,
+)
 
 
 def _to_float_or_nan(value: object) -> float:
@@ -484,6 +488,106 @@ def _predict_outputs_for_row(
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = (f0 - fout) / f0
+            else:
+                return (
+                    np.zeros(len(output_species_list), dtype=float),
+                    False,
+                    "未知输出模式",
+                )
+
+    elif reactor_type == "CSTR":
+        reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
+        if not np.isfinite(reactor_volume_m3):
+            return np.zeros(len(output_species_list), dtype=float), False, "缺少 V_m3"
+        if reactor_volume_m3 < 0.0:
+            return (
+                np.zeros(len(output_species_list), dtype=float),
+                False,
+                "V_m3 不能为负",
+            )
+
+        vdot_m3_s = _to_float_or_nan(_row_get_value(row, "vdot_m3_s", np.nan))
+        if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
+            return (
+                np.zeros(len(output_species_list), dtype=float),
+                False,
+                "体积流量 vdot_m3_s 无效（请检查 CSV 的 vdot_m3_s 列）",
+            )
+
+        if inlet_column_names is None:
+            inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
+
+        conc_inlet = np.zeros(len(species_names), dtype=float)
+        for i, col in enumerate(inlet_column_names):
+            value = _to_float_or_nan(_row_get_value(row, col, np.nan))
+            if not np.isfinite(value):
+                return (
+                    np.zeros(len(output_species_list), dtype=float),
+                    False,
+                    f"缺少 {col}",
+                )
+            if value < 0.0:
+                return (
+                    np.zeros(len(output_species_list), dtype=float),
+                    False,
+                    f"{col} 不能为负",
+                )
+            conc_inlet[i] = float(value)
+
+        conc_outlet = None
+        ok = True
+        message = "OK"
+        if model_eval_cache is not None:
+            cache_key = (
+                "CSTR",
+                float(reactor_volume_m3),
+                float(vdot_m3_s),
+                float(temperature_K),
+                tuple(conc_inlet),
+            )
+            if cache_key in model_eval_cache:
+                cached = model_eval_cache[cache_key]
+                conc_outlet, ok, message = cached
+
+        if conc_outlet is None:
+            conc_outlet, ok, message = solve_cstr_steady_state_concentrations(
+                reactor_volume_m3=reactor_volume_m3,
+                temperature_K=temperature_K,
+                vdot_m3_s=vdot_m3_s,
+                conc_inlet_mol_m3=conc_inlet,
+                stoich_matrix=stoich_matrix,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                kinetic_model=kinetic_model,
+                K0_ads=K0_ads,
+                Ea_K_J_mol=Ea_K_J_mol,
+                m_inhibition=m_inhibition,
+                k0_rev=k0_rev,
+                ea_rev_J_mol=ea_rev_J_mol,
+                order_rev_matrix=order_rev_matrix,
+                stop_event=stop_event,
+                max_wall_time_s=max_wall_time_s,
+            )
+            if model_eval_cache is not None:
+                model_eval_cache[cache_key] = (conc_outlet, bool(ok), str(message))
+
+        if not ok:
+            return np.zeros(len(output_species_list), dtype=float), False, message
+
+        output_values = np.zeros(len(output_species_list), dtype=float)
+        for out_i, idx in enumerate(output_species_indices):
+            if output_mode == "Cout (mol/m^3)":
+                output_values[out_i] = conc_outlet[idx]
+            elif output_mode == "Fout (mol/s)":
+                output_values[out_i] = float(vdot_m3_s) * conc_outlet[idx]
+            elif output_mode == "X (conversion)":
+                c0 = conc_inlet[idx]
+                c_out = conc_outlet[idx]
+                if c0 < 1e-30:
+                    output_values[out_i] = np.nan
+                else:
+                    output_values[out_i] = (c0 - c_out) / c0
             else:
                 return (
                     np.zeros(len(output_species_list), dtype=float),

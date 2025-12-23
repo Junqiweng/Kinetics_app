@@ -48,6 +48,48 @@ def _build_example_batch_csv_bytes() -> bytes:
     return data_df.to_csv(index=False).encode("utf-8")
 
 
+def _build_example_cstr_csv_bytes() -> bytes:
+    """
+    生成一个 CSTR 稳态示例数据（A -> B 一级反应，幂律 n=1）。
+    用于帮助页面下载示例 CSV。
+    """
+    temperature_K = 350.0  # Temperature [K]
+    conc_A0_mol_m3 = 2000.0  # Inlet concentration [mol/m^3]
+    conc_B0_mol_m3 = 0.0  # Inlet concentration [mol/m^3]
+
+    vdot_m3_s = 1.0e-4  # Volumetric flow rate [m^3/s]
+    reactor_volume_m3 = np.array([1e-3, 2e-3, 3e-3, 5e-3, 8e-3], dtype=float)  # [m^3]
+    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)  # Residence time [s]
+
+    k0_1_s = 1.0e6  # Pre-exponential factor [1/s] (for n=1)
+    ea_J_mol = 5.0e4  # Activation energy [J/mol]
+    rate_constant_1_s = k0_1_s * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
+
+    # First-order CSTR: C_A = C_A0 / (1 + k*tau)
+    conc_A_out = conc_A0_mol_m3 / (1.0 + rate_constant_1_s * tau_s)
+    conc_B_out = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_out)
+    conversion_A = 1.0 - conc_A_out / max(conc_A0_mol_m3, 1e-30)
+
+    fout_A_mol_s = vdot_m3_s * conc_A_out
+    fout_B_mol_s = vdot_m3_s * conc_B_out
+
+    data_df = pd.DataFrame(
+        {
+            "V_m3": reactor_volume_m3,
+            "T_K": np.full(reactor_volume_m3.size, temperature_K, dtype=float),
+            "vdot_m3_s": np.full(reactor_volume_m3.size, vdot_m3_s, dtype=float),
+            "C0_A_mol_m3": np.full(reactor_volume_m3.size, conc_A0_mol_m3, dtype=float),
+            "C0_B_mol_m3": np.full(reactor_volume_m3.size, conc_B0_mol_m3, dtype=float),
+            "Cout_A_mol_m3": conc_A_out,
+            "Cout_B_mol_m3": conc_B_out,
+            "Fout_A_mol_s": fout_A_mol_s,
+            "Fout_B_mol_s": fout_B_mol_s,
+            "X_A": conversion_A,
+        }
+    )
+    return data_df.to_csv(index=False).encode("utf-8")
+
+
 def read_file_bytes_if_exists(file_path: str) -> bytes | None:
     try:
         path = Path(file_path)
@@ -110,7 +152,7 @@ def render_help_page() -> None:
 
         st.divider()
         st.markdown("**示例数据下载（可直接用于上手）**")
-        col_ex1, col_ex2 = st.columns(2)
+        col_ex1, col_ex2, col_ex3 = st.columns(3)
         with col_ex1:
             pfr_example_bytes = read_file_bytes_if_exists(
                 str(_project_root_dir() / "test_data" / "test_data_matched.csv")
@@ -129,6 +171,16 @@ def render_help_page() -> None:
                     use_container_width=True,
                 )
         with col_ex2:
+            cstr_example_bytes = _build_example_cstr_csv_bytes()
+            st.download_button(
+                "📥 下载 CSTR 示例数据 (CSV)",
+                data=cstr_example_bytes,
+                file_name="cstr_example.csv",
+                mime="text/csv",
+                help="示例：A → B 一级反应稳态 CSTR，列包含 V_m3/T_K/vdot/C0_*/Cout_*/Fout_*/X_A。",
+                use_container_width=True,
+            )
+        with col_ex3:
             batch_example_bytes = _build_example_batch_csv_bytes()
             st.download_button(
                 "📥 下载 BSTR 示例数据 (CSV)",
