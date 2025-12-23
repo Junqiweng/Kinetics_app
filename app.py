@@ -1166,38 +1166,34 @@ def main():
             st.markdown("**1. 基础边界设置**")
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
-                k0_min = st.number_input(
+                k0_min = ui_comp.smart_number_input(
                     "k0 Min",
                     value=float(get_cfg("k0_min", 1e-15)),
-                    format="%.1e",
                     key="cfg_k0_min",
                 )
-                k0_max = st.number_input(
+                k0_max = ui_comp.smart_number_input(
                     "k0 Max",
                     value=float(get_cfg("k0_max", 1e15)),
-                    format="%.1e",
                     key="cfg_k0_max",
                 )
             with col_b2:
-                ea_min = st.number_input(
+                ea_min = ui_comp.smart_number_input(
                     "Ea Min",
                     value=float(get_cfg("ea_min_J_mol", 1e4)),
-                    format="%.1e",
                     key="cfg_ea_min_J_mol",
                 )
-                ea_max = st.number_input(
+                ea_max = ui_comp.smart_number_input(
                     "Ea Max",
                     value=float(get_cfg("ea_max_J_mol", 3e5)),
-                    format="%.1e",
                     key="cfg_ea_max_J_mol",
                 )
             with col_b3:
-                ord_min = st.number_input(
+                ord_min = ui_comp.smart_number_input(
                     "Order Min",
                     value=float(get_cfg("order_min", -2.0)),
                     key="cfg_order_min",
                 )
-                ord_max = st.number_input(
+                ord_max = ui_comp.smart_number_input(
                     "Order Max",
                     value=float(get_cfg("order_max", 5.0)),
                     key="cfg_order_max",
@@ -1211,29 +1207,25 @@ def main():
                 st.markdown("**1.2 L-H 边界设置**")
                 col_lh_b1, col_lh_b2 = st.columns(2)
                 with col_lh_b1:
-                    K0_ads_min = st.number_input(
+                    K0_ads_min = ui_comp.smart_number_input(
                         "K0_ads Min",
                         value=K0_ads_min,
-                        format="%.1e",
                         key="cfg_K0_ads_min",
                     )
-                    K0_ads_max = st.number_input(
+                    K0_ads_max = ui_comp.smart_number_input(
                         "K0_ads Max",
                         value=K0_ads_max,
-                        format="%.1e",
                         key="cfg_K0_ads_max",
                     )
                 with col_lh_b2:
-                    Ea_K_min = st.number_input(
+                    Ea_K_min = ui_comp.smart_number_input(
                         "Ea_K Min",
                         value=Ea_K_min,
-                        format="%.1e",
                         key="cfg_Ea_K_min",
                     )
-                    Ea_K_max = st.number_input(
+                    Ea_K_max = ui_comp.smart_number_input(
                         "Ea_K Max",
                         value=Ea_K_max,
-                        format="%.1e",
                         key="cfg_Ea_K_max",
                     )
 
@@ -1250,14 +1242,13 @@ def main():
                         help="提示：每次迭代内部会为数值差分 Jacobian 额外调用模型多次，所以看到的“调用次数”通常会大于该值。",
                     )
                 )
-                diff_step_rel = st.number_input(
+                diff_step_rel = ui_comp.smart_number_input(
                     "diff_step (Finite Diff)",
                     value=get_cfg("diff_step_rel", 1e-2),
-                    format="%.1e",
                     key="cfg_diff_step_rel",
                     help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值。",
                 )
-                max_step_fraction = st.number_input(
+                max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
                     value=float(get_cfg("max_step_fraction", 0.1)),
                     min_value=0.0,
@@ -1513,17 +1504,17 @@ def main():
                 unsafe_allow_html=True,
             )
             refresh_interval_s = float(
-                col_interval_input.number_input(
+                ui_comp.smart_number_input(
                     "间隔(s)",
-                    label_visibility="collapsed",
-                    value=float(
-                        st.session_state.get("fitting_refresh_interval_s", 2.0)
-                    ),
+                    value=float(st.session_state.get("fitting_refresh_interval_s", 2.0)),
                     min_value=0.5,
                     max_value=10.0,
                     step=0.5,
+                    key="cfg_refresh_interval_s_ui",
                     disabled=(not fitting_running) or (not auto_refresh),
                     help="自动刷新间隔 [s]",
+                    label_visibility="collapsed",
+                    container=col_interval_input,
                 )
             )
             clear_btn = col_act4.button(

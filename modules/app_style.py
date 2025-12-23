@@ -337,6 +337,10 @@ def apply_plot_style() -> None:
             "axes.facecolor": "#ffffff",
             "axes.titleweight": 600,
             "axes.labelweight": 600,
+            # 智能切换科学计数：当指数 < -3 或 >= 4 时使用科学计数
+            "axes.formatter.limits": (-3, 4),
+            "axes.formatter.use_mathtext": True,
+            "axes.formatter.useoffset": False,
         }
     )
 

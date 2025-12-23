@@ -6,6 +6,101 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 
+SMART_FLOAT_SIG_FIGS = 3
+SMART_FLOAT_SCI_LOW = 1e-3
+SMART_FLOAT_SCI_HIGH = 1e3
+
+# Streamlit number_input：仅支持固定 format，这里只在“极小/极大”时启用科学计数
+SMART_FLOAT_SCI_HIGH_STREAMLIT = 1e3
+SMART_FLOAT_SCI_FORMAT_STREAMLIT = "%.2e"
+
+
+def smart_float_to_str(
+    value: float | int | None,
+    sig_figs: int = SMART_FLOAT_SIG_FIGS,
+    sci_low: float = SMART_FLOAT_SCI_LOW,
+    sci_high: float = SMART_FLOAT_SCI_HIGH,
+) -> str:
+    """
+    智能数字显示：小于 sci_low 或大于等于 sci_high 时用科学计数，否则用常规数字。
+
+    说明：这里“常规数字”使用有效数字格式（g），避免出现一长串小数 0。
+    """
+    if value is None:
+        return ""
+
+    try:
+        x = float(value)
+    except Exception:
+        return str(value)
+
+    if not np.isfinite(x):
+        return ""
+
+    if x == 0.0:
+        return "0"
+
+    abs_x = abs(x)
+    if (abs_x < float(sci_low)) or (abs_x >= float(sci_high)):
+        return f"{x:.{int(max(1, sig_figs - 1))}e}"
+
+    return f"{x:.{int(sig_figs)}g}"
+
+
+def smart_number_input(
+    label: str,
+    value: float,
+    key: str,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    step: float | None = None,
+    help: str | None = None,
+    disabled: bool = False,
+    label_visibility: str = "visible",
+    container=None,
+) -> float:
+    """
+    智能 number_input：
+    - 当数值很小/很大时（默认 <1e-3 或 >=1e6），用科学计数显示（避免超长数字）。
+    - 其它情况不传 format，使用 Streamlit 默认显示（更像“常规数字”，不会强制补 0）。
+
+    说明：判断优先使用当前 session_state 中的值（用户正在编辑时更符合直觉）。
+    """
+    current_value = st.session_state.get(key, value)
+    try:
+        x = float(current_value)
+    except Exception:
+        x = float(value)
+
+    use_sci = (x != 0.0) and (
+        (abs(x) < float(SMART_FLOAT_SCI_LOW))
+        or (abs(x) >= float(SMART_FLOAT_SCI_HIGH_STREAMLIT))
+    )
+
+    kwargs: dict = {
+        "label": label,
+        "value": float(value),
+        "key": key,
+        "help": help,
+        "disabled": bool(disabled),
+        "label_visibility": str(label_visibility),
+    }
+    if min_value is not None:
+        kwargs["min_value"] = float(min_value)
+    if max_value is not None:
+        kwargs["max_value"] = float(max_value)
+    if step is not None:
+        kwargs["step"] = float(step)
+
+    if use_sci:
+        kwargs["format"] = SMART_FLOAT_SCI_FORMAT_STREAMLIT
+
+    if container is None:
+        return float(st.number_input(**kwargs))
+
+    return float(container.number_input(**kwargs))
+
+
 def figure_to_image_bytes(fig: plt.Figure, image_format: str) -> bytes:
     """
     将 Matplotlib Figure 导出为字节流。
@@ -23,7 +118,16 @@ def apply_plot_tick_format(
     ax: plt.Axes, number_style: str, decimal_places: int, use_auto: bool
 ) -> None:
     if use_auto:
-        return
+        # 自动模式：根据数量级自动切换科学计数
+        try:
+            from matplotlib.ticker import ScalarFormatter
+
+            formatter = ScalarFormatter(useMathText=True)
+            formatter.set_powerlimits((-3, 4))
+            ax.xaxis.set_major_formatter(formatter)
+            ax.yaxis.set_major_formatter(formatter)
+        except Exception:
+            return
     decimal_places = int(decimal_places)
     fmt_str = (
         f"{{:.{decimal_places}e}}"
@@ -68,9 +172,9 @@ def render_param_table(
     """
     df = pd.DataFrame(
         {
-            col1_name: [f"{v:.2e}" for v in col1_data],
+            col1_name: [smart_float_to_str(v) for v in col1_data],
             f"Fit_{col1_name}": fit1_default,
-            col2_name: [f"{v:.2e}" for v in col2_data],
+            col2_name: [smart_float_to_str(v) for v in col2_data],
             f"Fit_{col2_name}": fit2_default,
         },
         index=index_names,
