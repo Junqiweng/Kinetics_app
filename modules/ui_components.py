@@ -172,6 +172,7 @@ def render_param_table(
     通用的双参数表格渲染 (如 k0/Ea, K0/Ea, k0_rev/Ea_rev)。
     返回: val1_arr, val2_arr, fit1_arr, fit2_arr
     """
+
     def ensure_1d_length(
         input_array: np.ndarray | list | tuple | float | int | bool | None,
         target_length: int,
@@ -215,13 +216,7 @@ def render_param_table(
     fit1_default = ensure_1d_length(fit1_default, target_length, False).astype(bool)
     fit2_default = ensure_1d_length(fit2_default, target_length, False).astype(bool)
 
-    if needs_resize:
-        warn_key = f"_warn_len_mismatch_{key_prefix}"
-        if warn_key not in st.session_state:
-            st.warning(
-                "检测到参数数量与当前行数不一致，已自动补齐/截断以避免报错。"
-            )
-            st.session_state[warn_key] = True
+    # 自动补齐/截断逻辑已在上方 ensure_1d_length 中处理，无需警告
 
     df = pd.DataFrame(
         {
@@ -298,9 +293,9 @@ def render_order_table(
         out[:n_copy_rows, :n_copy_cols] = mat[:n_copy_rows, :n_copy_cols]
         return out
 
-    order_data = ensure_2d_shape(order_data, n_reactions, len(species_names), 0.0).astype(
-        float
-    )
+    order_data = ensure_2d_shape(
+        order_data, n_reactions, len(species_names), 0.0
+    ).astype(float)
     fit_data = ensure_2d_shape(fit_data, n_reactions, len(species_names), False).astype(
         bool
     )

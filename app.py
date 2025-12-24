@@ -645,12 +645,12 @@ def main():
                 ui_comp.render_param_table(
                     f"base_params_{n_reactions}",
                     [f"R{i+1}" for i in range(n_reactions)],
-                    "k0_guess",
+                    "k₀",
                     k0_def,
                     "指前因子",
-                    "Ea_guess_J_mol",
+                    "Eₐ [J/mol]",
                     ea_def,
-                    "活化能 [J/mol]",
+                    "活化能",
                     fit_k0_def,
                     fit_ea_def,
                 )
@@ -730,10 +730,10 @@ def main():
                         ui_comp.render_param_table(
                             f"lh_ads_{len(species_names)}",
                             species_names,
-                            "K0_ads",
+                            "K₀,ads",
                             K0_def,
                             "吸附常数指前因子",
-                            "Ea_K_J_mol",
+                            "Eₐ,K [J/mol]",
                             EaK_def,
                             "吸附热",
                             fit_K0_def,
@@ -814,12 +814,12 @@ def main():
                         ui_comp.render_param_table(
                             f"rev_params_{n_reactions}",
                             [f"R{i+1}" for i in range(n_reactions)],
-                            "k0_rev",
+                            "k₀⁻",
                             k0r_def,
-                            "逆反应 k0",
-                            "Ea_rev_J_mol",
+                            "逆反应指前因子",
+                            "Eₐ⁻ [J/mol]",
                             ear_def,
-                            "逆反应 Ea",
+                            "逆反应活化能",
                             fit_k0r_def,
                             fit_ear_def,
                         )
@@ -869,29 +869,93 @@ def main():
     output_species_list = []
 
     with tab_data:
+        # --- 拟合目标变量 + 物种选择（同一行）---
+        col_target1, col_target2 = st.columns(2)
+        with col_target1:
+            opts = (
+                ["Cout (mol/m^3)", "Fout (mol/s)"]
+                if reactor_type in ("PFR", "CSTR")
+                else ["Cout (mol/m^3)"]
+            )
+            if ("cfg_output_mode" in st.session_state) and (
+                str(st.session_state["cfg_output_mode"]) not in opts
+            ):
+                st.session_state["cfg_output_mode"] = opts[0]
+            output_mode = st.selectbox(
+                "拟合目标变量",
+                opts,
+                index=(
+                    opts.index(get_cfg("output_mode", opts[0]))
+                    if get_cfg("output_mode", opts[0]) in opts
+                    else 0
+                ),
+                key="cfg_output_mode",
+                help="选择用于拟合的测量数据类型（Cout=出口浓度，Fout=出口摩尔流量）",
+            )
+
+        with col_target2:
+            # 读取配置中保存的物种列表，并清理无效物种
+            saved_species_list = get_cfg("output_species_list", None)
+            if saved_species_list is not None and isinstance(saved_species_list, list):
+                # 从配置中读取，过滤掉不在当前物种列表中的物种
+                valid_species = [
+                    str(x) for x in saved_species_list if str(x) in species_names
+                ]
+                if valid_species:
+                    default_species = valid_species
+                else:
+                    default_species = list(species_names)
+            else:
+                default_species = list(species_names)
+
+            # 重要：不要同时给 multiselect 的 default=... 并且又写 session_state[key]，
+            # 否则会触发 Streamlit 警告：
+            # "The widget with key ... was created with a default value but also had its value set via the Session State API."
+            # 这里统一以 session_state 作为单一数据源。
+            if "cfg_output_species_list" not in st.session_state:
+                st.session_state["cfg_output_species_list"] = default_species
+            else:
+                current_list = st.session_state.get("cfg_output_species_list", [])
+                if not isinstance(current_list, list):
+                    current_list = []
+                cleaned_list = [str(x) for x in current_list if str(x) in species_names]
+                st.session_state["cfg_output_species_list"] = (
+                    cleaned_list if cleaned_list else default_species
+                )
+
+            fit_mask = st.multiselect(
+                "选择进入目标函数的物种",
+                species_names,
+                key="cfg_output_species_list",
+                help="选择哪些物种的测量值用于计算拟合残差",
+            )
+            output_species_list = fit_mask
+
+        st.divider()
         col_d1, col_d2 = st.columns([1, 1])
         with col_d1:
             st.markdown("#### 1. 下载模板")
+            # 根据 output_mode 决定测量列
+            if output_mode.startswith("F"):
+                meas_cols = [f"Fout_{s}_mol_s" for s in species_names]
+            else:
+                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names]
+
+            # 根据反应器类型决定输入条件列
             if reactor_type == "PFR":
-                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
-                    f"Fout_{s}_mol_s" for s in species_names
-                ]
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
                     + [f"F0_{s}_mol_s" for s in species_names]
                     + meas_cols
                 )
             elif reactor_type == "CSTR":
-                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names] + [
-                    f"Fout_{s}_mol_s" for s in species_names
-                ]
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
                     + meas_cols
                 )
             else:
-                meas_cols = [f"Cout_{s}_mol_m3" for s in species_names]
+                # BSTR
                 cols = (
                     ["t_s", "T_K"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
@@ -901,8 +965,13 @@ def main():
             template_csv = (
                 pd.DataFrame(columns=cols).to_csv(index=False).encode("utf-8")
             )
+            # 动态生成模板文件名，包含反应器类型和测量类型
+            template_filename = f"template_{reactor_type}_{output_mode.split()[0]}.csv"
             st.download_button(
-                "📥 下载 CSV 模板", template_csv, "template.csv", "text/csv"
+                "📥 下载 CSV 模板", template_csv, template_filename, "text/csv"
+            )
+            st.caption(
+                f"模板包含 {len(cols)} 列：输入条件 + {output_mode.split()[0]} 测量值"
             )
 
         with col_d2:
@@ -941,66 +1010,6 @@ def main():
                 label_visibility="collapsed",
                 key=csv_uploader_key,
             )
-
-        st.divider()
-        col_mz1, col_mz2 = st.columns(2)
-        with col_mz1:
-            opts = (
-                ["Fout (mol/s)", "Cout (mol/m^3)"]
-                if reactor_type in ("PFR", "CSTR")
-                else ["Cout (mol/m^3)"]
-            )
-            if ("cfg_output_mode" in st.session_state) and (
-                str(st.session_state["cfg_output_mode"]) not in opts
-            ):
-                st.session_state["cfg_output_mode"] = opts[0]
-            output_mode = st.selectbox(
-                "拟合目标变量",
-                opts,
-                index=(
-                    opts.index(get_cfg("output_mode", opts[0]))
-                    if get_cfg("output_mode", opts[0]) in opts
-                    else 0
-                ),
-                key="cfg_output_mode",
-            )
-
-        with col_mz2:
-            # 读取配置中保存的物种列表，并清理无效物种
-            saved_species_list = get_cfg("output_species_list", None)
-            if saved_species_list is not None and isinstance(saved_species_list, list):
-                # 从配置中读取，过滤掉不在当前物种列表中的物种
-                valid_species = [
-                    str(x) for x in saved_species_list if str(x) in species_names
-                ]
-                if valid_species:
-                    default_species = valid_species
-                else:
-                    default_species = list(species_names)
-            else:
-                default_species = list(species_names)
-
-            # 重要：不要同时给 multiselect 的 default=... 并且又写 session_state[key]，
-            # 否则会触发 Streamlit 警告：
-            # "The widget with key ... was created with a default value but also had its value set via the Session State API."
-            # 这里统一以 session_state 作为单一数据源。
-            if "cfg_output_species_list" not in st.session_state:
-                st.session_state["cfg_output_species_list"] = default_species
-            else:
-                current_list = st.session_state.get("cfg_output_species_list", [])
-                if not isinstance(current_list, list):
-                    current_list = []
-                cleaned_list = [str(x) for x in current_list if str(x) in species_names]
-                st.session_state["cfg_output_species_list"] = (
-                    cleaned_list if cleaned_list else default_species
-                )
-
-            fit_mask = st.multiselect(
-                "选择进入目标函数的物种",
-                species_names,
-                key="cfg_output_species_list",
-            )
-            output_species_list = fit_mask
 
         if uploaded_file:
             try:
@@ -1516,7 +1525,9 @@ def main():
             refresh_interval_s = float(
                 ui_comp.smart_number_input(
                     "间隔(s)",
-                    value=float(st.session_state.get("fitting_refresh_interval_s", 2.0)),
+                    value=float(
+                        st.session_state.get("fitting_refresh_interval_s", 2.0)
+                    ),
                     min_value=0.5,
                     max_value=10.0,
                     step=0.5,
