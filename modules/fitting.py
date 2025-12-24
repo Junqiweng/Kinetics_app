@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .constants import EPSILON_FLOW_RATE
 from .reactors import (
     integrate_batch_reactor,
     integrate_pfr_molar_flows,
@@ -382,7 +383,9 @@ def _predict_outputs_for_row(
 
     if output_species_indices is None:
         try:
-            output_species_indices = [name_to_index[name] for name in output_species_list]
+            output_species_indices = [
+                name_to_index[name] for name in output_species_list
+            ]
         except Exception:
             return (
                 np.zeros(len(output_species_list), dtype=float),
@@ -470,7 +473,11 @@ def _predict_outputs_for_row(
                 max_wall_time_s=max_wall_time_s,
             )
             if model_eval_cache is not None:
-                model_eval_cache[cache_key] = (molar_flow_outlet, bool(ok), str(message))
+                model_eval_cache[cache_key] = (
+                    molar_flow_outlet,
+                    bool(ok),
+                    str(message),
+                )
         if not ok:
             return np.zeros(len(output_species_list), dtype=float), False, message
 
@@ -480,11 +487,13 @@ def _predict_outputs_for_row(
             if output_mode == "Fout (mol/s)":
                 output_values[out_i] = molar_flow_outlet[idx]
             elif output_mode == "Cout (mol/m^3)":
-                output_values[out_i] = molar_flow_outlet[idx] / max(vdot_m3_s, 1e-30)
+                output_values[out_i] = molar_flow_outlet[idx] / max(
+                    vdot_m3_s, EPSILON_FLOW_RATE
+                )
             elif output_mode == "X (conversion)":
                 f0 = molar_flow_inlet[idx]
                 fout = molar_flow_outlet[idx]
-                if f0 < 1e-30:
+                if f0 < EPSILON_FLOW_RATE:
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = (f0 - fout) / f0

@@ -85,14 +85,16 @@ def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
         return None, None, "未找到已缓存上传文件"
 
     try:
-        uploaded_bytes = open(csv_path, "rb").read()
+        with open(csv_path, "rb") as f:
+            uploaded_bytes = f.read()
     except Exception as exc:
         return None, None, f"读取缓存 CSV 失败: {exc}"
 
     uploaded_name = ""
     if os.path.exists(meta_path):
         try:
-            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
             uploaded_name = str(meta.get("name", "")).strip()
         except Exception:
             uploaded_name = ""
@@ -102,7 +104,9 @@ def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
     return uploaded_bytes, uploaded_name, "OK"
 
 
-def _save_persisted_upload(uploaded_bytes: bytes, uploaded_name: str) -> tuple[bool, str]:
+def _save_persisted_upload(
+    uploaded_bytes: bytes, uploaded_name: str
+) -> tuple[bool, str]:
     csv_path, meta_path = _get_upload_file_paths()
     try:
         _atomic_write_bytes(csv_path, uploaded_bytes)

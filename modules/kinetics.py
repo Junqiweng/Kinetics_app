@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-R_GAS_J_MOL_K = 8.314462618  # Gas constant [J/(mol*K)]
-CONC_EPS_MOL_M3 = 1e-30  # Concentration floor [mol/m^3] (avoid 0^negative -> inf)
+from .constants import (
+    R_GAS_J_MOL_K,
+    EPSILON_CONCENTRATION,
+    EPSILON_DENOMINATOR,
+    FLOAT_EQUALITY_TOLERANCE,
+)
 
 
 def safe_nonnegative(values: np.ndarray) -> np.ndarray:
@@ -37,7 +41,7 @@ def calc_rate_vector_power_law(
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
-                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+                conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_value = rate_value * (conc_value**order_value)
         rate_vector[reaction_index] = rate_value
     return rate_vector
@@ -94,14 +98,16 @@ def calc_rate_vector_langmuir_hinshelwood(
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
-                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+                conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_numerator = rate_numerator * (conc_value**order_value)
 
         # 分母：(1 + Σ_i K_i(T) * C_i)^m_j
         m_j = m_inhibition[reaction_index]
         denominator = denominator_base**m_j if m_j != 0.0 else 1.0
 
-        rate_vector[reaction_index] = rate_numerator / max(denominator, 1e-30)
+        rate_vector[reaction_index] = rate_numerator / max(
+            denominator, EPSILON_DENOMINATOR
+        )
 
     return rate_vector
 
@@ -149,7 +155,7 @@ def calc_rate_vector_reversible(
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
-                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+                conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_fwd = rate_fwd * (conc_value**order_value)
 
         # 逆反应速率
@@ -160,7 +166,7 @@ def calc_rate_vector_reversible(
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
-                conc_value = max(conc_value, CONC_EPS_MOL_M3)
+                conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_rev = rate_rev * (conc_value**order_value)
 
         # 净反应速率

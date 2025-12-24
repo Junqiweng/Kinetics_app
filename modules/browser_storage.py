@@ -26,7 +26,7 @@ def _compute_config_hash(config_dict: dict) -> str:
     """计算配置的哈希值，用于检测变化。"""
     try:
         config_json = json.dumps(config_dict, sort_keys=True, ensure_ascii=False)
-        return hashlib.md5(config_json.encode("utf-8")).hexdigest()[:16]
+        return hashlib.sha256(config_json.encode("utf-8")).hexdigest()[:16]
     except Exception:
         return ""
 

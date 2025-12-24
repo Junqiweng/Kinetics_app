@@ -7,6 +7,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares
 
+from .constants import EPSILON_FLOW_RATE, EPSILON_DENOMINATOR
 from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
     calc_rate_vector_power_law,
@@ -90,16 +91,22 @@ def integrate_pfr_molar_flows(
             max_wall_time_s = float(max_wall_time_s)
         except Exception:
             max_wall_time_s = None
-        if (max_wall_time_s is not None) and (not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0):
+        if (max_wall_time_s is not None) and (
+            not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
+        ):
             max_wall_time_s = None
 
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
-        if (max_wall_time_s is not None) and ((time.monotonic() - start_time_s) > max_wall_time_s):
+        if (max_wall_time_s is not None) and (
+            (time.monotonic() - start_time_s) > max_wall_time_s
+        ):
             raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
 
-        conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(vdot_m3_s, 1e-30)
+        conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(
+            vdot_m3_s, EPSILON_FLOW_RATE
+        )
 
         if kinetic_model == "power_law":
             rate_vector = calc_rate_vector_power_law(
@@ -381,7 +388,9 @@ def solve_cstr_steady_state_concentrations(
     if max_nfev <= 0:
         max_nfev = 200
 
-    tau_s = float(reactor_volume_m3) / max(float(vdot_m3_s), 1e-30)  # Residence time [s]
+    tau_s = float(reactor_volume_m3) / max(
+        float(vdot_m3_s), EPSILON_FLOW_RATE
+    )  # Residence time [s]
     if (not np.isfinite(tau_s)) or (tau_s < 0.0):
         return conc_inlet_mol_m3.copy(), False, "停留时间 tau_s 无效"
     if tau_s == 0.0:
@@ -418,8 +427,12 @@ def solve_cstr_steady_state_concentrations(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
                 K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size),
-                m_inhibition=m_inhibition if m_inhibition is not None else np.ones(k0.size),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         if kinetic_model == "reversible":
             return calc_rate_vector_reversible(
@@ -429,9 +442,13 @@ def solve_cstr_steady_state_concentrations(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
-                    order_rev_matrix if order_rev_matrix is not None else np.zeros_like(reaction_order_matrix)
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
                 ),
             )
         return calc_rate_vector_power_law(
@@ -550,7 +567,9 @@ def integrate_cstr_profile(
         return np.array([0.0]), conc_inlet_mol_m3[:, None], False, "V_m3 不能为负"
     if reactor_volume_m3 == 0.0:
         time_grid_s = np.linspace(0.0, float(simulation_time_s), n_points, dtype=float)
-        conc_profile = np.repeat(conc_inlet_mol_m3.astype(float)[:, None], n_points, axis=1)
+        conc_profile = np.repeat(
+            conc_inlet_mol_m3.astype(float)[:, None], n_points, axis=1
+        )
         return time_grid_s, conc_profile, True, "V=0"
 
     if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
@@ -589,7 +608,7 @@ def integrate_cstr_profile(
             "反应级数矩阵 n 包含 NaN/Inf",
         )
 
-    tau_s = float(reactor_volume_m3) / max(float(vdot_m3_s), 1e-30)
+    tau_s = float(reactor_volume_m3) / max(float(vdot_m3_s), EPSILON_FLOW_RATE)
     if (not np.isfinite(tau_s)) or (tau_s <= 0.0):
         return np.array([0.0]), conc_inlet_mol_m3[:, None], False, "停留时间 tau_s 无效"
 
@@ -599,7 +618,9 @@ def integrate_cstr_profile(
             max_wall_time_s = float(max_wall_time_s)
         except Exception:
             max_wall_time_s = None
-        if (max_wall_time_s is not None) and (not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0):
+        if (max_wall_time_s is not None) and (
+            not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
+        ):
             max_wall_time_s = None
 
     conc_inlet_mol_m3 = conc_inlet_mol_m3.astype(float)
@@ -607,7 +628,9 @@ def integrate_cstr_profile(
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
-        if (max_wall_time_s is not None) and ((time.monotonic() - start_time_s) > max_wall_time_s):
+        if (max_wall_time_s is not None) and (
+            (time.monotonic() - start_time_s) > max_wall_time_s
+        ):
             raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
 
         conc_safe = safe_nonnegative(conc_mol_m3)
@@ -628,8 +651,12 @@ def integrate_cstr_profile(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
                 K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)),
-                m_inhibition=(m_inhibition if m_inhibition is not None else np.ones(k0.size)),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
             )
         elif kinetic_model == "reversible":
             rate_vector = calc_rate_vector_reversible(
@@ -639,9 +666,13 @@ def integrate_cstr_profile(
                 ea_fwd_J_mol=ea_J_mol,
                 order_fwd_matrix=reaction_order_matrix,
                 k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
                 order_rev_matrix=(
-                    order_rev_matrix if order_rev_matrix is not None else np.zeros_like(reaction_order_matrix)
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
                 ),
             )
         else:
@@ -654,7 +685,9 @@ def integrate_cstr_profile(
             )
 
         reaction_source_mol_m3_s = stoich_matrix @ rate_vector
-        mixing_term_mol_m3_s = (conc_inlet_mol_m3 - conc_safe) / max(tau_s, 1e-30)
+        mixing_term_mol_m3_s = (conc_inlet_mol_m3 - conc_safe) / max(
+            tau_s, EPSILON_DENOMINATOR
+        )
         dC_dt = mixing_term_mol_m3_s + reaction_source_mol_m3_s
         return dC_dt
 
@@ -806,7 +839,9 @@ def integrate_pfr_profile(
         ):
             raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
 
-        conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(vdot_m3_s, 1e-30)
+        conc_mol_m3 = safe_nonnegative(molar_flow_mol_s) / max(
+            vdot_m3_s, EPSILON_FLOW_RATE
+        )
 
         if kinetic_model == "power_law":
             rate_vector = calc_rate_vector_power_law(
@@ -978,13 +1013,17 @@ def integrate_batch_profile(
             max_wall_time_s = float(max_wall_time_s)
         except Exception:
             max_wall_time_s = None
-        if (max_wall_time_s is not None) and (not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0):
+        if (max_wall_time_s is not None) and (
+            not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
+        ):
             max_wall_time_s = None
 
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
-        if (max_wall_time_s is not None) and ((time.monotonic() - start_time_s) > max_wall_time_s):
+        if (max_wall_time_s is not None) and (
+            (time.monotonic() - start_time_s) > max_wall_time_s
+        ):
             raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
 
         conc_safe = safe_nonnegative(conc_mol_m3)

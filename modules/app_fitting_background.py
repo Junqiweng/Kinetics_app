@@ -13,15 +13,14 @@ import streamlit as st
 from scipy.optimize import least_squares
 
 from . import fitting
+from .constants import (
+    DEFAULT_RESIDUAL_PENALTY_MULTIPLIER,
+    DEFAULT_RESIDUAL_PENALTY_MIN_ABS,
+)
 
 
 class FittingStoppedError(Exception):
     pass
-
-
-# 固定默认值（不在 UI 中暴露给用户）
-DEFAULT_RESIDUAL_PENALTY_MULTIPLIER = 1e3
-DEFAULT_RESIDUAL_PENALTY_MIN_ABS = 1e3
 
 
 def _get_fitting_executor() -> ThreadPoolExecutor:
@@ -144,7 +143,9 @@ def _render_fitting_progress_panel() -> None:
     if timeline:
         st.write("")
         with st.container(border=True):
-            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+            )
             st.markdown("#### 进度日志")
             for icon, text in timeline:
                 text = str(text).strip()
@@ -154,14 +155,18 @@ def _render_fitting_progress_panel() -> None:
     if ms_summary:
         st.write("")
         with st.container(border=True):
-            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+            )
             st.markdown("#### Multi-start 摘要")
             st.code(ms_summary, language="text")
 
     if final_summary:
         st.write("")
         with st.container(border=True):
-            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+            )
             st.markdown("#### 拟合摘要")
             st.caption(final_summary)
 
@@ -365,7 +370,9 @@ def _run_fitting_job(
         available_cols_text = ", ".join(available_cols[:40])
         suggestions = []
         for missing_name in missing_output_columns:
-            matches = difflib.get_close_matches(missing_name, available_cols, n=3, cutoff=0.6)
+            matches = difflib.get_close_matches(
+                missing_name, available_cols, n=3, cutoff=0.6
+            )
             if matches:
                 suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
         suggestion_text = ("\n" + "\n".join(suggestions)) if suggestions else ""
@@ -381,27 +388,30 @@ def _run_fitting_job(
 
     # --- 必要输入列检查（避免所有行都“失败罚项”，看起来像卡住）---
     if reactor_type == "PFR":
-        required_input_columns = (
-            ["V_m3", "T_K", "vdot_m3_s"]
-            + [f"F0_{name}_mol_s" for name in species_names]
-        )
+        required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + [
+            f"F0_{name}_mol_s" for name in species_names
+        ]
     elif reactor_type == "CSTR":
-        required_input_columns = (
-            ["V_m3", "T_K", "vdot_m3_s"] + [f"C0_{name}_mol_m3" for name in species_names]
-        )
+        required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + [
+            f"C0_{name}_mol_m3" for name in species_names
+        ]
     else:
         required_input_columns = ["t_s", "T_K"] + [
             f"C0_{name}_mol_m3" for name in species_names
         ]
 
-    missing_input_columns = [c for c in required_input_columns if c not in data_df.columns]
+    missing_input_columns = [
+        c for c in required_input_columns if c not in data_df.columns
+    ]
     if missing_input_columns:
         missing_text = ", ".join(missing_input_columns)
         available_cols = [str(c) for c in list(data_df.columns)]
         available_cols_text = ", ".join(available_cols[:40])
         suggestions = []
         for missing_name in missing_input_columns:
-            matches = difflib.get_close_matches(missing_name, available_cols, n=3, cutoff=0.6)
+            matches = difflib.get_close_matches(
+                missing_name, available_cols, n=3, cutoff=0.6
+            )
             if matches:
                 suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
         suggestion_text = ("\n" + "\n".join(suggestions)) if suggestions else ""
