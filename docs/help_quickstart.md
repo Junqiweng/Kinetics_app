@@ -18,7 +18,7 @@
 
 1. 上传 CSV（或使用已缓存的上传文件）
 2. 选择 `拟合目标变量`
-   - **PFR / CSTR**：可选 `Fout (mol/s)` 或 `Cout (mol/m^3)`
+   - **PFR / CSTR**：可选 `Fout (mol/s)` 或 `Cout (mol/m^3)` 或 `xout (mole fraction)`
    - **BSTR**：只能选 `Cout (mol/m^3)`（无出口流）
 3. 勾选“进入目标函数的物种”  
    只选你**确实有测量列**、并且该测量列**每一行都是数字**（不能有 NaN/空白/文本/Inf）

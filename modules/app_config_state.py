@@ -31,7 +31,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_atol"] = float(config.get("atol", 1e-9))
 
     if "species_text" in config:
-        st.session_state["cfg_species_text"] = str(config.get("species_text", "")).strip()
+        st.session_state["cfg_species_text"] = str(
+            config.get("species_text", "")
+        ).strip()
     if "n_reactions" in config:
         st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
 
@@ -39,7 +41,11 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
     if reactor_type_cfg == "BSTR":
         allowed_output_modes = ["Cout (mol/m^3)"]
     else:
-        allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)"]
+        allowed_output_modes = [
+            "Fout (mol/s)",
+            "Cout (mol/m^3)",
+            "xout (mole fraction)",
+        ]
     if output_mode_cfg in allowed_output_modes:
         st.session_state["cfg_output_mode"] = output_mode_cfg
     elif allowed_output_modes:
@@ -47,7 +53,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
 
     output_species_list_cfg = config.get("output_species_list", None)
     if isinstance(output_species_list_cfg, list):
-        st.session_state["cfg_output_species_list"] = [str(x) for x in output_species_list_cfg]
+        st.session_state["cfg_output_species_list"] = [
+            str(x) for x in output_species_list_cfg
+        ]
 
     for key_name in [
         "k0_min",
@@ -94,7 +102,9 @@ def _clear_config_related_state() -> None:
     st.session_state["uploader_ver_config_json"] = (
         int(st.session_state.get("uploader_ver_config_json", 0)) + 1
     )
-    st.session_state["uploader_ver_csv"] = int(st.session_state.get("uploader_ver_csv", 0)) + 1
+    st.session_state["uploader_ver_csv"] = (
+        int(st.session_state.get("uploader_ver_csv", 0)) + 1
+    )
 
     keys_to_delete: list[str] = []
 
@@ -122,7 +132,9 @@ def _clear_config_related_state() -> None:
     # 3.1) 上传控件 / 上传缓存（配置 JSON + 实验数据 CSV）
     for key in list(st.session_state.keys()):
         key_str = str(key)
-        if key_str.startswith("uploaded_config_json_") or key_str.startswith("uploaded_csv_"):
+        if key_str.startswith("uploaded_config_json_") or key_str.startswith(
+            "uploaded_csv_"
+        ):
             keys_to_delete.append(key_str)
     keys_to_delete.extend(["data_df_cached"])
 

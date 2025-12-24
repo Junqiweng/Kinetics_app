@@ -38,6 +38,8 @@ def _get_measurement_column_name(output_mode: str, species_name: str) -> str:
         return f"Fout_{species_name}_mol_s"
     if output_mode.startswith("C"):
         return f"Cout_{species_name}_mol_m3"
+    if output_mode.startswith("x"):
+        return f"xout_{species_name}"
     # 兼容旧版本：曾支持 X (conversion)
     return f"X_{species_name}"
 
@@ -48,6 +50,8 @@ def _get_output_unit_text(output_mode: str) -> str:
         return "mol/s"
     if output_mode.startswith("C"):
         return "mol/m^3"
+    if output_mode.startswith("x"):
+        return "-"
     return "-"
 
 
@@ -77,7 +81,9 @@ def _build_fit_comparison_long_table(
         ).to_numpy(dtype=float)
 
     species_name_to_index = {name: i for i, name in enumerate(species_names)}
-    output_species_indices = [species_name_to_index[name] for name in output_species_list]
+    output_species_indices = [
+        species_name_to_index[name] for name in output_species_list
+    ]
     if reactor_type == "PFR":
         inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
     else:

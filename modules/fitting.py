@@ -492,6 +492,13 @@ def _predict_outputs_for_row(
                 output_values[out_i] = molar_flow_outlet[idx] / max(
                     vdot_m3_s, EPSILON_FLOW_RATE
                 )
+            elif output_mode == "xout (mole fraction)":
+                # 摩尔组成 y_i = F_i / Σ F_j
+                total_flow = np.sum(molar_flow_outlet)
+                if total_flow < EPSILON_FLOW_RATE:
+                    output_values[out_i] = np.nan
+                else:
+                    output_values[out_i] = molar_flow_outlet[idx] / total_flow
             elif output_mode == "X (conversion)":
                 f0 = molar_flow_inlet[idx]
                 fout = molar_flow_outlet[idx]
@@ -592,6 +599,13 @@ def _predict_outputs_for_row(
                 output_values[out_i] = conc_outlet[idx]
             elif output_mode == "Fout (mol/s)":
                 output_values[out_i] = float(vdot_m3_s) * conc_outlet[idx]
+            elif output_mode == "xout (mole fraction)":
+                # 摩尔组成 y_i = F_i / Σ F_j = C_i / Σ C_j (体积流量可约掉)
+                total_conc = np.sum(conc_outlet)
+                if total_conc < 1e-30:
+                    output_values[out_i] = np.nan
+                else:
+                    output_values[out_i] = conc_outlet[idx] / total_conc
             elif output_mode == "X (conversion)":
                 c0 = conc_inlet[idx]
                 c_out = conc_outlet[idx]

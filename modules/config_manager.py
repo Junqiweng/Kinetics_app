@@ -434,7 +434,11 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if reactor_type == "BSTR":
             allowed_output_modes = ["Cout (mol/m^3)"]
         else:
-            allowed_output_modes = ["Fout (mol/s)", "Cout (mol/m^3)"]
+            allowed_output_modes = [
+                "Fout (mol/s)",
+                "Cout (mol/m^3)",
+                "xout (mole fraction)",
+            ]
 
         if output_mode not in allowed_output_modes:
             return False, f"无效的 output_mode：{output_mode}"

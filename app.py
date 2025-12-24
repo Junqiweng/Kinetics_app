@@ -873,7 +873,7 @@ def main():
         col_target1, col_target2 = st.columns(2)
         with col_target1:
             opts = (
-                ["Cout (mol/m^3)", "Fout (mol/s)"]
+                ["Cout (mol/m^3)", "Fout (mol/s)", "xout (mole fraction)"]
                 if reactor_type in ("PFR", "CSTR")
                 else ["Cout (mol/m^3)"]
             )
@@ -890,7 +890,7 @@ def main():
                     else 0
                 ),
                 key="cfg_output_mode",
-                help="选择用于拟合的测量数据类型（Cout=出口浓度，Fout=出口摩尔流量）",
+                help="选择用于拟合的测量数据类型（Cout=出口浓度，Fout=出口摩尔流量，xout=出口摩尔组成）",
             )
 
         with col_target2:
@@ -938,6 +938,8 @@ def main():
             # 根据 output_mode 决定测量列
             if output_mode.startswith("F"):
                 meas_cols = [f"Fout_{s}_mol_s" for s in species_names]
+            elif output_mode.startswith("x"):
+                meas_cols = [f"xout_{s}" for s in species_names]
             else:
                 meas_cols = [f"Cout_{s}_mol_m3" for s in species_names]
 

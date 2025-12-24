@@ -37,6 +37,7 @@
 
 - 选 `Fout (mol/s)`：需要 `Fout_<物种名>_mol_s`（**仅 PFR/CSTR 可选**）
 - 选 `Cout (mol/m^3)`：需要 `Cout_<物种名>_mol_m3`
+- 选 `xout (mole fraction)`：需要 `xout_<物种名>`（**仅 PFR/CSTR 可选**）
 
 ## 4) 重要规则：只检查“你选中的测量列”
 
