@@ -82,8 +82,8 @@ streamlit run app.py
 
 **Step 2：点左侧 `📖 教程/帮助`，下载示例 CSV（PFR 或 BSTR）**
 
-- PFR 示例：`test_data/test_data_matched.csv`
-- BSTR 示例：App 内自动生成（下载即可）
+- PFR 示例：`test_data/orthogonal_design_data.csv`（也可运行 `python test_data/generate_orthogonal_design.py` 重新生成）
+- CSTR/BSTR 示例：App 内自动生成（下载即可）
 
 **Step 3：按示例配置输入模型**
 
@@ -97,7 +97,7 @@ streamlit run app.py
 
 **Step 5：选择拟合目标变量与目标物种**
 
-- PFR 示例通常选：`Fout (mol/s)`，目标物种选 `A`
+- PFR 示例通常选：`Fout (mol/s)`，目标物种选 `A`（示例文件仅提供 `Fout_A_mol_s`）
 - BSTR 示例通常选：`Cout (mol/m^3)`
 
 **Step 6：到「③ 拟合与结果」点 `🚀 开始拟合`**

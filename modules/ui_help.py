@@ -169,7 +169,7 @@ def render_help_page() -> None:
                     data=pfr_example_bytes,
                     file_name="pfr_example.csv",
                     mime="text/csv",
-                    help="示例：A → B 一级反应，列包含 V_m3/T_K/vdot/F0_*/Fout_*。",
+                    help="示例：A → B 一级反应（正交设计，27 组工况）。测量列为 Fout_A_mol_s；建议目标物种只选 A。",
                     use_container_width=True,
                 )
         with col_ex2:

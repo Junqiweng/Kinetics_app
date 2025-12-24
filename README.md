@@ -94,10 +94,10 @@ streamlit run app.py
 
 ## 快速验证（推荐先跑通一次）
 
-1) 生成 PFR 示例数据（也可直接在 App 的“教程/帮助”里下载）：
+1) （可选）生成/更新 PFR 示例数据（App 的“教程/帮助”也可直接下载现成示例）：
 
 ```bash
-python test_data/generate_test_data.py
+python test_data/generate_orthogonal_design.py
 ```
 
 2) 打开 App：`streamlit run app.py`
@@ -202,23 +202,26 @@ Kinetics_app/
 ├── .streamlit/
 │   └── config.toml        # Streamlit 主题配置
 └── test_data/
-    ├── generate_test_data.py   # 测试数据生成脚本
-    └── test_data_matched.csv   # 示例测试数据
+    ├── generate_orthogonal_design.py  # PFR 示例数据生成（正交设计）
+    ├── orthogonal_design_data.csv     # PFR 示例数据（可直接上传）
+    ├── generate_complex_data.py       # 复杂验证数据生成
+    ├── validation_*.csv               # 复杂验证数据（可直接上传）
+    └── validation_*.json              # 对应的可导入配置（与 CSV 匹配）
 ```
 
 ## 测试数据
 
 `test_data/` 文件夹包含用于测试的示例数据：
 
-- **`test_data_matched.csv`**：A → B 一级反应的模拟实验数据
-- **`generate_test_data.py`**：数据生成脚本，可自定义动力学参数
+- **`orthogonal_design_data.csv`**：PFR 示例数据（A 一级反应，27 组工况，带少量噪声；示例测量列为 `Fout_A_mol_s`）
+- **`generate_orthogonal_design.py`**：重新生成上述 PFR 示例数据
+- **`generate_complex_data.py`**：生成更复杂的验证数据（并附带可导入配置 `validation_*.json`）
 - **更多验证数据**：见 `test_data/README.md`
 
-测试参数：
+基础测试参数（示例生成用）：
 - 反应：A → B（一级反应）
-- k₀ = 1×10⁶ s⁻¹
-- Eₐ = 5×10⁴ J/mol
-- T = 350 K
+- $k_0 = 1\\times 10^6\\;\\mathrm{s^{-1}}$
+- $E_a = 5\\times 10^4\\;\\mathrm{J/mol}$
 
 ## 依赖库
 
