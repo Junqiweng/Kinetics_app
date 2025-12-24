@@ -172,6 +172,57 @@ def render_param_table(
     通用的双参数表格渲染 (如 k0/Ea, K0/Ea, k0_rev/Ea_rev)。
     返回: val1_arr, val2_arr, fit1_arr, fit2_arr
     """
+    def ensure_1d_length(
+        input_array: np.ndarray | list | tuple | float | int | bool | None,
+        target_length: int,
+        fill_value: float | bool,
+    ) -> np.ndarray:
+        if target_length <= 0:
+            return np.array([], dtype=type(fill_value))
+
+        if input_array is None:
+            return np.full(target_length, fill_value)
+
+        arr = np.asarray(input_array)
+
+        if arr.ndim == 0:
+            arr = np.array([arr.item()])
+        else:
+            arr = arr.reshape(-1)
+
+        if arr.size == target_length:
+            return arr
+
+        if arr.size == 0:
+            return np.full(target_length, fill_value)
+
+        pad_value = arr[-1]
+        out = np.full(target_length, pad_value)
+        n_copy = min(target_length, arr.size)
+        out[:n_copy] = arr[:n_copy]
+        return out
+
+    target_length = len(index_names)
+    col1_size = 0 if col1_data is None else int(np.asarray(col1_data).size)
+    col2_size = 0 if col2_data is None else int(np.asarray(col2_data).size)
+    fit1_size = 0 if fit1_default is None else int(np.asarray(fit1_default).size)
+    fit2_size = 0 if fit2_default is None else int(np.asarray(fit2_default).size)
+    input_sizes = [col1_size, col2_size, fit1_size, fit2_size]
+    needs_resize = any((s not in (0, target_length)) for s in input_sizes)
+
+    col1_data = ensure_1d_length(col1_data, target_length, np.nan)
+    col2_data = ensure_1d_length(col2_data, target_length, np.nan)
+    fit1_default = ensure_1d_length(fit1_default, target_length, False).astype(bool)
+    fit2_default = ensure_1d_length(fit2_default, target_length, False).astype(bool)
+
+    if needs_resize:
+        warn_key = f"_warn_len_mismatch_{key_prefix}"
+        if warn_key not in st.session_state:
+            st.warning(
+                "检测到参数数量与当前行数不一致，已自动补齐/截断以避免报错。"
+            )
+            st.session_state[warn_key] = True
+
     df = pd.DataFrame(
         {
             col1_name: [smart_float_to_str(v) for v in col1_data],
@@ -225,20 +276,41 @@ def render_order_table(
     n_reactions = len(row_names)
     data_dict = {}
 
+    def ensure_2d_shape(
+        input_matrix: np.ndarray | list | tuple | None,
+        target_rows: int,
+        target_cols: int,
+        fill_value: float | bool,
+    ) -> np.ndarray:
+        if target_rows <= 0 or target_cols <= 0:
+            return np.zeros((max(0, target_rows), max(0, target_cols)))
+
+        if input_matrix is None:
+            return np.full((target_rows, target_cols), fill_value)
+
+        mat = np.asarray(input_matrix)
+        if mat.ndim != 2:
+            mat = np.atleast_2d(mat)
+
+        out = np.full((target_rows, target_cols), fill_value)
+        n_copy_rows = min(target_rows, mat.shape[0])
+        n_copy_cols = min(target_cols, mat.shape[1])
+        out[:n_copy_rows, :n_copy_cols] = mat[:n_copy_rows, :n_copy_cols]
+        return out
+
+    order_data = ensure_2d_shape(order_data, n_reactions, len(species_names), 0.0).astype(
+        float
+    )
+    fit_data = ensure_2d_shape(fit_data, n_reactions, len(species_names), False).astype(
+        bool
+    )
+
     for i, sp_name in enumerate(species_names):
         col_n = f"n_{sp_name}"
         col_fit = f"Fit_{sp_name}"
 
-        if order_data is not None:
-            data_dict[col_n] = order_data[:, i]
-        else:
-            # 默认值通常由调用方单独处理；这里提供一个简单的兜底逻辑
-            data_dict[col_n] = np.zeros(n_reactions)
-
-        if fit_data is not None:
-            data_dict[col_fit] = fit_data[:, i]
-        else:
-            data_dict[col_fit] = np.zeros(n_reactions, dtype=bool)
+        data_dict[col_n] = order_data[:, i]
+        data_dict[col_fit] = fit_data[:, i]
 
     df = pd.DataFrame(data_dict, index=row_names)
 

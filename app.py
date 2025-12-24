@@ -584,16 +584,21 @@ def main():
         imp_stoich = get_cfg("stoich_matrix", None)
         if imp_stoich:
             try:
-                arr = np.array(imp_stoich)
-                if arr.shape == nu_default.shape:
-                    nu_default = pd.DataFrame(
-                        arr, index=nu_default.index, columns=nu_default.columns
-                    )
-                else:
-                    _warn_once(
-                        f"warn_stoich_shape_{len(species_names)}_{n_reactions}",
-                        f"导入配置中的化学计量数矩阵尺寸不匹配，已忽略：期望 {nu_default.shape}，实际 {arr.shape}",
-                    )
+                arr = np.asarray(imp_stoich, dtype=float)
+                if arr.ndim != 2:
+                    raise ValueError(f"需要二维矩阵，实际维度={arr.ndim}")
+
+                # 尺寸不匹配时：自动补齐/截断，并用 0 填充空缺（不提示警告）
+                if arr.shape != nu_default.shape:
+                    fixed = np.zeros(nu_default.shape, dtype=float)
+                    n_rows = min(fixed.shape[0], arr.shape[0])
+                    n_cols = min(fixed.shape[1], arr.shape[1])
+                    fixed[:n_rows, :n_cols] = arr[:n_rows, :n_cols]
+                    arr = fixed
+
+                nu_default = pd.DataFrame(
+                    arr, index=nu_default.index, columns=nu_default.columns
+                )
             except Exception as exc:
                 _warn_once(
                     f"warn_stoich_parse_{len(species_names)}_{n_reactions}",
@@ -975,21 +980,24 @@ def main():
             else:
                 default_species = list(species_names)
 
-            # 如果 session_state 中已有值且有效，则清理后保留；否则使用配置中的默认值
-            if "cfg_output_species_list" in st.session_state:
+            # 重要：不要同时给 multiselect 的 default=... 并且又写 session_state[key]，
+            # 否则会触发 Streamlit 警告：
+            # "The widget with key ... was created with a default value but also had its value set via the Session State API."
+            # 这里统一以 session_state 作为单一数据源。
+            if "cfg_output_species_list" not in st.session_state:
+                st.session_state["cfg_output_species_list"] = default_species
+            else:
                 current_list = st.session_state.get("cfg_output_species_list", [])
                 if not isinstance(current_list, list):
                     current_list = []
                 cleaned_list = [str(x) for x in current_list if str(x) in species_names]
-                if not cleaned_list:
-                    st.session_state["cfg_output_species_list"] = default_species
-                else:
-                    st.session_state["cfg_output_species_list"] = cleaned_list
+                st.session_state["cfg_output_species_list"] = (
+                    cleaned_list if cleaned_list else default_species
+                )
 
             fit_mask = st.multiselect(
                 "选择进入目标函数的物种",
                 species_names,
-                default=default_species,
                 key="cfg_output_species_list",
             )
             output_species_list = fit_mask
