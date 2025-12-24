@@ -1,3 +1,5 @@
+# 文件作用：帮助页面内容与示例数据生成（用于给用户下载示例 CSV、展示使用说明等）。
+
 from __future__ import annotations
 
 import numpy as np
@@ -21,12 +23,12 @@ def _build_example_batch_csv_bytes() -> bytes:
     生成一个 BSTR 示例数据（A -> B 一级反应，幂律 n=1）。
     用于帮助页面下载示例 CSV。
     """
-    temperature_K = 350.0  # Temperature [K]
-    conc_A0_mol_m3 = 2000.0  # Initial concentration [mol/m^3]
-    conc_B0_mol_m3 = 0.0  # Initial concentration [mol/m^3]
+    temperature_K = 350.0  # 温度 [K]
+    conc_A0_mol_m3 = 2000.0  # 初始浓度 [mol/m^3]
+    conc_B0_mol_m3 = 0.0  # 初始浓度 [mol/m^3]
 
-    k0_1_s = 1.0e6  # Pre-exponential factor [1/s] (for n=1)
-    ea_J_mol = 5.0e4  # Activation energy [J/mol]
+    k0_1_s = 1.0e6  # 指前因子 [1/s]（n=1）
+    ea_J_mol = 5.0e4  # 活化能 [J/mol]
     rate_constant_1_s = k0_1_s * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
 
     time_s = np.array([0, 20, 40, 60, 90, 120, 180, 240, 360, 480], dtype=float)
@@ -53,19 +55,19 @@ def _build_example_cstr_csv_bytes() -> bytes:
     生成一个 CSTR 稳态示例数据（A -> B 一级反应，幂律 n=1）。
     用于帮助页面下载示例 CSV。
     """
-    temperature_K = 350.0  # Temperature [K]
-    conc_A0_mol_m3 = 2000.0  # Inlet concentration [mol/m^3]
-    conc_B0_mol_m3 = 0.0  # Inlet concentration [mol/m^3]
+    temperature_K = 350.0  # 温度 [K]
+    conc_A0_mol_m3 = 2000.0  # 入口浓度 [mol/m^3]
+    conc_B0_mol_m3 = 0.0  # 入口浓度 [mol/m^3]
 
-    vdot_m3_s = 1.0e-4  # Volumetric flow rate [m^3/s]
+    vdot_m3_s = 1.0e-4  # 体积流量 [m^3/s]
     reactor_volume_m3 = np.array([1e-3, 2e-3, 3e-3, 5e-3, 8e-3], dtype=float)  # [m^3]
-    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)  # Residence time [s]
+    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)  # 停留时间 [s]
 
-    k0_1_s = 1.0e6  # Pre-exponential factor [1/s] (for n=1)
-    ea_J_mol = 5.0e4  # Activation energy [J/mol]
+    k0_1_s = 1.0e6  # 指前因子 [1/s]（n=1）
+    ea_J_mol = 5.0e4  # 活化能 [J/mol]
     rate_constant_1_s = k0_1_s * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
 
-    # First-order CSTR: C_A = C_A0 / (1 + k*tau)
+    # 一阶 CSTR：C_A = C_A0 / (1 + k*tau)
     conc_A_out = conc_A0_mol_m3 / (1.0 + rate_constant_1_s * tau_s)
     conc_B_out = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_out)
     conversion_A = 1.0 - conc_A_out / max(conc_A0_mol_m3, 1e-30)

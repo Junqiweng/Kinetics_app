@@ -1,3 +1,5 @@
+﻿# 文件作用：生成更复杂的示例/验证数据（多反应网络、PFR/CSTR/BSTR、多种动力学），用于测试应用的求解与拟合流程。
+
 import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
@@ -12,7 +14,7 @@ def log(msg):
     print(msg)
 
 
-# Ensure stdout is flushed
+# 确保 stdout 及时刷新（便于在终端实时看到进度）
 sys.stdout.reconfigure(line_buffering=True)
 log("Script started...")
 
@@ -64,19 +66,19 @@ def generate_pfr_data():
         return r1, r2, r3, r4
 
     def pfr_ode(V, F, T, vdot):
-        # Unpack Molar Flows
+        # 解包摩尔流率
         FA, FB, FC, FD, FE = F
-        # Concentrations
+        # 浓度
         CA = FA / vdot
         CB = FB / vdot
         CC = FC / vdot
         CD = FD / vdot
         CE = FE / vdot
 
-        # Rates
+        # 反应速率
         r1, r2, r3, r4 = get_rates([CA, CB, CC, CD, CE], T)
 
-        # Material Balances (dFi/dV = sum(nu_ij * r_j))
+        # 物料衡算（dF_i/dV = Σ_j ν_{i,j} r_j）
         dFA = -r1 - 2 * r3
         dFB = r1 - r2
         dFC = r2 - r4
@@ -114,8 +116,8 @@ def generate_pfr_data():
             F_out_noisy = np.maximum(F_out_noisy, 0)  # 物理约束
 
             # 构造符合 App 要求的列名
-            # PFR/Flow Required: V_m3, T_K, vdot_m3_s, F0_{spec}_mol_s
-            # Measured: Fout_{spec}_mol_s
+            # 流动反应器（PFR）所需列：V_m3, T_K, vdot_m3_s, F0_{spec}_mol_s
+            # 测量值列：Fout_{spec}_mol_s
             row = {
                 "V_m3": V_vol,
                 "T_K": T,
@@ -142,10 +144,10 @@ def generate_pfr_data():
 # 场景 2: PFR 反应器 (4个反应, L-H 吸附动力学)
 # ==========================================
 # 反应网络:
-# 1. A -> B  (L-H: r1 = k1*CA / (1 + K1*CA))
-# 2. B -> C  (L-H: r2 = k2*CB / (1 + K1*CA))
-# 3. A -> D  (Power: r3 = k3*CA)
-# 4. D -> E  (Power: r4 = k4*CD)
+# 1. A -> B  （L-H：r1 = k1*CA / (1 + K1*CA)）
+# 2. B -> C  （L-H：r2 = k2*CB / (1 + K1*CA)）
+# 3. A -> D  （幂律：r3 = k3*CA）
+# 4. D -> E  （幂律：r4 = k4*CD）
 
 
 def generate_pfr_lh_data():
@@ -222,7 +224,7 @@ def generate_pfr_lh_data():
             F_out_noisy = F_out * noise
             F_out_noisy = np.maximum(F_out_noisy, 0)  # 物理约束
 
-            # PFR 格式列名
+            # 流动反应器（PFR）格式列名
             row = {
                 "V_m3": V_vol,
                 "T_K": T,
@@ -246,7 +248,7 @@ def generate_pfr_lh_data():
 
 
 # ==========================================
-# 场景 3: 间歇搅拌釜反应器 (BSTR) (4个反应, 连串反应)
+# 场景 3: 间歇搅拌釜反应器 (BSTR)（4个反应，连串反应）
 # ==========================================
 # 反应网络:
 # 1. A ->B
@@ -289,7 +291,7 @@ def generate_batch_data():
     data = []
 
     T_list = [298, 308, 318, 328]
-    # BSTR 里自变量是时间 Time
+    # 间歇釜（BSTR）里自变量是时间 t
     Time_list = [60, 120, 240, 480, 960, 1500]  # seconds
 
     for T in T_list:
@@ -309,8 +311,8 @@ def generate_batch_data():
             C_out_noisy = C_out * noise
             C_out_noisy = np.maximum(C_out_noisy, 0)
 
-            # BSTR Required: t_s, T_K, C0_{spec}_mol_m3
-            # Measured: Cout_{spec}_mol_m3
+            # 间歇釜（BSTR）所需列：t_s, T_K, C0_{spec}_mol_m3
+            # 测量值列：Cout_{spec}_mol_m3
             row = {
                 "t_s": t_val,
                 "T_K": T,

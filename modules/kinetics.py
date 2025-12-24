@@ -1,3 +1,5 @@
+# 文件作用：实现不同动力学模型（幂律、L-H、可逆反应）的速率矢量计算，并提供必要的数值保护函数。
+
 from __future__ import annotations
 
 import numpy as np
@@ -22,15 +24,16 @@ def calc_rate_vector_power_law(
     reaction_order_matrix: np.ndarray,
 ) -> np.ndarray:
     """
-    conc_mol_m3: shape (n_species,)
-    k0: shape (n_reactions,)   pre-exponential factor
-    ea_J_mol: shape (n_reactions,) activation energy [J/mol]
-    reaction_order_matrix: shape (n_reactions, n_species)
+    参数说明：
+        conc_mol_m3：浓度向量，形状 (n_species,) [mol/m³]
+        k0：指前因子向量，形状 (n_reactions,)
+        ea_J_mol：活化能向量，形状 (n_reactions,) [J/mol]
+        reaction_order_matrix：反应级数矩阵，形状 (n_reactions, n_species)
     """
     conc_mol_m3 = safe_nonnegative(conc_mol_m3)
     k_T = k0 * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
 
-    # rate_j = k_j(T) * Π_i C_i^(n_ij)
+    # 速率表达式：rate_j = k_j(T) * Π_i C_i^(n_ij)
     n_reactions = k0.size
     rate_vector = np.zeros(n_reactions, dtype=float)
     for reaction_index in range(n_reactions):

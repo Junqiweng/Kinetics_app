@@ -1,3 +1,5 @@
+﻿# 文件作用：配置管理（收集当前 UI 配置、导入/导出 JSON、自动保存/恢复上次配置）。
+
 """
 配置管理模块：导入/导出用户设置，自动恢复上次配置
 """
@@ -90,7 +92,7 @@ def collect_config(
     ea_guess_J_mol: np.ndarray,
     fit_k0_flags: np.ndarray,
     fit_ea_flags: np.ndarray,
-    # --- L-H 参数 ---
+    # --- 朗缪尔-辛斯伍德（L-H）参数 ---
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
     fit_K0_ads_flags: np.ndarray | None = None,
@@ -114,7 +116,7 @@ def collect_config(
     ea_max_J_mol: float = 3e5,
     order_min: float = -2.0,
     order_max: float = 5.0,
-    # L-H 边界
+    # 朗缪尔-辛斯伍德（L-H）边界
     K0_ads_min: float = 0.0,
     K0_ads_max: float = 1e10,
     Ea_K_min: float = -2e5,
@@ -168,7 +170,7 @@ def collect_config(
         "ea_guess_J_mol": ea_guess_J_mol,
         "fit_k0_flags": fit_k0_flags,
         "fit_ea_flags": fit_ea_flags,
-        # L-H 参数
+        # 朗缪尔-辛斯伍德（L-H）参数
         "K0_ads": K0_ads,
         "Ea_K_J_mol": Ea_K_J_mol,
         "fit_K0_ads_flags": fit_K0_ads_flags,
@@ -192,7 +194,7 @@ def collect_config(
         "ea_max_J_mol": ea_max_J_mol,
         "order_min": order_min,
         "order_max": order_max,
-        # L-H 边界
+        # 朗缪尔-辛斯伍德（L-H）边界
         "K0_ads_min": K0_ads_min,
         "K0_ads_max": K0_ads_max,
         "Ea_K_min": Ea_K_min,
@@ -244,7 +246,7 @@ def auto_save_config(config: dict, client_id: str | None = None) -> tuple[bool, 
     """
     自动保存配置到本地文件。
 
-    Returns:
+    返回:
         (ok, message)
     """
     _ = client_id  # 保留参数以兼容旧调用；当前实现只保存“一个”配置缓存
@@ -261,7 +263,7 @@ def auto_load_config(client_id: str | None = None) -> tuple[dict | None, str]:
     """
     从本地文件加载上次保存的配置。
 
-    Returns:
+    返回:
         (config, message)
     """
     _ = client_id  # 保留参数以兼容旧调用；当前实现只加载“一个”配置缓存
@@ -280,7 +282,7 @@ def clear_auto_saved_config(client_id: str | None = None) -> tuple[bool, str]:
     """
     删除自动保存的配置文件（重置为默认）。
 
-    Returns:
+    返回:
         (ok, message)
     """
     _ = client_id  # 保留参数以兼容旧调用；当前实现只清理“一个”配置缓存
@@ -342,7 +344,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
     """
     验证配置是否有效。
 
-    Returns:
+    返回:
         (is_valid, error_message)
     """
 

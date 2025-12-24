@@ -1,3 +1,5 @@
+# 文件作用：数据处理与辅助函数（默认化学计量数表、输出列名/单位、拟合结果对比表等）。
+
 from __future__ import annotations
 
 import numpy as np

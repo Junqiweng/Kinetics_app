@@ -1,3 +1,5 @@
+# 文件作用：反应器模型求解（PFR、CSTR、BSTR），通过 `solve_ivp`/`least_squares` 计算出口组成或时间剖面。
+
 from __future__ import annotations
 
 import threading
@@ -58,8 +60,8 @@ def integrate_pfr_molar_flows(
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
     """
-    PFR design equation (liquid / constant volumetric flow):
-      dF_i/dV = Σ_j nu_{i,j} r_j
+    PFR 设计方程（液相/体积流量近似恒定）：
+      dF_i/dV = Σ_j ν_{i,j} r_j
       C_i = F_i / vdot
     """
     if not np.isfinite(reactor_volume_m3):

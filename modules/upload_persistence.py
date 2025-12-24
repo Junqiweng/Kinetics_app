@@ -1,3 +1,5 @@
+# 文件作用：上传 CSV 的本地缓存与恢复（跨浏览器刷新保留最近一次上传内容）。
+
 from __future__ import annotations
 
 import io
@@ -64,7 +66,7 @@ def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> No
 
 def _get_upload_file_paths() -> tuple[str, str]:
     """
-    Returns:
+    返回:
         (csv_bytes_path, meta_json_path)
 
     说明：只保留“一份”上传缓存，新内容覆盖旧内容。
@@ -77,7 +79,7 @@ def _get_upload_file_paths() -> tuple[str, str]:
 
 def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
     """
-    Returns:
+    返回:
         (uploaded_csv_bytes, uploaded_csv_name, message)
     """
     csv_path, meta_path = _get_upload_file_paths()

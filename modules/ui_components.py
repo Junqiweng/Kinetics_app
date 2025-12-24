@@ -1,3 +1,5 @@
+# 文件作用：封装 Streamlit 常用 UI 组件（数值输入、表格编辑、绘图导出等），便于在主应用中复用。
+
 import io
 import numpy as np
 import pandas as pd
@@ -10,7 +12,7 @@ SMART_FLOAT_SIG_FIGS = 3
 SMART_FLOAT_SCI_LOW = 1e-3
 SMART_FLOAT_SCI_HIGH = 1e3
 
-# Streamlit number_input：仅支持固定 format，这里只在“极小/极大”时启用科学计数
+# 对于 Streamlit 的 number_input：仅支持固定“显示格式”；这里只在“极小/极大”时启用科学计数
 SMART_FLOAT_SCI_HIGH_STREAMLIT = 1e3
 SMART_FLOAT_SCI_FORMAT_STREAMLIT = "%.2e"
 
@@ -230,7 +232,7 @@ def render_order_table(
         if order_data is not None:
             data_dict[col_n] = order_data[:, i]
         else:
-            # Default logic handled specifically by caller usually, but simplified here
+            # 默认值通常由调用方单独处理；这里提供一个简单的兜底逻辑
             data_dict[col_n] = np.zeros(n_reactions)
 
         if fit_data is not None:

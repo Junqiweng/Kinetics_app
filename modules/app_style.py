@@ -1,3 +1,5 @@
+# 文件作用：定义应用的全局 CSS（Streamlit UI 样式）以及 Matplotlib 绘图风格。
+
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
@@ -220,7 +222,9 @@ div[data-testid="stNumberInput"] input {
 
 div[data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {
   border-color: rgba(0, 122, 255, 0.55) !important;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.14) !important;
+  /* 避免“边框 + 外圈描边”叠加造成双边框观感，这里只保留单层边框高亮 */
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 div[data-testid="stNumberInput"] [data-baseweb="button"] {
@@ -231,6 +235,24 @@ div[data-testid="stNumberInput"] [data-baseweb="button"] {
 
 div[data-testid="stNumberInput"] [data-baseweb="button"]:hover {
   background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* NumberInput：隐藏右侧 +/-（stepper）按钮，改为纯手动输入 */
+div[data-testid="stNumberInput"] [data-baseweb="end-enhancer"],
+div[data-testid="stNumberInput"] [data-baseweb="button"],
+div[data-testid="stNumberInput"] button {
+  display: none !important;
+}
+
+/* 部分浏览器会给 <input type="number"> 自带滚轮/上下箭头，这里一并去掉 */
+div[data-testid="stNumberInput"] input[type="number"]::-webkit-outer-spin-button,
+div[data-testid="stNumberInput"] input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+div[data-testid="stNumberInput"] input[type="number"] {
+  -moz-appearance: textfield;
 }
 
 div[data-testid="stSelectbox"] [data-baseweb="select"] > div {

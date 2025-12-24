@@ -1,3 +1,5 @@
+# 文件作用：处理配置导入/重置时的 `st.session_state` 写入与提示逻辑，避免在控件创建后修改状态导致报错。
+
 from __future__ import annotations
 
 import streamlit as st

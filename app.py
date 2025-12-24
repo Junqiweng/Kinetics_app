@@ -1,3 +1,5 @@
+﻿# 文件作用：Streamlit 主应用入口，提供反应动力学拟合的交互式界面（模型设置、数据上传、拟合与结果展示）。
+
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +18,7 @@ import modules.fitting as fitting
 import modules.reactors as reactors
 import modules.ui_help as ui_help
 import modules.config_manager as config_manager
-import modules.ui_components as ui_comp  # New module
+import modules.ui_components as ui_comp  # UI 组件工具函数
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 import modules.app_style as app_style
 
@@ -50,7 +52,7 @@ from modules.upload_persistence import (
 )
 
 
-# ========== Main App ==========
+# ========= 主应用入口 =========
 def main():
     st.set_page_config(
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
@@ -330,7 +332,7 @@ def main():
             # 同时保存到浏览器 LocalStorage
             browser_storage.save_config_to_browser(pending_cfg)
 
-    # --- Auto Load Config ---
+    # --- 自动加载配置 ---
     # 如果刚刚执行了重置，则跳过配置加载（避免重新加载浏览器中的旧配置）
     just_reset = bool(st.session_state.pop("_reset_just_happened", False))
 
@@ -370,7 +372,7 @@ def main():
             return st.session_state["imported_config"].get(key, default)
         return default
 
-    # Initialize fitting stopped flag
+    # 初始化“停止拟合”标志与拟合状态
     if "fitting_stopped" not in st.session_state:
         st.session_state.fitting_stopped = False
     if "fitting_running" not in st.session_state:
@@ -400,7 +402,7 @@ def main():
     if "fitting_executor" not in st.session_state:
         st.session_state["fitting_executor"] = None
 
-    # --- Restore cached uploaded CSV (persist across browser refresh) ---
+    # --- 恢复缓存的已上传 CSV（浏览器刷新后仍保留）---
     if "uploaded_csv_bytes" not in st.session_state:
         uploaded_bytes, uploaded_name, message = _load_persisted_upload()
         if uploaded_bytes is not None:
@@ -429,7 +431,7 @@ def main():
                 st.session_state["data_restore_warned"] = True
                 st.warning(f"恢复缓存 CSV 失败（请重新上传）：{exc}")
 
-    # --- Styles ---
+    # --- 样式 ---
     app_style.apply_app_css()
     app_style.apply_plot_style()
 
@@ -437,7 +439,7 @@ def main():
     def _show_help_dialog() -> None:
         ui_help.render_help_page()
 
-    # ========== Sidebar ==========
+    # ========= 侧边栏 =========
     export_config_placeholder = None
     with st.sidebar:
         st.markdown("### 全局设置")
@@ -502,7 +504,7 @@ def main():
                 disabled=global_disabled,
             )
 
-        # Config Managment
+        # 配置管理
         with st.expander("⚙️ 配置管理 (导入/导出/重置)"):
             config_uploader_key = f"uploaded_config_json_{int(st.session_state.get('uploader_ver_config_json', 0))}"
             uploaded_config = st.file_uploader(
@@ -540,7 +542,7 @@ def main():
                 st.session_state["pending_reset_to_default"] = True
                 st.rerun()
 
-    # ========== Main Content ==========
+    # ========= 主内容区 =========
     st.title(f"{reactor_type} 反应动力学参数拟合")
     if reactor_type == "PFR":
         st.caption("模型：PFR (solve_ivp) + least_squares")
@@ -552,7 +554,7 @@ def main():
     tab_model, tab_data, tab_fit = st.tabs(MAIN_TAB_LABELS)
     _restore_active_main_tab()
 
-    # ---------------- TAB 1: MODEL ----------------
+    # ---------------- 选项卡 1：模型 ----------------
     with tab_model:
         col_def1, col_def2 = st.columns([2, 1])
         with col_def1:
@@ -575,10 +577,10 @@ def main():
         if not species_names:
             st.stop()
 
-        # Stoichiometry
+        # 化学计量数
         st.markdown("**化学计量数矩阵 ν** (行=物种, 列=反应)")
         nu_default = _build_default_nu_table(species_names, n_reactions)
-        # Apply imported stoich if exists
+        # 若已导入配置，则优先应用其中的化学计量数
         imp_stoich = get_cfg("stoich_matrix", None)
         if imp_stoich:
             try:
@@ -608,11 +610,11 @@ def main():
         st.markdown("---")
         st.markdown("#### 动力学参数初值")
 
-        # --- Base Parameters (k0, Ea, n) ---
+        # --- 基础参数（k0, Ea, n）---
         col_p1, col_p2 = st.columns(2)
         with col_p1:
             st.caption("速率常数 k0 & 活化能 Ea")
-            # Logic to get defaults
+            # 获取默认值的逻辑
             k0_def = (
                 np.array(get_cfg("k0_guess", [1e3] * n_reactions))
                 if get_cfg("k0_guess", None)
@@ -651,7 +653,7 @@ def main():
 
         with col_p2:
             st.caption("反应级数 n")
-            # Logic for order defaults
+            # 反应级数默认值逻辑
             order_data = (
                 np.array(
                     get_cfg("order_guess", np.zeros((n_reactions, len(species_names))))
@@ -660,7 +662,7 @@ def main():
                 else None
             )
             if order_data is None:
-                # Simple default logic
+                # 简单默认规则
                 order_data = np.zeros((n_reactions, len(species_names)))
                 if len(species_names) > 0:
                     order_data[:, 0] = 1.0
@@ -684,7 +686,7 @@ def main():
                 fit_order_def,
             )
 
-        # --- L-H Parameters ---
+        # --- L-H 参数 ---
         K0_ads, Ea_K_J_mol, fit_K0_ads_flags, fit_Ea_K_flags = None, None, None, None
         m_inhibition, fit_m_flags = None, None
 
@@ -693,7 +695,7 @@ def main():
                 col_lh1, col_lh2 = st.columns(2)
                 with col_lh1:
                     st.caption("吸附常数 K (每物种)")
-                    # Defaults
+                    # 默认值
                     K0_def = (
                         np.array(get_cfg("K0_ads", [1.0] * len(species_names)))
                         if get_cfg("K0_ads", None)
@@ -760,7 +762,7 @@ def main():
                     m_inhibition = m_editor["m"].to_numpy(dtype=float)
                     fit_m_flags = m_editor["Fit_m"].to_numpy(dtype=bool)
         else:
-            # Init empty for compatibility
+            # 为兼容旧版本，初始化为空
             K0_ads = np.zeros(len(species_names))
             Ea_K_J_mol = np.zeros(len(species_names))
             fit_K0_ads_flags = np.zeros(len(species_names), dtype=bool)
@@ -768,7 +770,7 @@ def main():
             m_inhibition = np.ones(n_reactions)
             fit_m_flags = np.zeros(n_reactions, dtype=bool)
 
-        # --- Reversible Parameters ---
+        # --- 可逆反应参数 ---
         k0_rev, ea_rev_J_mol, fit_k0_rev_flags, fit_ea_rev_flags = (
             None,
             None,
@@ -856,7 +858,7 @@ def main():
                 (n_reactions, len(species_names)), dtype=bool
             )
 
-    # ---------------- TAB 2: DATA ----------------
+    # ---------------- 选项卡 2：数据 ----------------
     data_df = st.session_state.get("data_df_cached", None)
     output_mode = "Cout (mol/m^3)"
     output_species_list = []
@@ -1021,7 +1023,7 @@ def main():
                 st.error(f"CSV 读取失败: {exc}")
                 data_df = None
 
-    # --- Build export config (basic; will be updated again in tab_fit if advanced settings exist) ---
+    # --- 构建导出配置（基础版；若拟合页启用高级设置，会在拟合页再次更新）---
     if export_config_placeholder is not None:
         export_k0_min = float(get_cfg("k0_min", 1e-15))
         export_k0_max = float(get_cfg("k0_max", 1e15))
@@ -1139,7 +1141,7 @@ def main():
             key="export_config_download_basic",
         )
 
-    # ---------------- TAB 3: FITTING ----------------
+    # ---------------- 选项卡 3：拟合 ----------------
     with tab_fit:
         fit_results_cached = st.session_state.get("fit_results", None)
 
@@ -1160,7 +1162,7 @@ def main():
 
         data_len = len(data_df) if data_df is not None else 0
 
-        # --- Advanced Settings (Expanded) ---
+        # --- 高级设置（展开）---
         with st.expander("高级设置与边界 (点击展开)", expanded=False):
 
             st.markdown("**1. 基础边界设置**")
@@ -1351,7 +1353,7 @@ def main():
                 "说明：当模型计算失败（如 solve_ivp 失败）时，残差会使用系统默认罚项（不在 UI 中提供调节）。"
             )
 
-        # Update export config with advanced settings (when tab_fit is active and widgets are available)
+        # 使用高级设置更新导出配置（仅当拟合页激活且控件已创建时）
         if export_config_placeholder is not None:
             export_config_placeholder.empty()
             export_cfg = config_manager.collect_config(
@@ -1457,7 +1459,7 @@ def main():
                 key="export_config_download_advanced",
             )
 
-        # --- Action Buttons ---
+        # --- 操作按钮 ---
 
         _drain_fitting_progress_queue()
 
@@ -1555,7 +1557,7 @@ def main():
                     del st.session_state[key]
             st.rerun()
 
-        # --- Handle start request (from callback) ---
+        # --- 处理“开始拟合”请求（回调触发）---
         if bool(st.session_state.pop("start_fit_requested", False)) and (
             not fitting_future
         ):
@@ -1572,7 +1574,7 @@ def main():
                     "text": "请选择至少一个目标物种。",
                 }
             else:
-                # Ensure a fresh executor for each fitting run (avoid queued/stuck tasks from prior sessions).
+                # 每次拟合都使用新的线程池（避免上次任务残留导致排队/卡住）
                 old_executor = st.session_state.get("fitting_executor", None)
                 if old_executor is not None:
                     try:
@@ -1693,10 +1695,10 @@ def main():
         elif st.session_state.get("fitting_timeline", []):
             _render_fitting_progress_panel()
 
-        # Create results container at the bottom of tab_fit
+        # 在拟合页底部创建结果容器
         tab_fit_results_container = st.container()
 
-    # --- Results Display (Optimized) ---
+    # --- 结果展示（优化版）---
     if "fit_results" in st.session_state:
         res = st.session_state["fit_results"]
         tab_fit_results_container.divider()

@@ -1,3 +1,5 @@
+# 文件作用：将 UI 输入参数组织为拟合向量，并调用各反应器/动力学模型计算预测值与残差（供 least_squares 优化）。
+
 from __future__ import annotations
 
 import numpy as np
@@ -38,7 +40,7 @@ def _pack_parameters(
     fit_k0_flags: np.ndarray,
     fit_ea_flags: np.ndarray,
     fit_order_flags_matrix: np.ndarray,
-    # L-H 参数
+    # 朗缪尔-辛斯伍德（L-H）参数
     K0_ads_guess: np.ndarray = None,
     Ea_K_guess: np.ndarray = None,
     m_inhibition_guess: np.ndarray = None,
@@ -67,20 +69,20 @@ def _pack_parameters(
     if np.any(fit_ea_flags):
         parts.append(ea_guess_J_mol[fit_ea_flags])
 
-    # 3. Orders (正反应)
+    # 3. 反应级数（正反应）
     order_mask_flat = np.asarray(fit_order_flags_matrix, dtype=bool).ravel()
     if np.any(order_mask_flat):
         parts.append(order_guess.ravel()[order_mask_flat])
 
-    # 4. K0_ads (L-H)
+    # 4. K0_ads（L-H）
     if fit_K0_ads_flags is not None and np.any(fit_K0_ads_flags):
         parts.append(K0_ads_guess[fit_K0_ads_flags])
 
-    # 5. Ea_K (L-H)
+    # 5. Ea_K（L-H）
     if fit_Ea_K_flags is not None and np.any(fit_Ea_K_flags):
         parts.append(Ea_K_guess[fit_Ea_K_flags])
 
-    # 6. m_inhibition (L-H)
+    # 6. m_inhibition（L-H）
     if fit_m_flags is not None and np.any(fit_m_flags):
         parts.append(m_inhibition_guess[fit_m_flags])
 
@@ -92,7 +94,7 @@ def _pack_parameters(
     if fit_ea_rev_flags is not None and np.any(fit_ea_rev_flags):
         parts.append(ea_rev_guess[fit_ea_rev_flags])
 
-    # 9. Orders_rev (可逆)
+    # 9. 反应级数（可逆）
     if fit_order_rev_flags_matrix is not None:
         order_rev_mask_flat = np.asarray(fit_order_rev_flags_matrix, dtype=bool).ravel()
         if np.any(order_rev_mask_flat):
@@ -111,7 +113,7 @@ def _unpack_parameters(
     fit_k0_flags: np.ndarray,
     fit_ea_flags: np.ndarray,
     fit_order_flags_matrix: np.ndarray,
-    # L-H 参数
+    # 朗缪尔-辛斯伍德（L-H）参数
     K0_ads_guess: np.ndarray = None,
     Ea_K_guess: np.ndarray = None,
     m_inhibition_guess: np.ndarray = None,
@@ -161,7 +163,7 @@ def _unpack_parameters(
         ea_J_mol[fit_ea_flags] = parameter_vector[index : index + n_fit_ea]
         index += n_fit_ea
 
-    # 3. Orders
+    # 3. 反应级数
     n_reactions, n_species = reaction_order_matrix.shape
     order_mask_flat = np.asarray(fit_order_flags_matrix, dtype=bool).ravel()
     n_fit_orders = int(np.sum(order_mask_flat))
@@ -244,7 +246,7 @@ def _build_bounds(
     ea_max_J_mol: float,
     order_min: float,
     order_max: float,
-    # L-H 边界参数
+    # 朗缪尔-辛斯伍德（L-H）边界参数
     fit_K0_ads_flags: np.ndarray = None,
     fit_Ea_K_flags: np.ndarray = None,
     fit_m_flags: np.ndarray = None,
@@ -284,7 +286,7 @@ def _build_bounds(
         lower_parts.append(np.full(n_fit_ea, ea_min_J_mol, dtype=float))
         upper_parts.append(np.full(n_fit_ea, ea_max_J_mol, dtype=float))
 
-    # 3. Orders
+    # 3. 反应级数
     n_fit_orders_total = int(np.sum(np.asarray(fit_order_flags_matrix, dtype=bool)))
     if n_fit_orders_total > 0:
         lower_parts.append(np.full(n_fit_orders_total, order_min, dtype=float))
@@ -394,7 +396,7 @@ def _predict_outputs_for_row(
             )
 
     if reactor_type == "PFR":
-        # PFR 需要 V_m3, vdot_m3_s, F0_*
+        # 流动反应器（PFR）需要 V_m3, vdot_m3_s, F0_*
         reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
         if not np.isfinite(reactor_volume_m3):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 V_m3"
@@ -605,7 +607,7 @@ def _predict_outputs_for_row(
                 )
 
     elif reactor_type in ("BSTR", "Batch"):
-        # BSTR 需要 t_s, C0_*
+        # 间歇釜（BSTR）需要 t_s, C0_*
         reaction_time_s = _to_float_or_nan(_row_get_value(row, "t_s", np.nan))
         if not np.isfinite(reaction_time_s):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 t_s"
@@ -691,7 +693,7 @@ def _predict_outputs_for_row(
                 else:
                     output_values[out_i] = (c0 - c_final) / c0
             else:
-                # BSTR 不支持 Fout 模式
+                # 间歇釜（BSTR）不支持 Fout 模式
                 return (
                     np.zeros(len(output_species_list), dtype=float),
                     False,

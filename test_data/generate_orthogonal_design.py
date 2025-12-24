@@ -1,10 +1,12 @@
+﻿# 文件作用：生成用于验证拟合功能的正交实验（L27）示例数据，并导出为 CSV 供应用上传测试。
+
 """
 生成正交实验数据 - 温度、入口摩尔流率、反应体积三因素三水平
 
 使用方法:
 1. 运行此脚本: python generate_orthogonal_design.py
-2. 生成的CSV文件将保存为 orthogonal_design_data.csv
-3. 将CSV文件上传到 Streamlit App 进行拟合测试
+2. 生成的 CSV 文件将保存为 orthogonal_design_data.csv
+3. 将 CSV 文件上传到 Streamlit 应用进行拟合测试
 """
 
 import numpy as np
@@ -19,20 +21,20 @@ k0_true = 1e6  # 指前因子 [1/s]
 Ea_true = 5e4  # 活化能 [J/mol]
 
 # ========== 正交实验：三因素三水平 ==========
-# 因素1：温度 (Temperature) [K]
+# 因素1：温度 [K]
 temps_K = [330, 350, 370]
 
-# 因素2：入口摩尔流率 (Inlet molar flow rate) [mol/s]
+# 因素2：入口摩尔流率 [mol/s]
 F0_A_values = [0.005, 0.01, 0.02]
 
-# 因素3：反应体积 (Reaction volume) [m³]
+# 因素3：反应体积 [m³]
 volumes_m3 = [0.001, 0.005, 0.01]
 
 # ========== 标准正交表 L27(3^13) - 27个实验 ==========
 # 每行代表一个实验组合
 # 列对应：因素1(温度), 因素2(流率), 因素3(体积)
 # 数值1,2,3 对应各因素的第1,2,3个水平
-# L27表是全因子设计 3^3 的完整正交表
+# 正交表 L27 是 3^3 全因子设计的完整正交表
 
 orthogonal_table = np.array(
     [
@@ -102,7 +104,7 @@ for exp_idx, (idx_t, idx_f, idx_v) in enumerate(orthogonal_table, 1):
     k_T = k0_true * np.exp(-Ea_true / (R_GAS * T_K))
 
     # ========== 定义 PFR 微分方程 ==========
-    # dF_A/dV = -r = -k * C_A = -k * F_A / vdot
+    # 流动反应器（PFR）微分方程：dF_A/dV = -r = -k * C_A = -k * F_A / vdot
     # 注：此处假设体积流量恒定（假设密度恒定）
     # 实际上，如果没有指定体积流量，使用恒定入口摩尔流率进行计算
 

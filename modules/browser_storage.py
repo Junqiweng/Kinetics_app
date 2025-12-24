@@ -1,3 +1,5 @@
+﻿# 文件作用：通过浏览器 LocalStorage 持久化配置（用于 Streamlit Cloud 等无法稳定写本地文件的环境）。
+
 """
 浏览器 LocalStorage 持久化模块
 
@@ -18,7 +20,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 
-# LocalStorage 键名常量
+# 浏览器 LocalStorage 键名常量
 _LS_CONFIG_KEY = "kinetics_app_config_v1"
 
 
@@ -38,7 +40,7 @@ def save_config_to_browser(config_dict: dict) -> None:
     使用隐藏的 iframe 注入 JavaScript 代码。
     只有当配置发生变化时才真正保存。
 
-    Args:
+    参数:
         config_dict: 配置字典（需要可 JSON 序列化）
     """
     try:
@@ -53,7 +55,7 @@ def save_config_to_browser(config_dict: dict) -> None:
         st.session_state["_browser_config_hash"] = config_hash
 
         config_json = json.dumps(config_dict, ensure_ascii=False)
-        # Base64 编码以避免 JavaScript 字符串转义问题
+        # 使用 Base64 编码以避免 JavaScript 字符串转义问题
         encoded_config = base64.b64encode(config_json.encode("utf-8")).decode("ascii")
 
         js_code = f"""
@@ -153,8 +155,8 @@ def get_browser_loaded_config() -> dict | None:
     """
     获取从浏览器加载的配置。
 
-    Returns:
-        配置字典，如果没有则返回 None
+    返回:
+        配置字典；若没有则返回 None
     """
     return st.session_state.get("_browser_loaded_config", None)
 
@@ -190,7 +192,7 @@ def render_config_sync_indicator(is_saved: bool = True) -> None:
     """
     显示配置同步状态指示器。
 
-    Args:
+    参数:
         is_saved: 配置是否已保存
     """
     if is_saved:

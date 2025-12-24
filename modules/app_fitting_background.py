@@ -1,3 +1,5 @@
+# 文件作用：后台拟合任务的线程调度、进度队列、UI 进度展示与结果回传。
+
 from __future__ import annotations
 
 import html as html_lib
@@ -461,7 +463,7 @@ def _run_fitting_job(
             bad_mask = numeric_values < 0.0
             bad_desc = "不能为负"
         else:
-            # F0_* 或 C0_*
+            # 入口变量：F0_* 或 C0_*
             bad_mask = numeric_values < 0.0
             bad_desc = "不能为负"
 
@@ -566,7 +568,7 @@ def _run_fitting_job(
     else:
         inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
 
-    # --- Progress tracking based on function evaluations (nfev) ---
+    # --- 基于函数评估次数（nfev）的进度跟踪 ---
     stage_label = "初始化"
     stage_base_progress = 0.0
     stage_span_progress = 0.05
@@ -774,10 +776,10 @@ def _run_fitting_job(
             "max_step_fraction": float(max_step_fraction),
             "reactor_type": reactor_type,
             "kinetic_model": kinetic_model,
-            # Backward compatible keys
+            # 向后兼容的键名
             "initial_cost": float(initial_cost),
             "cost": float(initial_cost),
-            # Preferred objective naming
+            # 推荐使用的目标函数字段名
             "phi_initial": float(initial_cost),
             "phi_final": float(initial_cost),
             "residual_type": str(residual_type),
@@ -950,10 +952,10 @@ def _run_fitting_job(
         "max_step_fraction": float(max_step_fraction),
         "reactor_type": reactor_type,
         "kinetic_model": kinetic_model,
-        # Backward compatible keys
+        # 向后兼容的键名
         "initial_cost": float(initial_cost),
         "cost": float(final_res.cost),
-        # Preferred objective naming
+        # 推荐使用的目标函数字段名
         "phi_initial": float(initial_cost),
         "phi_final": float(final_res.cost),
         "residual_type": str(residual_type),
