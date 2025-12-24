@@ -545,11 +545,11 @@ def main():
     # ========= 主内容区 =========
     st.title(f"{reactor_type} 反应动力学参数拟合")
     if reactor_type == "PFR":
-        st.caption("模型：PFR (solve_ivp) + least_squares")
+        st.caption(r"模型：$\frac{dF_i}{dV} = \sum_j \nu_{ij} r_j$")
     elif reactor_type == "CSTR":
-        st.caption("模型：CSTR (steady-state) + least_squares")
+        st.caption(r"模型：$F_{i,0} - F_i + V \sum_j \nu_{ij} r_j = 0$")
     else:
-        st.caption("模型：BSTR (solve_ivp) + least_squares")
+        st.caption(r"模型：$\frac{dC_i}{dt} = \sum_j \nu_{ij} r_j$")
 
     tab_model, tab_data, tab_fit = st.tabs(MAIN_TAB_LABELS)
     _restore_active_main_tab()
