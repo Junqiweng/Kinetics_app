@@ -366,7 +366,7 @@ div[data-testid="stDataEditor"] {
 
 /* 对话框：更像系统弹窗 */
 div[role="dialog"][aria-modal="true"] {
-  width: 92vw !important;
+  width: 50vw !important;
   max-width: 1280px !important;
   border-radius: 18px !important;
 }
