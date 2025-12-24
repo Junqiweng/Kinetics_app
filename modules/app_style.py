@@ -190,18 +190,72 @@ button[data-testid="baseButton-primary"]:hover {
   box-shadow: var(--shadow-soft) !important;
 }
 
-/* 输入控件：白底、细边框、聚焦蓝色描边 */
-div[data-testid="stTextInput"] input,
-div[data-testid="stTextArea"] textarea {
+/* TextInput：外层容器保持边框，内层 input 去掉边框以避免双边框叠加 */
+/* 通用：清除所有输入控件的外层边框 */
+[data-baseweb="base-input"] {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+/* 清除 Streamlit 自动生成的 emotion-cache 容器边框（NumberInput 外层白边框来源） */
+div[data-testid="stNumberInput"] > div,
+div[data-testid="stTextInput"] > div,
+div[data-testid="stTextArea"] > div {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+/* 清除所有 emotion-cache 容器可能的边框 */
+div[data-testid="stNumberInput"] [class*="emotion-cache"],
+div[data-testid="stTextInput"] [class*="emotion-cache"],
+div[data-testid="stTextArea"] [class*="emotion-cache"] {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stTextInput"] [data-baseweb="input"] {
   background: var(--card-bg) !important;
   border: 1px solid var(--border) !important;
   border-radius: 12px !important;
+  box-shadow: none !important;
+  overflow: hidden;
 }
 
-div[data-testid="stTextInput"] input:focus,
-div[data-testid="stTextArea"] textarea:focus {
+div[data-testid="stTextInput"] input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
   border-color: rgba(0, 122, 255, 0.55) !important;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.14) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* TextArea：同样处理双边框问题 */
+div[data-testid="stTextArea"] [data-baseweb="textarea"] {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+div[data-testid="stTextArea"] textarea {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+div[data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within {
+  border-color: rgba(0, 122, 255, 0.55) !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* NumberInput（含 +/- stepper）：避免“内外两层边框”叠加产生重影 */
@@ -365,4 +419,3 @@ def apply_plot_style() -> None:
             "axes.formatter.useoffset": False,
         }
     )
-

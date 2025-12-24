@@ -1250,23 +1250,27 @@ def main():
 
             st.divider()
             st.markdown("**2. 算法与鲁棒性**")
-            col_adv1, col_adv2, col_adv3 = st.columns(3)
-            with col_adv1:
+
+            # 第一行：主要迭代参数
+            col_iter1, col_iter2, col_iter3 = st.columns(3)
+            with col_iter1:
                 max_nfev = int(
                     st.number_input(
                         "Max Iterations (外层迭代)",
                         value=int(get_cfg("max_nfev", 3000)),
                         step=500,
                         key="cfg_max_nfev",
-                        help="提示：每次迭代内部会为数值差分 Jacobian 额外调用模型多次，所以看到的“调用次数”通常会大于该值。",
+                        help="提示：每次迭代内部会为数值差分 Jacobian 额外调用模型多次，所以看到的'调用次数'通常会大于该值。",
                     )
                 )
+            with col_iter2:
                 diff_step_rel = ui_comp.smart_number_input(
                     "diff_step (Finite Diff)",
                     value=get_cfg("diff_step_rel", 1e-2),
                     key="cfg_diff_step_rel",
                     help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值。",
                 )
+            with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
                     value=float(get_cfg("max_step_fraction", 0.1)),
@@ -1276,15 +1280,19 @@ def main():
                     key="cfg_max_step_fraction",
                     help="用于 solve_ivp 的 max_step：max_step = fraction × 总时间/总体积；0 表示不限制。",
                 )
-            with col_adv2:
+
+            # 第二行：Multi-start 相关选项
+            col_ms1, col_ms2, col_ms3 = st.columns(3)
+            with col_ms1:
                 use_ms = st.checkbox(
                     "Multi-start (多起点)",
                     value=bool(get_cfg("use_multi_start", True)),
                     key="cfg_use_multi_start",
                 )
+            with col_ms2:
                 n_starts = int(
                     st.number_input(
-                        "Start Points",
+                        "Start Points (起点数)",
                         value=get_cfg("n_starts", 10),
                         min_value=1,
                         step=1,
@@ -1292,27 +1300,32 @@ def main():
                         help="仅当 Multi-start 勾选且 Start Points>1 时才生效。",
                     )
                 )
-            with col_adv3:
+            with col_ms3:
+                max_nfev_coarse = int(
+                    st.number_input(
+                        "Coarse Iters (粗拟合)",
+                        value=get_cfg("max_nfev_coarse", 300),
+                        step=50,
+                        key="cfg_max_nfev_coarse",
+                        help="仅当 Multi-start 生效时用于粗拟合阶段。",
+                    )
+                )
+
+            # 第三行：其他选项
+            col_opt1, col_opt2, col_opt3 = st.columns(3)
+            with col_opt1:
                 use_x_scale_jac = st.checkbox(
                     "Use x_scale='jac'",
                     value=get_cfg("use_x_scale_jac", True),
                     key="cfg_use_x_scale_jac",
                 )
+            with col_opt2:
                 random_seed = int(
                     st.number_input(
-                        "Random Seed",
+                        "Random Seed (随机种子)",
                         value=get_cfg("random_seed", 42),
                         step=1,
                         key="cfg_random_seed",
-                    )
-                )
-                max_nfev_coarse = int(
-                    st.number_input(
-                        "Coarse check iters",
-                        value=get_cfg("max_nfev_coarse", 300),
-                        step=50,
-                        key="cfg_max_nfev_coarse",
-                        help="仅当 Multi-start 生效时用于粗拟合阶段。",
                     )
                 )
 
