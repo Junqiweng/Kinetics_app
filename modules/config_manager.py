@@ -14,11 +14,26 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# 持久化目录（跨刷新可用；避免写入代码目录导致多用户互相覆盖）
-_PERSIST_DIR = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
-os.makedirs(_PERSIST_DIR, exist_ok=True)
+# 持久化基础目录
+_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
 
-_AUTO_SAVE_FILE = os.path.join(_PERSIST_DIR, "last_config.json")
+
+def _get_auto_save_file(session_id: str | None = None) -> str:
+    """
+    返回自动保存配置文件的路径。
+
+    参数:
+        session_id: 会话 ID，若提供则使用独立目录
+
+    返回:
+        配置文件路径
+    """
+    if session_id:
+        persist_dir = os.path.join(_PERSIST_BASE_DIR, session_id)
+    else:
+        persist_dir = _PERSIST_BASE_DIR
+    os.makedirs(persist_dir, exist_ok=True)
+    return os.path.join(persist_dir, "last_config.json")
 
 
 def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
@@ -242,15 +257,14 @@ def import_config_from_json(json_str: str) -> dict:
     return _convert_from_serializable(config)
 
 
-def auto_save_config(config: dict, client_id: str | None = None) -> tuple[bool, str]:
+def auto_save_config(config: dict, session_id: str | None = None) -> tuple[bool, str]:
     """
     自动保存配置到本地文件。
 
     返回:
         (ok, message)
     """
-    _ = client_id  # 保留参数以兼容旧调用；当前实现只保存“一个”配置缓存
-    file_path = _AUTO_SAVE_FILE
+    file_path = _get_auto_save_file(session_id)
     try:
         text = json.dumps(config, indent=2, ensure_ascii=False)
         _atomic_write_text(file_path, text, encoding="utf-8")
@@ -259,15 +273,14 @@ def auto_save_config(config: dict, client_id: str | None = None) -> tuple[bool, 
         return False, f"自动保存失败: {exc}"
 
 
-def auto_load_config(client_id: str | None = None) -> tuple[dict | None, str]:
+def auto_load_config(session_id: str | None = None) -> tuple[dict | None, str]:
     """
     从本地文件加载上次保存的配置。
 
     返回:
         (config, message)
     """
-    _ = client_id  # 保留参数以兼容旧调用；当前实现只加载“一个”配置缓存
-    file_path = _AUTO_SAVE_FILE
+    file_path = _get_auto_save_file(session_id)
     if not os.path.exists(file_path):
         return None, "未找到自动保存配置"
     try:
@@ -278,15 +291,14 @@ def auto_load_config(client_id: str | None = None) -> tuple[dict | None, str]:
         return None, f"自动加载失败: {exc}"
 
 
-def clear_auto_saved_config(client_id: str | None = None) -> tuple[bool, str]:
+def clear_auto_saved_config(session_id: str | None = None) -> tuple[bool, str]:
     """
     删除自动保存的配置文件（重置为默认）。
 
     返回:
         (ok, message)
     """
-    _ = client_id  # 保留参数以兼容旧调用；当前实现只清理“一个”配置缓存
-    file_path = _AUTO_SAVE_FILE
+    file_path = _get_auto_save_file(session_id)
     if os.path.exists(file_path):
         try:
             os.remove(file_path)

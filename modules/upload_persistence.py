@@ -1,4 +1,5 @@
 # 文件作用：上传 CSV 的本地缓存与恢复（跨浏览器刷新保留最近一次上传内容）。
+# 支持多用户会话隔离：每个会话 ID 使用独立的存储目录。
 
 from __future__ import annotations
 
@@ -23,11 +24,21 @@ def _read_csv_bytes_cached(uploaded_bytes: bytes) -> pd.DataFrame:
     return data_df
 
 
-def _get_persist_dir() -> str:
+def _get_persist_dir(session_id: str | None = None) -> str:
     """
-    本地持久化目录：用于跨刷新恢复（只保留一份缓存，新内容覆盖旧内容）。
+    本地持久化目录：用于跨刷新恢复。
+
+    参数:
+        session_id: 会话 ID，若提供则使用独立目录
+
+    返回:
+        持久化目录路径
     """
-    persist_dir = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+    base_dir = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+    if session_id:
+        persist_dir = os.path.join(base_dir, session_id)
+    else:
+        persist_dir = base_dir
     os.makedirs(persist_dir, exist_ok=True)
     return persist_dir
 
@@ -64,25 +75,33 @@ def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> No
             pass
 
 
-def _get_upload_file_paths() -> tuple[str, str]:
+def _get_upload_file_paths(session_id: str | None = None) -> tuple[str, str]:
     """
     返回:
         (csv_bytes_path, meta_json_path)
 
-    说明：只保留“一份”上传缓存，新内容覆盖旧内容。
+    参数:
+        session_id: 会话 ID，用于多用户隔离
     """
-    persist_dir = _get_persist_dir()
+    persist_dir = _get_persist_dir(session_id)
     csv_path = os.path.join(persist_dir, "uploaded.csv")
     meta_path = os.path.join(persist_dir, "uploaded.meta.json")
     return csv_path, meta_path
 
 
-def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
+def _load_persisted_upload(
+    session_id: str | None = None,
+) -> tuple[bytes | None, str | None, str]:
     """
+    加载已缓存的上传文件。
+
+    参数:
+        session_id: 会话 ID，用于多用户隔离
+
     返回:
         (uploaded_csv_bytes, uploaded_csv_name, message)
     """
-    csv_path, meta_path = _get_upload_file_paths()
+    csv_path, meta_path = _get_upload_file_paths(session_id)
     if not os.path.exists(csv_path):
         return None, None, "未找到已缓存上传文件"
 
@@ -107,9 +126,20 @@ def _load_persisted_upload() -> tuple[bytes | None, str | None, str]:
 
 
 def _save_persisted_upload(
-    uploaded_bytes: bytes, uploaded_name: str
+    uploaded_bytes: bytes, uploaded_name: str, session_id: str | None = None
 ) -> tuple[bool, str]:
-    csv_path, meta_path = _get_upload_file_paths()
+    """
+    保存上传文件到本地缓存。
+
+    参数:
+        uploaded_bytes: CSV 文件内容
+        uploaded_name: 文件名
+        session_id: 会话 ID，用于多用户隔离
+
+    返回:
+        (成功标志, 消息)
+    """
+    csv_path, meta_path = _get_upload_file_paths(session_id)
     try:
         _atomic_write_bytes(csv_path, uploaded_bytes)
         meta = {
@@ -124,8 +154,17 @@ def _save_persisted_upload(
         return False, f"缓存上传文件失败: {exc}"
 
 
-def _delete_persisted_upload() -> tuple[bool, str]:
-    csv_path, meta_path = _get_upload_file_paths()
+def _delete_persisted_upload(session_id: str | None = None) -> tuple[bool, str]:
+    """
+    删除已缓存的上传文件。
+
+    参数:
+        session_id: 会话 ID，用于多用户隔离
+
+    返回:
+        (成功标志, 消息)
+    """
+    csv_path, meta_path = _get_upload_file_paths(session_id)
     try:
         for path in [csv_path, meta_path]:
             if os.path.exists(path):

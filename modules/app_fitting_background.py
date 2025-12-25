@@ -139,38 +139,42 @@ def _render_fitting_progress_panel() -> None:
     ms_summary = str(st.session_state.get("fitting_ms_summary", "")).strip()
     final_summary = str(st.session_state.get("fitting_final_summary", "")).strip()
 
-    if job_summary:
-        _render_fitting_overview_box(job_summary)
+    if not (job_summary or timeline or ms_summary or final_summary):
+        return
 
-    if timeline:
-        st.write("")
-        with st.container(border=True):
-            st.markdown(
-                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
-            )
-            st.markdown("#### 进度日志")
-            for icon, text in timeline:
-                text = str(text).strip()
-                if text:
-                    st.markdown(f"- {icon} {text}")
+    with st.expander("拟合任务概览与摘要 (点击展开)", expanded=False):
+        if job_summary:
+            _render_fitting_overview_box(job_summary)
 
-    if ms_summary:
-        st.write("")
-        with st.container(border=True):
-            st.markdown(
-                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
-            )
-            st.markdown("#### Multi-start 摘要")
-            st.code(ms_summary, language="text")
+        if timeline:
+            st.write("")
+            with st.container(border=True):
+                st.markdown(
+                    '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+                )
+                st.markdown("#### 进度日志")
+                for icon, text in timeline:
+                    text = str(text).strip()
+                    if text:
+                        st.markdown(f"- {icon} {text}")
 
-    if final_summary:
-        st.write("")
-        with st.container(border=True):
-            st.markdown(
-                '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
-            )
-            st.markdown("#### 拟合摘要")
-            st.caption(final_summary)
+        if ms_summary:
+            st.write("")
+            with st.container(border=True):
+                st.markdown(
+                    '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+                )
+                st.markdown("#### Multi-start 摘要")
+                st.code(ms_summary, language="text")
+
+        if final_summary:
+            st.write("")
+            with st.container(border=True):
+                st.markdown(
+                    '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+                )
+                st.markdown("#### 拟合摘要")
+                st.caption(final_summary)
 
 
 def _render_fitting_live_progress() -> None:

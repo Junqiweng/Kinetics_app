@@ -99,7 +99,7 @@ def smart_number_input(
 
     kwargs: dict = {
         "label": label,
-        "value": float(value),
+        "value": float(current_value),
         "key": key,
         "help": help,
         "disabled": bool(disabled),
@@ -114,6 +114,9 @@ def smart_number_input(
 
     if use_sci:
         kwargs["format"] = UI_FLOAT_SCI_FORMAT_STREAMLIT
+    else:
+        # 为常规数字提供足够的小数位格式，避免 1e-3 (0.001) 显示为 0.00
+        kwargs["format"] = f"%.{UI_FLOAT_NORMAL_MAX_DECIMALS}f"
 
     if container is None:
         return float(st.number_input(**kwargs))

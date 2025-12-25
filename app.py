@@ -20,6 +20,7 @@ import modules.ui_help as ui_help
 import modules.config_manager as config_manager
 import modules.ui_components as ui_comp  # UI 组件工具函数
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
+import modules.session_cleanup as session_cleanup  # 会话清理
 import modules.app_style as app_style
 
 from modules.constants import (
@@ -29,7 +30,6 @@ from modules.constants import (
     UI_TOLERANCE_FORMAT_STREAMLIT,
 )
 from modules.app_config_state import (
-    _apply_imported_config_to_widget_state,
     _clear_config_related_state,
     _warn_once,
 )
@@ -63,6 +63,21 @@ def main():
     st.set_page_config(
         page_title="Kinetics_app | 反应动力学拟合", layout="wide", page_icon="⚗️"
     )
+
+    # ========= 会话 ID 初始化（多用户隔离） =========
+    # 必须在其他操作之前初始化会话 ID
+    browser_storage.inject_session_id_script()
+    session_id = browser_storage.get_current_session_id()
+    # 将 session_id 存储到 session_state 供后续使用
+    if session_id:
+        st.session_state["_current_session_id"] = session_id
+
+    # ========= 定期清理过期会话 =========
+    # 每 20 次页面加载执行一次清理（避免频繁 IO）
+    cleanup_counter = st.session_state.get("_cleanup_counter", 0) + 1
+    st.session_state["_cleanup_counter"] = cleanup_counter
+    if cleanup_counter % 20 == 1:
+        session_cleanup.cleanup_old_sessions(max_age_hours=24)
 
     MAIN_TAB_LABELS = ["反应与模型", "实验数据", "拟合与结果"]
 
@@ -309,13 +324,13 @@ def main():
 
     # --- 重置为默认：延迟到“下一次 rerun”再清理（避免修改已创建 widget 的 session_state）---
     if bool(st.session_state.pop("pending_reset_to_default", False)):
-        ok, message = config_manager.clear_auto_saved_config()
+        ok, message = config_manager.clear_auto_saved_config(session_id)
         if not ok:
             st.warning(message)
         # 同时清除浏览器 LocalStorage 中的配置
         browser_storage.clear_browser_config()
         # 同时删除“实验数据”中已缓存的上传文件（否则下次启动会被自动恢复）
-        ok, message = _delete_persisted_upload()
+        ok, message = _delete_persisted_upload(session_id)
         if not ok:
             st.warning(message)
         _clear_config_related_state()
@@ -330,10 +345,11 @@ def main():
         if not is_valid:
             st.error(f"导入配置失败（配置校验未通过）：{error_message}")
         else:
+            # 先清空旧的控件状态，防止与新导入的配置冲突导致 Streamlit 告警
+            _clear_config_related_state()
             st.session_state["imported_config"] = pending_cfg
-            _apply_imported_config_to_widget_state(pending_cfg)
             # 保存到本地文件系统
-            ok, message = config_manager.auto_save_config(pending_cfg)
+            ok, message = config_manager.auto_save_config(pending_cfg, session_id)
             if not ok:
                 st.warning(message)
             # 同时保存到浏览器 LocalStorage
@@ -348,7 +364,7 @@ def main():
 
         if not just_reset:
             # 方案1：尝试从本地文件系统加载（用于本地运行）
-            saved_config, load_message = config_manager.auto_load_config()
+            saved_config, load_message = config_manager.auto_load_config(session_id)
             if saved_config is not None:
                 is_valid, error_message = config_manager.validate_config(saved_config)
                 if is_valid:
@@ -411,7 +427,7 @@ def main():
 
     # --- 恢复缓存的已上传 CSV（浏览器刷新后仍保留）---
     if "uploaded_csv_bytes" not in st.session_state:
-        uploaded_bytes, uploaded_name, message = _load_persisted_upload()
+        uploaded_bytes, uploaded_name, message = _load_persisted_upload(session_id)
         if uploaded_bytes is not None:
             st.session_state["uploaded_csv_bytes"] = uploaded_bytes
             st.session_state["uploaded_csv_name"] = uploaded_name or ""
@@ -1003,7 +1019,7 @@ def main():
                             del st.session_state[k]
                     if "data_df_cached" in st.session_state:
                         del st.session_state["data_df_cached"]
-                    ok, message = _delete_persisted_upload()
+                    ok, message = _delete_persisted_upload(session_id)
                     if not ok:
                         st.warning(message)
                     if csv_uploader_key in st.session_state:
@@ -1026,7 +1042,9 @@ def main():
                 uploaded_name = str(getattr(uploaded_file, "name", "")).strip()
                 st.session_state["uploaded_csv_bytes"] = uploaded_bytes
                 st.session_state["uploaded_csv_name"] = uploaded_name
-                ok, message = _save_persisted_upload(uploaded_bytes, uploaded_name)
+                ok, message = _save_persisted_upload(
+                    uploaded_bytes, uploaded_name, session_id
+                )
                 if not ok:
                     st.warning(message)
             except Exception as exc:
@@ -1152,7 +1170,7 @@ def main():
         is_valid_cfg, _ = config_manager.validate_config(export_cfg)
         if is_valid_cfg:
             # 本地文件系统保存（用于本地运行）
-            ok, message = config_manager.auto_save_config(export_cfg)
+            ok, message = config_manager.auto_save_config(export_cfg, session_id)
             if not ok:
                 st.warning(message)
             # 浏览器 LocalStorage 保存（用于 Streamlit Cloud 等云环境）
@@ -1284,7 +1302,9 @@ def main():
             with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
-                    value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
+                    value=float(
+                        get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
+                    ),
                     min_value=0.0,
                     max_value=10.0,
                     step=0.05,
@@ -1483,7 +1503,7 @@ def main():
             is_valid_cfg, _ = config_manager.validate_config(export_cfg)
             if is_valid_cfg:
                 # 本地文件系统保存（用于本地运行）
-                ok, message = config_manager.auto_save_config(export_cfg)
+                ok, message = config_manager.auto_save_config(export_cfg, session_id)
                 if not ok:
                     st.warning(message)
                 # 浏览器 LocalStorage 保存（用于 Streamlit Cloud 等云环境）
@@ -1747,9 +1767,7 @@ def main():
         tab_fit_results_container.divider()
         phi_value = float(res.get("phi_final", res.get("cost", 0.0)))
         phi_text = ui_comp.smart_float_to_str(phi_value)
-        tab_fit_results_container.markdown(
-            f"### 拟合结果 (目标函数 Φ: {phi_text})"
-        )
+        tab_fit_results_container.markdown(f"### 拟合结果 (目标函数 Φ: {phi_text})")
         tab_fit_results_container.latex(
             r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
         )
@@ -1762,7 +1780,10 @@ def main():
         rtol_fit = float(res.get("rtol", rtol))
         atol_fit = float(res.get("atol", atol))
         max_step_fraction_fit = float(
-            res.get("max_step_fraction", get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION))
+            res.get(
+                "max_step_fraction",
+                get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION),
+            )
         )
         reactor_type_fit = res.get("reactor_type", reactor_type)
         kinetic_model_fit = res.get("kinetic_model", kinetic_model)

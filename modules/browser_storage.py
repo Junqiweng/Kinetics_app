@@ -1,14 +1,15 @@
-﻿# 文件作用：通过浏览器 LocalStorage 持久化配置（用于 Streamlit Cloud 等无法稳定写本地文件的环境）。
+﻿# 文件作用：通过浏览器 LocalStorage/sessionStorage 持久化配置和会话管理。
 
 """
-浏览器 LocalStorage 持久化模块
+浏览器存储持久化模块
 
 用于 Streamlit Cloud 等无法使用本地文件系统的环境。
-通过注入 JavaScript 代码与浏览器 LocalStorage 交互。
+通过注入 JavaScript 代码与浏览器 LocalStorage/sessionStorage 交互。
 
 实现原理：
-1. 保存：通过 components.html 注入 JS，将配置写入 LocalStorage
-2. 加载：通过 URL 参数传递标志，触发 JS 读取 LocalStorage 并存入隐藏的 text_input
+1. 会话 ID：使用 sessionStorage 存储唯一会话 ID（刷新保留，关闭清除）
+2. 保存配置：通过 components.html 注入 JS，将配置写入 LocalStorage
+3. 加载配置：通过 URL 参数传递标志，触发 JS 读取 LocalStorage
 """
 
 from __future__ import annotations
@@ -16,12 +17,124 @@ from __future__ import annotations
 import json
 import base64
 import hashlib
+import uuid
 import streamlit as st
 import streamlit.components.v1 as components
 
 
-# 浏览器 LocalStorage 键名常量
+# 浏览器存储键名常量
 _LS_CONFIG_KEY = "kinetics_app_config_v1"
+_SS_SESSION_KEY = "kinetics_session_id_v1"  # sessionStorage 会话 ID 键名
+
+
+# ============ 会话 ID 管理 ============
+
+
+def inject_session_id_script() -> None:
+    """
+    注入 JavaScript 脚本管理会话 ID。
+
+    该脚本会：
+    1. 检查 sessionStorage 中是否存在会话 ID
+    2. 如果不存在，生成新的 UUID
+    3. 将会话 ID 通过 URL 参数传递给 Streamlit
+
+    特性：
+    - sessionStorage 在刷新时保留
+    - sessionStorage 在关闭标签页时清除
+    """
+    # 如果已经有会话 ID，跳过注入
+    if st.session_state.get("_session_id_initialized", False):
+        return
+
+    # 检查 URL 参数中是否有会话 ID
+    query_params = st.query_params
+    session_id_from_url = query_params.get("sid", None)
+
+    if session_id_from_url:
+        # 从 URL 获取会话 ID
+        st.session_state["_current_session_id"] = session_id_from_url
+        st.session_state["_session_id_initialized"] = True
+        # 清除 URL 参数（保持 URL 简洁）
+        st.query_params.clear()
+        return
+
+    # 注入 JavaScript 生成/读取会话 ID
+    js_code = f"""
+    <script>
+        (function() {{
+            // 避免重复执行
+            if (window._kinetics_session_id_done) return;
+            window._kinetics_session_id_done = true;
+            
+            const SESSION_KEY = "{_SS_SESSION_KEY}";
+            
+            try {{
+                // 检查 sessionStorage 中是否有会话 ID
+                let sessionId = sessionStorage.getItem(SESSION_KEY);
+                
+                if (!sessionId) {{
+                    // 生成新的 UUID
+                    sessionId = crypto.randomUUID ? crypto.randomUUID() : 
+                        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {{
+                            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                            return v.toString(16);
+                        }});
+                    sessionStorage.setItem(SESSION_KEY, sessionId);
+                }}
+                
+                // 将会话 ID 通过 URL 参数传递给 Streamlit
+                const currentUrl = new URL(window.parent.location.href);
+                if (!currentUrl.searchParams.has('sid')) {{
+                    currentUrl.searchParams.set('sid', sessionId);
+                    window.parent.history.replaceState(null, '', currentUrl.toString());
+                    // 触发 Streamlit 重新加载
+                    window.parent.location.reload();
+                }}
+            }} catch (e) {{
+                console.error("Session ID management error:", e);
+            }}
+        }})();
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+
+def get_current_session_id() -> str | None:
+    """
+    获取当前会话 ID。
+
+    返回:
+        会话 ID 字符串；若尚未初始化则返回 None
+    """
+    return st.session_state.get("_current_session_id", None)
+
+
+def clear_session_id() -> None:
+    """
+    清除当前会话 ID（用于重置）。
+    """
+    js_code = f"""
+    <script>
+        (function() {{
+            try {{
+                sessionStorage.removeItem("{_SS_SESSION_KEY}");
+            }} catch (e) {{
+                console.error("Session ID clear error:", e);
+            }}
+        }})();
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+    # 清除 session_state 中的会话 ID
+    if "_current_session_id" in st.session_state:
+        del st.session_state["_current_session_id"]
+    if "_session_id_initialized" in st.session_state:
+        del st.session_state["_session_id_initialized"]
+
+
+# ============ 配置存储 ============
 
 
 def _compute_config_hash(config_dict: dict) -> str:
