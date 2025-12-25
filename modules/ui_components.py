@@ -9,12 +9,15 @@ from matplotlib.ticker import FuncFormatter
 
 
 from .constants import (
+    PLOT_EXPORT_DPI,
+    PLOT_SCI_POWERLIMITS,
     UI_FLOAT_NORMAL_MAX_DECIMALS,
     UI_FLOAT_SCI_DECIMALS,
     UI_FLOAT_SCI_FORMAT_STREAMLIT,
     UI_FLOAT_SCI_HIGH,
     UI_FLOAT_SCI_LOW,
     UI_ORDER_MATRIX_NUMBER_FORMAT,
+    UI_PARAM_TABLE_HEIGHT_PX,
 )
 
 
@@ -132,7 +135,7 @@ def figure_to_image_bytes(fig: plt.Figure, image_format: str) -> bytes:
     buf = io.BytesIO()
     save_kwargs = {"format": image_format, "bbox_inches": "tight"}
     if image_format in ["png", "jpg", "jpeg", "tif", "tiff"]:
-        save_kwargs["dpi"] = 300
+        save_kwargs["dpi"] = PLOT_EXPORT_DPI
     fig.savefig(buf, **save_kwargs)
     return buf.getvalue()
 
@@ -146,7 +149,7 @@ def apply_plot_tick_format(
             from matplotlib.ticker import ScalarFormatter
 
             formatter = ScalarFormatter(useMathText=True)
-            formatter.set_powerlimits((-3, 4))
+            formatter.set_powerlimits(PLOT_SCI_POWERLIMITS)
             ax.xaxis.set_major_formatter(formatter)
             ax.yaxis.set_major_formatter(formatter)
         except Exception:
@@ -203,7 +206,7 @@ def render_param_table(
     col2_help: str,
     fit1_default: np.ndarray,
     fit2_default: np.ndarray,
-    height: int = 250,
+    height: int = UI_PARAM_TABLE_HEIGHT_PX,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     通用的双参数表格渲染 (如 k0/Ea, K0/Ea, k0_rev/Ea_rev)。
@@ -299,7 +302,7 @@ def render_order_table(
     species_names: list[str],
     order_data: np.ndarray | None,
     fit_data: np.ndarray | None,
-    height: int = 250,
+    height: int = UI_PARAM_TABLE_HEIGHT_PX,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     渲染反应级数矩阵编辑器。

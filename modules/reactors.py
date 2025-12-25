@@ -9,7 +9,16 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares
 
-from .constants import EPSILON_FLOW_RATE, EPSILON_DENOMINATOR
+from .constants import (
+    DEFAULT_CSTR_STEADY_FTOL,
+    DEFAULT_CSTR_STEADY_GTOL,
+    DEFAULT_CSTR_STEADY_MAX_NFEV,
+    DEFAULT_CSTR_STEADY_XTOL,
+    DEFAULT_MAX_STEP_FRACTION,
+    DEFAULT_PROFILE_N_POINTS,
+    EPSILON_DENOMINATOR,
+    EPSILON_FLOW_RATE,
+)
 from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
     calc_rate_vector_power_law,
@@ -49,7 +58,7 @@ def integrate_pfr_molar_flows(
     rtol: float,
     atol: float,
     kinetic_model: str = "power_law",
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -196,7 +205,7 @@ def integrate_batch_reactor(
     rtol: float,
     atol: float,
     kinetic_model: str = "power_law",
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -342,10 +351,10 @@ def solve_cstr_steady_state_concentrations(
     k0_rev: np.ndarray = None,
     ea_rev_J_mol: np.ndarray = None,
     order_rev_matrix: np.ndarray = None,
-    max_nfev: int = 200,
-    xtol: float = 1e-10,
-    ftol: float = 1e-10,
-    gtol: float = 1e-10,
+    max_nfev: int = DEFAULT_CSTR_STEADY_MAX_NFEV,
+    xtol: float = DEFAULT_CSTR_STEADY_XTOL,
+    ftol: float = DEFAULT_CSTR_STEADY_FTOL,
+    gtol: float = DEFAULT_CSTR_STEADY_GTOL,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
@@ -386,9 +395,9 @@ def solve_cstr_steady_state_concentrations(
     try:
         max_nfev = int(max_nfev)
     except Exception:
-        max_nfev = 200
+        max_nfev = DEFAULT_CSTR_STEADY_MAX_NFEV
     if max_nfev <= 0:
-        max_nfev = 200
+        max_nfev = DEFAULT_CSTR_STEADY_MAX_NFEV
 
     tau_s = float(reactor_volume_m3) / max(
         float(vdot_m3_s), EPSILON_FLOW_RATE
@@ -514,9 +523,9 @@ def integrate_cstr_profile(
     solver_method: str,
     rtol: float,
     atol: float,
-    n_points: int = 200,
+    n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = "power_law",
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -738,9 +747,9 @@ def integrate_pfr_profile(
     solver_method: str,
     rtol: float,
     atol: float,
-    n_points: int = 200,
+    n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = "power_law",
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,
@@ -942,9 +951,9 @@ def integrate_batch_profile(
     solver_method: str,
     rtol: float,
     atol: float,
-    n_points: int = 200,
+    n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = "power_law",
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray = None,
     Ea_K_J_mol: np.ndarray = None,
     m_inhibition: np.ndarray = None,

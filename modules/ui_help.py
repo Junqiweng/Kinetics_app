@@ -7,8 +7,7 @@ import pandas as pd
 import streamlit as st
 from pathlib import Path
 
-from .kinetics import R_GAS_J_MOL_K
-from .constants import EPSILON_CONCENTRATION, EPSILON_FLOW_RATE
+from .constants import EPSILON_CONCENTRATION, EPSILON_FLOW_RATE, R_GAS_J_MOL_K
 
 
 def _project_root_dir() -> Path:

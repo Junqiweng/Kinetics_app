@@ -5,7 +5,23 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .constants import EPSILON_FLOW_RATE, EPSILON_CONCENTRATION
+from .constants import (
+    DEFAULT_EA_K_MAX_J_MOL,
+    DEFAULT_EA_K_MIN_J_MOL,
+    DEFAULT_EA_REV_MAX_J_MOL,
+    DEFAULT_EA_REV_MIN_J_MOL,
+    DEFAULT_K0_ADS_MAX,
+    DEFAULT_K0_ADS_MIN,
+    DEFAULT_K0_REV_MAX,
+    DEFAULT_K0_REV_MIN,
+    DEFAULT_M_INHIBITION_MAX,
+    DEFAULT_M_INHIBITION_MIN,
+    DEFAULT_MAX_STEP_FRACTION,
+    DEFAULT_ORDER_REV_MAX,
+    DEFAULT_ORDER_REV_MIN,
+    EPSILON_CONCENTRATION,
+    EPSILON_FLOW_RATE,
+)
 from .reactors import (
     integrate_batch_reactor,
     integrate_pfr_molar_flows,
@@ -250,22 +266,22 @@ def _build_bounds(
     fit_K0_ads_flags: np.ndarray = None,
     fit_Ea_K_flags: np.ndarray = None,
     fit_m_flags: np.ndarray = None,
-    K0_ads_min: float = 1e-10,
-    K0_ads_max: float = 1e10,
-    Ea_K_min: float = -2e5,  # 允许负值（放热吸附）
-    Ea_K_max: float = 2e5,
-    m_min: float = 0.0,
-    m_max: float = 5.0,
+    K0_ads_min: float = DEFAULT_K0_ADS_MIN,
+    K0_ads_max: float = DEFAULT_K0_ADS_MAX,
+    Ea_K_min: float = DEFAULT_EA_K_MIN_J_MOL,  # 允许负值（放热吸附）
+    Ea_K_max: float = DEFAULT_EA_K_MAX_J_MOL,
+    m_min: float = DEFAULT_M_INHIBITION_MIN,
+    m_max: float = DEFAULT_M_INHIBITION_MAX,
     # 可逆反应边界参数
     fit_k0_rev_flags: np.ndarray = None,
     fit_ea_rev_flags: np.ndarray = None,
     fit_order_rev_flags_matrix: np.ndarray = None,
-    k0_rev_min: float = 1e-10,
-    k0_rev_max: float = 1e15,
-    ea_rev_min: float = 0.0,
-    ea_rev_max: float = 5e5,
-    order_rev_min: float = -3.0,
-    order_rev_max: float = 5.0,
+    k0_rev_min: float = DEFAULT_K0_REV_MIN,
+    k0_rev_max: float = DEFAULT_K0_REV_MAX,
+    ea_rev_min: float = DEFAULT_EA_REV_MIN_J_MOL,
+    ea_rev_max: float = DEFAULT_EA_REV_MAX_J_MOL,
+    order_rev_min: float = DEFAULT_ORDER_REV_MIN,
+    order_rev_max: float = DEFAULT_ORDER_REV_MAX,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     构建所有拟合参数的边界。
@@ -361,7 +377,7 @@ def _predict_outputs_for_row(
     k0_rev: np.ndarray = None,
     ea_rev_J_mol: np.ndarray = None,
     order_rev_matrix: np.ndarray = None,
-    max_step_fraction: float | None = 0.1,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     name_to_index: dict[str, int] | None = None,
     output_species_indices: list[int] | None = None,
     inlet_column_names: list[str] | None = None,

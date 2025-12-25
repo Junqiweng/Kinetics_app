@@ -16,8 +16,23 @@ from scipy.optimize import least_squares
 
 from . import fitting
 from .constants import (
+    CSV_CLOSE_MATCHES_CUTOFF,
+    CSV_CLOSE_MATCHES_MAX,
+    CSV_COLUMN_PREVIEW_COUNT,
+    CSV_INVALID_INDEX_PREVIEW_COUNT,
+    DEFAULT_EA_K_MAX_J_MOL,
+    DEFAULT_EA_K_MIN_J_MOL,
+    DEFAULT_K0_ADS_MAX,
+    DEFAULT_M_INHIBITION_MAX,
+    DEFAULT_M_INHIBITION_MIN,
+    DEFAULT_MAX_STEP_FRACTION,
     DEFAULT_RESIDUAL_PENALTY_MULTIPLIER,
     DEFAULT_RESIDUAL_PENALTY_MIN_ABS,
+    EPSILON_RELATIVE,
+    FITTING_EPSILON_NORM,
+    FITTING_EPSILON_PHI_RATIO,
+    FITTING_UI_UPDATE_INTERVAL_S,
+    PERCENTAGE_RESIDUAL_EPSILON_FACTOR,
 )
 
 
@@ -287,10 +302,10 @@ def _run_fitting_job(
     ord_min = job_inputs["ord_min"]
     ord_max = job_inputs["ord_max"]
     K0_ads_min = job_inputs.get("K0_ads_min", 0.0)
-    K0_ads_max = job_inputs.get("K0_ads_max", 1e10)
-    Ea_K_min = job_inputs.get("Ea_K_min", -2e5)
-    Ea_K_max = job_inputs.get("Ea_K_max", 2e5)
-    max_step_fraction = float(job_inputs.get("max_step_fraction", 0.1))
+    K0_ads_max = job_inputs.get("K0_ads_max", DEFAULT_K0_ADS_MAX)
+    Ea_K_min = job_inputs.get("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL)
+    Ea_K_max = job_inputs.get("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL)
+    max_step_fraction = float(job_inputs.get("max_step_fraction", DEFAULT_MAX_STEP_FRACTION))
     residual_type = str(job_inputs.get("residual_type", "绝对残差"))
 
     if stop_event.is_set():
@@ -340,8 +355,8 @@ def _run_fitting_job(
         K0_ads_max,
         Ea_K_min,
         Ea_K_max,
-        0,
-        5,
+        DEFAULT_M_INHIBITION_MIN,
+        DEFAULT_M_INHIBITION_MAX,
         fit_k0_rev_flags,
         fit_ea_rev_flags,
         fit_order_rev_flags_matrix,
@@ -373,11 +388,14 @@ def _run_fitting_job(
     if missing_output_columns:
         missing_columns_text = ", ".join(missing_output_columns)
         available_cols = [str(c) for c in list(data_df.columns)]
-        available_cols_text = ", ".join(available_cols[:40])
+        available_cols_text = ", ".join(available_cols[:CSV_COLUMN_PREVIEW_COUNT])
         suggestions = []
         for missing_name in missing_output_columns:
             matches = difflib.get_close_matches(
-                missing_name, available_cols, n=3, cutoff=0.6
+                missing_name,
+                available_cols,
+                n=CSV_CLOSE_MATCHES_MAX,
+                cutoff=CSV_CLOSE_MATCHES_CUTOFF,
             )
             if matches:
                 suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
@@ -386,7 +404,7 @@ def _run_fitting_job(
             "数据表缺少所选输出测量列，无法构建残差并进行拟合。\n"
             f"- 当前输出模式: {output_mode}\n"
             f"- 需要的列名: {missing_columns_text}\n"
-            f"- 当前 CSV 列名（前 40 个）: {available_cols_text}\n"
+            f"- 当前 CSV 列名（前 {CSV_COLUMN_PREVIEW_COUNT} 个）: {available_cols_text}\n"
             "提示：系统会自动去掉列名首尾空格；请优先使用「下载 CSV 模板」生成的表头。\n"
             "请检查：输出模式/物种选择是否正确，以及数据文件表头是否匹配。"
             f"{suggestion_text}"
@@ -412,11 +430,14 @@ def _run_fitting_job(
     if missing_input_columns:
         missing_text = ", ".join(missing_input_columns)
         available_cols = [str(c) for c in list(data_df.columns)]
-        available_cols_text = ", ".join(available_cols[:40])
+        available_cols_text = ", ".join(available_cols[:CSV_COLUMN_PREVIEW_COUNT])
         suggestions = []
         for missing_name in missing_input_columns:
             matches = difflib.get_close_matches(
-                missing_name, available_cols, n=3, cutoff=0.6
+                missing_name,
+                available_cols,
+                n=CSV_CLOSE_MATCHES_MAX,
+                cutoff=CSV_CLOSE_MATCHES_CUTOFF,
             )
             if matches:
                 suggestions.append(f"- `{missing_name}` 可能对应: {', '.join(matches)}")
@@ -425,7 +446,7 @@ def _run_fitting_job(
             "数据表缺少必要输入列，无法进行模型计算与拟合。\n"
             f"- 反应器类型: {reactor_type}\n"
             f"- 缺少列名: {missing_text}\n"
-            f"- 当前 CSV 列名（前 40 个）: {available_cols_text}\n"
+            f"- 当前 CSV 列名（前 {CSV_COLUMN_PREVIEW_COUNT} 个）: {available_cols_text}\n"
             "请使用「下载 CSV 模板」生成的表头，或检查列名是否拼写一致（含单位后缀）。"
             f"{suggestion_text}"
         )
@@ -442,7 +463,9 @@ def _run_fitting_job(
         invalid_mask = ~np.isfinite(numeric_values)
         if bool(np.any(invalid_mask)):
             invalid_row_indices = data_df.index[invalid_mask].tolist()
-            sample_indices_text = ", ".join([str(i) for i in invalid_row_indices[:10]])
+            sample_indices_text = ", ".join(
+                [str(i) for i in invalid_row_indices[:CSV_INVALID_INDEX_PREVIEW_COUNT]]
+            )
             invalid_input_messages.append(
                 f"- 列 `{column_name}` 含 NaN/非数字/无穷大：共 {len(invalid_row_indices)} 行"
                 + (
@@ -473,7 +496,9 @@ def _run_fitting_job(
 
         if bool(np.any(bad_mask)):
             bad_row_indices = data_df.index[bad_mask].tolist()
-            sample_indices_text = ", ".join([str(i) for i in bad_row_indices[:10]])
+            sample_indices_text = ", ".join(
+                [str(i) for i in bad_row_indices[:CSV_INVALID_INDEX_PREVIEW_COUNT]]
+            )
             invalid_input_messages.append(
                 f"- 列 `{column_name}` {bad_desc}：共 {len(bad_row_indices)} 行"
                 + (
@@ -524,7 +549,7 @@ def _run_fitting_job(
         typical_measured_scale = 1.0
 
     if (not np.isfinite(max_step_fraction)) or (max_step_fraction < 0.0):
-        max_step_fraction = 0.1
+        max_step_fraction = DEFAULT_MAX_STEP_FRACTION
 
     residual_penalty_value = float(
         max(
@@ -543,9 +568,11 @@ def _run_fitting_job(
     )
 
     # 计算 epsilon（用于百分比残差，避免除零）
-    residual_epsilon = float(typical_measured_scale * 0.01)  # 典型值的 1%
-    if residual_epsilon < 1e-15:
-        residual_epsilon = 1e-15
+    residual_epsilon = float(
+        typical_measured_scale * PERCENTAGE_RESIDUAL_EPSILON_FACTOR
+    )  # 典型值的百分比
+    if residual_epsilon < EPSILON_RELATIVE:
+        residual_epsilon = EPSILON_RELATIVE
 
     # 残差类型信息
     residual_type_names = {
@@ -690,7 +717,7 @@ def _run_fitting_job(
                 best_cost_so_far = cost_now
 
         now_s = time.time()
-        if (now_s - last_ui_update_s) >= 0.6:
+        if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
             calls_per_iteration_est = int(max(int(n_params_fit or 0) + 1, 1))
             call_budget_est = int(max(int(stage_max_nfev), 1)) * calls_per_iteration_est
             frac = float(stage_nfev) / float(max(call_budget_est, 1))
@@ -900,10 +927,10 @@ def _run_fitting_job(
     set_metric("final_phi", final_phi)
     timeline_add("✅", f"精细拟合完成，最终 Φ: {final_phi:.4e}")
 
-    phi_ratio = float(final_phi / max(initial_cost, 1e-300))
+    phi_ratio = float(final_phi / max(initial_cost, FITTING_EPSILON_PHI_RATIO))
     param_relative_change = float(
         np.linalg.norm(final_res.x - param_vector)
-        / (np.linalg.norm(param_vector) + 1e-12)
+        / (np.linalg.norm(param_vector) + FITTING_EPSILON_NORM)
     )
     set_metric("phi_ratio", phi_ratio)
     set_metric("param_relative_change", param_relative_change)

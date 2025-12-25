@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from .constants import DEFAULT_ATOL, DEFAULT_RTOL
+
 
 def _apply_imported_config_to_widget_state(config: dict) -> None:
     """
@@ -26,9 +28,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_solver_method"] = solver_method_cfg
 
     if "rtol" in config:
-        st.session_state["cfg_rtol"] = float(config.get("rtol", 1e-6))
+        st.session_state["cfg_rtol"] = float(config.get("rtol", DEFAULT_RTOL))
     if "atol" in config:
-        st.session_state["cfg_atol"] = float(config.get("atol", 1e-9))
+        st.session_state["cfg_atol"] = float(config.get("atol", DEFAULT_ATOL))
 
     if "species_text" in config:
         st.session_state["cfg_species_text"] = str(

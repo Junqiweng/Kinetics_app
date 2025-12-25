@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from . import fitting
+from .constants import DEFAULT_MAX_STEP_FRACTION
 
 
 def _clean_species_names(species_text: str) -> list[str]:
@@ -67,7 +68,7 @@ def _build_fit_comparison_long_table(
     atol: float,
     reactor_type: str,
     kinetic_model: str,
-    max_step_fraction: float = 0.1,
+    max_step_fraction: float = DEFAULT_MAX_STEP_FRACTION,
 ) -> pd.DataFrame:
     rows = []
     row_indices = data_df.index.to_numpy()

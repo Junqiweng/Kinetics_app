@@ -5,6 +5,8 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import streamlit as st
 
+from .constants import PLOT_FONT_WEIGHT_SEMIBOLD, PLOT_SCI_POWERLIMITS
+
 
 APP_CSS = """
 <style>
@@ -411,10 +413,10 @@ def apply_plot_style() -> None:
             "grid.color": "#e5e5ea",
             "figure.facecolor": "#ffffff",
             "axes.facecolor": "#ffffff",
-            "axes.titleweight": 600,
-            "axes.labelweight": 600,
+            "axes.titleweight": PLOT_FONT_WEIGHT_SEMIBOLD,
+            "axes.labelweight": PLOT_FONT_WEIGHT_SEMIBOLD,
             # 智能切换科学计数：当指数 < -3 或 >= 4 时使用科学计数
-            "axes.formatter.limits": (-3, 4),
+            "axes.formatter.limits": PLOT_SCI_POWERLIMITS,
             "axes.formatter.use_mathtext": True,
             "axes.formatter.useoffset": False,
         }

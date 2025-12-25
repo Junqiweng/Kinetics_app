@@ -25,8 +25,40 @@ import modules.app_style as app_style
 
 from modules.constants import (
     DEFAULT_ATOL,
+    DEFAULT_DIFF_STEP_REL,
+    DEFAULT_EA_K_MAX_J_MOL,
+    DEFAULT_EA_K_MIN_J_MOL,
+    DEFAULT_EA_MAX_J_MOL,
+    DEFAULT_EA_MIN_J_MOL,
+    DEFAULT_K0_ADS_MAX,
+    DEFAULT_K0_ADS_MIN,
+    DEFAULT_K0_MAX,
+    DEFAULT_K0_MIN,
     DEFAULT_MAX_STEP_FRACTION,
+    DEFAULT_MAX_NFEV,
+    DEFAULT_MAX_NFEV_COARSE,
+    DEFAULT_N_STARTS,
+    DEFAULT_ORDER_MAX,
+    DEFAULT_ORDER_MIN,
+    DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
+    DEFAULT_SESSION_MAX_AGE_HOURS,
+    EPSILON_CONCENTRATION,
+    EPSILON_FLOW_RATE,
+    FITTING_STOP_WAIT_SLEEP_S,
+    FITTING_STOP_WAIT_TRIES,
+    SESSION_CLEANUP_EVERY_N_PAGE_LOADS,
+    UI_COMPARE_TABLE_HEIGHT_PX,
+    UI_DATA_PREVIEW_HEIGHT_PX,
+    UI_DATA_PREVIEW_ROWS,
+    UI_MAX_NFEV_STEP,
+    UI_MAX_STEP_FRACTION_STEP,
+    UI_METRICS_TABLE_HEIGHT_PX,
+    UI_PARAM_TABLE_HEIGHT_PX,
+    UI_PROFILE_POINTS_DEFAULT,
+    UI_PROFILE_POINTS_MAX,
+    UI_PROFILE_POINTS_MIN,
+    UI_PROFILE_POINTS_STEP,
     UI_TOLERANCE_FORMAT_STREAMLIT,
 )
 from modules.app_config_state import (
@@ -76,8 +108,8 @@ def main():
     # 每 20 次页面加载执行一次清理（避免频繁 IO）
     cleanup_counter = st.session_state.get("_cleanup_counter", 0) + 1
     st.session_state["_cleanup_counter"] = cleanup_counter
-    if cleanup_counter % 20 == 1:
-        session_cleanup.cleanup_old_sessions(max_age_hours=24)
+    if cleanup_counter % SESSION_CLEANUP_EVERY_N_PAGE_LOADS == 1:
+        session_cleanup.cleanup_old_sessions(max_age_hours=DEFAULT_SESSION_MAX_AGE_HOURS)
 
     MAIN_TAB_LABELS = ["反应与模型", "实验数据", "拟合与结果"]
 
@@ -271,10 +303,10 @@ def main():
         # 这样下面的 fitting_future.done() 就能立即检测到，无需第二次 rerun
         import time
 
-        for _ in range(10):  # 最多等待 0.5 秒
+        for _ in range(FITTING_STOP_WAIT_TRIES):
             if fitting_future and fitting_future.done():
                 break
-            time.sleep(0.05)
+            time.sleep(FITTING_STOP_WAIT_SLEEP_S)
 
     # 检查后台任务是否丢失（但排除“刚刚请求启动”的情况）
     start_fit_requested = bool(st.session_state.get("start_fit_requested", False))
@@ -1062,31 +1094,35 @@ def main():
                 data_df = _read_csv_bytes_cached(csv_bytes)
                 st.session_state["data_df_cached"] = data_df
                 st.markdown("#### 数据预览")
-                st.dataframe(data_df.head(50), use_container_width=True, height=200)
+                st.dataframe(
+                    data_df.head(UI_DATA_PREVIEW_ROWS),
+                    use_container_width=True,
+                    height=UI_DATA_PREVIEW_HEIGHT_PX,
+                )
             except Exception as exc:
                 st.error(f"CSV 读取失败: {exc}")
                 data_df = None
 
     # --- 构建导出配置（基础版；若拟合页启用高级设置，会在拟合页再次更新）---
     if export_config_placeholder is not None:
-        export_k0_min = float(get_cfg("k0_min", 1e-15))
-        export_k0_max = float(get_cfg("k0_max", 1e15))
-        export_ea_min = float(get_cfg("ea_min_J_mol", 1e4))
-        export_ea_max = float(get_cfg("ea_max_J_mol", 3e5))
-        export_ord_min = float(get_cfg("order_min", -2.0))
-        export_ord_max = float(get_cfg("order_max", 5.0))
-        export_K0_ads_min = float(get_cfg("K0_ads_min", 0.0))
-        export_K0_ads_max = float(get_cfg("K0_ads_max", 1e10))
-        export_Ea_K_min = float(get_cfg("Ea_K_min", -2e5))
-        export_Ea_K_max = float(get_cfg("Ea_K_max", 2e5))
+        export_k0_min = float(get_cfg("k0_min", DEFAULT_K0_MIN))
+        export_k0_max = float(get_cfg("k0_max", DEFAULT_K0_MAX))
+        export_ea_min = float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL))
+        export_ea_max = float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL))
+        export_ord_min = float(get_cfg("order_min", DEFAULT_ORDER_MIN))
+        export_ord_max = float(get_cfg("order_max", DEFAULT_ORDER_MAX))
+        export_K0_ads_min = float(get_cfg("K0_ads_min", DEFAULT_K0_ADS_MIN))
+        export_K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
+        export_Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
+        export_Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
 
-        export_diff_step_rel = float(get_cfg("diff_step_rel", 1e-2))
-        export_max_nfev = int(get_cfg("max_nfev", 3000))
+        export_diff_step_rel = float(get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL))
+        export_max_nfev = int(get_cfg("max_nfev", DEFAULT_MAX_NFEV))
         export_use_x_scale_jac = bool(get_cfg("use_x_scale_jac", True))
         export_use_ms = bool(get_cfg("use_multi_start", True))
-        export_n_starts = int(get_cfg("n_starts", 10))
-        export_max_nfev_coarse = int(get_cfg("max_nfev_coarse", 300))
-        export_random_seed = int(get_cfg("random_seed", 42))
+        export_n_starts = int(get_cfg("n_starts", DEFAULT_N_STARTS))
+        export_max_nfev_coarse = int(get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE))
+        export_random_seed = int(get_cfg("random_seed", DEFAULT_RANDOM_SEED))
         export_max_step_fraction = float(
             get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
         )
@@ -1216,41 +1252,41 @@ def main():
             with col_b1:
                 k0_min = ui_comp.smart_number_input(
                     "k0 Min",
-                    value=float(get_cfg("k0_min", 1e-15)),
+                    value=float(get_cfg("k0_min", DEFAULT_K0_MIN)),
                     key="cfg_k0_min",
                 )
                 k0_max = ui_comp.smart_number_input(
                     "k0 Max",
-                    value=float(get_cfg("k0_max", 1e15)),
+                    value=float(get_cfg("k0_max", DEFAULT_K0_MAX)),
                     key="cfg_k0_max",
                 )
             with col_b2:
                 ea_min = ui_comp.smart_number_input(
                     "Ea Min",
-                    value=float(get_cfg("ea_min_J_mol", 1e4)),
+                    value=float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL)),
                     key="cfg_ea_min_J_mol",
                 )
                 ea_max = ui_comp.smart_number_input(
                     "Ea Max",
-                    value=float(get_cfg("ea_max_J_mol", 3e5)),
+                    value=float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL)),
                     key="cfg_ea_max_J_mol",
                 )
             with col_b3:
                 ord_min = ui_comp.smart_number_input(
                     "Order Min",
-                    value=float(get_cfg("order_min", -2.0)),
+                    value=float(get_cfg("order_min", DEFAULT_ORDER_MIN)),
                     key="cfg_order_min",
                 )
                 ord_max = ui_comp.smart_number_input(
                     "Order Max",
-                    value=float(get_cfg("order_max", 5.0)),
+                    value=float(get_cfg("order_max", DEFAULT_ORDER_MAX)),
                     key="cfg_order_max",
                 )
 
-            K0_ads_min = float(get_cfg("K0_ads_min", 0.0))
-            K0_ads_max = float(get_cfg("K0_ads_max", 1e10))
-            Ea_K_min = float(get_cfg("Ea_K_min", -2e5))
-            Ea_K_max = float(get_cfg("Ea_K_max", 2e5))
+            K0_ads_min = float(get_cfg("K0_ads_min", DEFAULT_K0_ADS_MIN))
+            K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
+            Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
+            Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
             if kinetic_model == "langmuir_hinshelwood":
                 st.markdown("**1.2 L-H 边界设置**")
                 col_lh_b1, col_lh_b2 = st.columns(2)
@@ -1286,8 +1322,8 @@ def main():
                 max_nfev = int(
                     st.number_input(
                         "Max Iterations (外层迭代)",
-                        value=int(get_cfg("max_nfev", 3000)),
-                        step=500,
+                        value=int(get_cfg("max_nfev", DEFAULT_MAX_NFEV)),
+                        step=UI_MAX_NFEV_STEP,
                         key="cfg_max_nfev",
                         help="提示：每次迭代内部会为数值差分 Jacobian 额外调用模型多次，所以看到的'调用次数'通常会大于该值。",
                     )
@@ -1295,19 +1331,17 @@ def main():
             with col_iter2:
                 diff_step_rel = ui_comp.smart_number_input(
                     "diff_step (Finite Diff)",
-                    value=get_cfg("diff_step_rel", 1e-2),
+                    value=get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL),
                     key="cfg_diff_step_rel",
                     help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值。",
                 )
             with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
-                    value=float(
-                        get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
-                    ),
+                    value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
                     min_value=0.0,
                     max_value=10.0,
-                    step=0.05,
+                    step=UI_MAX_STEP_FRACTION_STEP,
                     key="cfg_max_step_fraction",
                     help="用于 solve_ivp 的 max_step：max_step = fraction × 总时间/总体积；0 表示不限制。",
                 )
@@ -1324,7 +1358,7 @@ def main():
                 n_starts = int(
                     st.number_input(
                         "Start Points (起点数)",
-                        value=get_cfg("n_starts", 10),
+                        value=get_cfg("n_starts", DEFAULT_N_STARTS),
                         min_value=1,
                         step=1,
                         key="cfg_n_starts",
@@ -1335,7 +1369,7 @@ def main():
                 max_nfev_coarse = int(
                     st.number_input(
                         "Coarse Iters (粗拟合)",
-                        value=get_cfg("max_nfev_coarse", 300),
+                        value=get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE),
                         step=50,
                         key="cfg_max_nfev_coarse",
                         help="仅当 Multi-start 生效时用于粗拟合阶段。",
@@ -1354,7 +1388,7 @@ def main():
                 random_seed = int(
                     st.number_input(
                         "Random Seed (随机种子)",
-                        value=get_cfg("random_seed", 42),
+                        value=get_cfg("random_seed", DEFAULT_RANDOM_SEED),
                         step=1,
                         key="cfg_random_seed",
                     )
@@ -1827,7 +1861,7 @@ def main():
                 st.dataframe(
                     ui_comp.format_dataframe_for_display(df_k0_ea),
                     use_container_width=True,
-                    height=250,
+                    height=UI_PARAM_TABLE_HEIGHT_PX,
                 )
 
             with col_p2:
@@ -1840,7 +1874,7 @@ def main():
                 st.dataframe(
                     ui_comp.format_dataframe_for_display(df_orders),
                     use_container_width=True,
-                    height=250,
+                    height=UI_PARAM_TABLE_HEIGHT_PX,
                 )
 
             if kinetic_model_fit == "langmuir_hinshelwood":
@@ -1861,7 +1895,7 @@ def main():
                         st.dataframe(
                             ui_comp.format_dataframe_for_display(df_ads),
                             use_container_width=True,
-                            height=250,
+                            height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
                 with col_lh2:
                     if fitted_params.get("m_inhibition", None) is not None:
@@ -1872,7 +1906,7 @@ def main():
                         st.dataframe(
                             ui_comp.format_dataframe_for_display(df_m),
                             use_container_width=True,
-                            height=250,
+                            height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
 
             if kinetic_model_fit == "reversible":
@@ -1891,7 +1925,7 @@ def main():
                     st.dataframe(
                         ui_comp.format_dataframe_for_display(df_rev),
                         use_container_width=True,
-                        height=250,
+                        height=UI_PARAM_TABLE_HEIGHT_PX,
                     )
                 if fitted_params.get("order_rev", None) is not None:
                     st.markdown("**逆反应级数矩阵 $n^-$**")
@@ -1903,7 +1937,7 @@ def main():
                     st.dataframe(
                         ui_comp.format_dataframe_for_display(df_order_rev),
                         use_container_width=True,
-                        height=250,
+                        height=UI_PARAM_TABLE_HEIGHT_PX,
                     )
 
         with tab_parity:
@@ -2092,7 +2126,11 @@ def main():
                     st.markdown("#### 预测 vs 实验对比表")
                     df_show = df_long.copy()
                     df_show = df_show[df_show["species"].isin(species_selected)]
-                    st.dataframe(df_show, use_container_width=True, height=260)
+                    st.dataframe(
+                        df_show,
+                        use_container_width=True,
+                        height=UI_COMPARE_TABLE_HEIGHT_PX,
+                    )
 
                 st.markdown("#### 拟合误差指标（按物种）")
                 rows_metric = []
@@ -2120,7 +2158,9 @@ def main():
                     )
                 if rows_metric:
                     st.dataframe(
-                        pd.DataFrame(rows_metric), use_container_width=True, height=220
+                        pd.DataFrame(rows_metric),
+                        use_container_width=True,
+                        height=UI_METRICS_TABLE_HEIGHT_PX,
                     )
 
         with tab_profile:
@@ -2136,10 +2176,14 @@ def main():
                     index=0,
                 )
                 profile_points = int(
-                    st.number_input(
-                        "剖面点数", min_value=20, max_value=2000, value=200, step=20
+                        st.number_input(
+                            "剖面点数",
+                            min_value=UI_PROFILE_POINTS_MIN,
+                            max_value=UI_PROFILE_POINTS_MAX,
+                            value=UI_PROFILE_POINTS_DEFAULT,
+                            step=UI_PROFILE_POINTS_STEP,
+                        )
                     )
-                )
                 profile_species = st.multiselect(
                     "选择要画剖面的物种（可多选）",
                     list(species_names_fit),
@@ -2206,19 +2250,14 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("F"):
                                 y = molar_flow_profile[idx, :]
-                                ax_pf.plot(
-                                    volume_grid_m3, y, linewidth=2, label=species_name
-                                )
+                                ax_pf.plot(volume_grid_m3, y, linewidth=2, label=species_name)
                                 profile_df[f"F_{species_name}_mol_s"] = y
                             else:
                                 conc = molar_flow_profile[idx, :] / max(
-                                    vdot_m3_s, 1e-30
+                                    vdot_m3_s, EPSILON_FLOW_RATE
                                 )
                                 ax_pf.plot(
-                                    volume_grid_m3,
-                                    conc,
-                                    linewidth=2,
-                                    label=species_name,
+                                    volume_grid_m3, conc, linewidth=2, label=species_name
                                 )
                                 profile_df[f"C_{species_name}_mol_m3"] = conc
 
@@ -2271,35 +2310,33 @@ def main():
                             row_sel.get(f"C0_{sp_name}_mol_m3", np.nan)
                         )
 
-                    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)
+                    tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)
                     simulation_time_s = float(5.0 * tau_s)
-                    time_grid_s, conc_profile, ok, message = (
-                        reactors.integrate_cstr_profile(
-                            simulation_time_s=simulation_time_s,
-                            temperature_K=temperature_K,
-                            reactor_volume_m3=reactor_volume_m3,
-                            vdot_m3_s=vdot_m3_s,
-                            conc_inlet_mol_m3=conc_inlet,
-                            stoich_matrix=stoich_matrix_fit,
-                            k0=fitted_params["k0"],
-                            ea_J_mol=fitted_params["ea_J_mol"],
-                            reaction_order_matrix=fitted_params[
-                                "reaction_order_matrix"
-                            ],
-                            solver_method=solver_method_fit,
-                            rtol=rtol_fit,
-                            atol=atol_fit,
-                            n_points=profile_points,
-                            kinetic_model=kinetic_model_fit,
-                            max_step_fraction=max_step_fraction_fit,
-                            K0_ads=fitted_params.get("K0_ads", None),
-                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                            m_inhibition=fitted_params.get("m_inhibition", None),
-                            k0_rev=fitted_params.get("k0_rev", None),
-                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                            order_rev_matrix=fitted_params.get("order_rev", None),
-                        )
+
+                    time_grid_s, conc_profile, ok, message = reactors.integrate_cstr_profile(
+                        simulation_time_s=simulation_time_s,
+                        temperature_K=temperature_K,
+                        reactor_volume_m3=reactor_volume_m3,
+                        vdot_m3_s=vdot_m3_s,
+                        conc_inlet_mol_m3=conc_inlet,
+                        stoich_matrix=stoich_matrix_fit,
+                        k0=fitted_params["k0"],
+                        ea_J_mol=fitted_params["ea_J_mol"],
+                        reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                        solver_method=solver_method_fit,
+                        rtol=rtol_fit,
+                        atol=atol_fit,
+                        n_points=profile_points,
+                        kinetic_model=kinetic_model_fit,
+                        max_step_fraction=max_step_fraction_fit,
+                        K0_ads=fitted_params.get("K0_ads", None),
+                        Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                        m_inhibition=fitted_params.get("m_inhibition", None),
+                        k0_rev=fitted_params.get("k0_rev", None),
+                        ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                        order_rev_matrix=fitted_params.get("order_rev", None),
                     )
+
                     if not ok:
                         st.error(
                             f"CSTR 剖面计算失败: {message}\n"
@@ -2315,19 +2352,15 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_cs.plot(
-                                    time_grid_s, y, linewidth=2, label=species_name
-                                )
+                                ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_inlet[idx])
-                                if c0 < 1e-30:
+                                if c0 < EPSILON_CONCENTRATION:
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_cs.plot(
-                                    time_grid_s, x, linewidth=2, label=species_name
-                                )
+                                ax_cs.plot(time_grid_s, x, linewidth=2, label=species_name)
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_cs.set_xlabel("Time t [s]")
@@ -2417,19 +2450,15 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_bt.plot(
-                                    time_grid_s, y, linewidth=2, label=species_name
-                                )
+                                ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_initial[idx])
-                                if c0 < 1e-30:
+                                if c0 < EPSILON_CONCENTRATION:
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_bt.plot(
-                                    time_grid_s, x, linewidth=2, label=species_name
-                                )
+                                ax_bt.plot(time_grid_s, x, linewidth=2, label=species_name)
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_bt.set_xlabel("Time t [s]")
