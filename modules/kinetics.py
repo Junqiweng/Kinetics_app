@@ -40,7 +40,7 @@ def calc_rate_vector_power_law(
         rate_value = k_T[reaction_index]
         for species_index in range(conc_mol_m3.size):
             order_value = reaction_order_matrix[reaction_index, species_index]
-            if order_value == 0.0:
+            if abs(order_value) < FLOAT_EQUALITY_TOLERANCE:
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
@@ -97,7 +97,7 @@ def calc_rate_vector_langmuir_hinshelwood(
         rate_numerator = k_T[reaction_index]
         for species_index in range(conc_mol_m3.size):
             order_value = reaction_order_matrix[reaction_index, species_index]
-            if order_value == 0.0:
+            if abs(order_value) < FLOAT_EQUALITY_TOLERANCE:
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
@@ -106,7 +106,7 @@ def calc_rate_vector_langmuir_hinshelwood(
 
         # 分母：(1 + Σ_i K_i(T) * C_i)^m_j
         m_j = m_inhibition[reaction_index]
-        denominator = denominator_base**m_j if m_j != 0.0 else 1.0
+        denominator = denominator_base**m_j if abs(m_j) >= FLOAT_EQUALITY_TOLERANCE else 1.0
 
         rate_vector[reaction_index] = rate_numerator / max(
             denominator, EPSILON_DENOMINATOR
@@ -154,7 +154,7 @@ def calc_rate_vector_reversible(
         rate_fwd = k_fwd_T[reaction_index]
         for species_index in range(conc_mol_m3.size):
             order_value = order_fwd_matrix[reaction_index, species_index]
-            if order_value == 0.0:
+            if abs(order_value) < FLOAT_EQUALITY_TOLERANCE:
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:
@@ -165,7 +165,7 @@ def calc_rate_vector_reversible(
         rate_rev = k_rev_T[reaction_index]
         for species_index in range(conc_mol_m3.size):
             order_value = order_rev_matrix[reaction_index, species_index]
-            if order_value == 0.0:
+            if abs(order_value) < FLOAT_EQUALITY_TOLERANCE:
                 continue
             conc_value = float(conc_mol_m3[species_index])
             if order_value < 0.0:

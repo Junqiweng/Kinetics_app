@@ -8,6 +8,7 @@ import streamlit as st
 from pathlib import Path
 
 from .kinetics import R_GAS_J_MOL_K
+from .constants import EPSILON_CONCENTRATION, EPSILON_FLOW_RATE
 
 
 def _project_root_dir() -> Path:
@@ -34,7 +35,7 @@ def _build_example_batch_csv_bytes() -> bytes:
     time_s = np.array([0, 20, 40, 60, 90, 120, 180, 240, 360, 480], dtype=float)
     conc_A_t = conc_A0_mol_m3 * np.exp(-rate_constant_1_s * time_s)
     conc_B_t = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_t)
-    conversion_A = 1.0 - conc_A_t / max(conc_A0_mol_m3, 1e-30)
+    conversion_A = 1.0 - conc_A_t / max(conc_A0_mol_m3, EPSILON_CONCENTRATION)
 
     data_df = pd.DataFrame(
         {
@@ -61,7 +62,7 @@ def _build_example_cstr_csv_bytes() -> bytes:
 
     vdot_m3_s = 1.0e-4  # 体积流量 [m^3/s]
     reactor_volume_m3 = np.array([1e-3, 2e-3, 3e-3, 5e-3, 8e-3], dtype=float)  # [m^3]
-    tau_s = reactor_volume_m3 / max(vdot_m3_s, 1e-30)  # 停留时间 [s]
+    tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)  # 停留时间 [s]
 
     k0_1_s = 1.0e6  # 指前因子 [1/s]（n=1）
     ea_J_mol = 5.0e4  # 活化能 [J/mol]
@@ -70,7 +71,7 @@ def _build_example_cstr_csv_bytes() -> bytes:
     # 一阶 CSTR：C_A = C_A0 / (1 + k*tau)
     conc_A_out = conc_A0_mol_m3 / (1.0 + rate_constant_1_s * tau_s)
     conc_B_out = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_out)
-    conversion_A = 1.0 - conc_A_out / max(conc_A0_mol_m3, 1e-30)
+    conversion_A = 1.0 - conc_A_out / max(conc_A0_mol_m3, EPSILON_CONCENTRATION)
 
     fout_A_mol_s = vdot_m3_s * conc_A_out
     fout_B_mol_s = vdot_m3_s * conc_B_out

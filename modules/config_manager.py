@@ -376,13 +376,34 @@ def validate_config(config: dict) -> tuple[bool, str]:
             return True, ""
         try:
             arr = np.asarray(config[key], dtype=dtype)
-        except Exception:
+        except (ValueError, TypeError):
             return False, f"配置项 {key} 无法转换为数组"
         if arr.shape != expected_shape:
             return (
                 False,
                 f"配置项 {key} 维度不匹配：期望 {expected_shape}，实际 {arr.shape}",
             )
+        return True, ""
+
+    def _check_array_values(
+        key: str, must_be_positive: bool = False, allow_nan: bool = False
+    ) -> tuple[bool, str]:
+        """检查数组数值的有效性"""
+        if key not in config:
+            return True, ""
+        try:
+            arr = np.asarray(config[key], dtype=float)
+        except (ValueError, TypeError):
+            return False, f"配置项 {key} 无法转换为数值数组"
+
+        # 检查是否包含无效值（NaN, Inf）
+        if not allow_nan and not np.all(np.isfinite(arr)):
+            return False, f"配置项 {key} 包含无效值（NaN 或 Inf）"
+
+        # 检查是否必须为正值
+        if must_be_positive and np.any(arr <= 0):
+            return False, f"配置项 {key} 必须全部为正值"
+
         return True, ""
 
     required_keys = ["reactor_type", "kinetic_model", "species_text", "n_reactions"]
@@ -415,14 +436,14 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if "rtol" in config:
         try:
             rtol = float(config["rtol"])
-        except Exception:
+        except (ValueError, TypeError):
             return False, "rtol 无法转换为数值"
         if (not np.isfinite(rtol)) or (rtol <= 0.0):
             return False, "rtol 必须为正且有限"
     if "atol" in config:
         try:
             atol = float(config["atol"])
-        except Exception:
+        except (ValueError, TypeError):
             return False, "atol 无法转换为数值"
         if (not np.isfinite(atol)) or (atol <= 0.0):
             return False, "atol 必须为正且有限"
@@ -430,7 +451,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if "max_step_fraction" in config:
         try:
             value = float(config["max_step_fraction"])
-        except Exception:
+        except (ValueError, TypeError):
             return False, "max_step_fraction 无法转换为数值"
         if (not np.isfinite(value)) or (value < 0.0):
             return False, "max_step_fraction 必须为非负且有限（0 表示不限制）"
@@ -461,7 +482,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
 
     try:
         n_reactions = int(config["n_reactions"])
-    except Exception:
+    except (ValueError, TypeError):
         return False, "n_reactions 无法转换为整数"
     if n_reactions < 1:
         return False, "n_reactions 必须 >= 1"
@@ -494,9 +515,17 @@ def validate_config(config: dict) -> tuple[bool, str]:
     ok, msg = _check_array_shape("k0_guess", (n_reactions,), float)
     if not ok:
         return ok, msg
+    ok, msg = _check_array_values("k0_guess", must_be_positive=True)
+    if not ok:
+        return ok, msg
+
     ok, msg = _check_array_shape("ea_guess_J_mol", (n_reactions,), float)
     if not ok:
         return ok, msg
+    ok, msg = _check_array_values("ea_guess_J_mol", must_be_positive=False)
+    if not ok:
+        return ok, msg
+
     ok, msg = _check_array_shape("fit_k0_flags", (n_reactions,), bool)
     if not ok:
         return ok, msg
@@ -508,18 +537,31 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("K0_ads", (n_species,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_values("K0_ads", must_be_positive=True)
+        if not ok:
+            return ok, msg
+
         ok, msg = _check_array_shape("Ea_K_J_mol", (n_species,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_values("Ea_K_J_mol", must_be_positive=False)
+        if not ok:
+            return ok, msg
+
         ok, msg = _check_array_shape("fit_K0_ads_flags", (n_species,), bool)
         if not ok:
             return ok, msg
         ok, msg = _check_array_shape("fit_Ea_K_flags", (n_species,), bool)
         if not ok:
             return ok, msg
+
         ok, msg = _check_array_shape("m_inhibition", (n_reactions,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_values("m_inhibition", must_be_positive=False)
+        if not ok:
+            return ok, msg
+
         ok, msg = _check_array_shape("fit_m_flags", (n_reactions,), bool)
         if not ok:
             return ok, msg
@@ -528,9 +570,17 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("k0_rev", (n_reactions,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_values("k0_rev", must_be_positive=True)
+        if not ok:
+            return ok, msg
+
         ok, msg = _check_array_shape("ea_rev_J_mol", (n_reactions,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_values("ea_rev_J_mol", must_be_positive=False)
+        if not ok:
+            return ok, msg
+
         ok, msg = _check_array_shape("fit_k0_rev_flags", (n_reactions,), bool)
         if not ok:
             return ok, msg

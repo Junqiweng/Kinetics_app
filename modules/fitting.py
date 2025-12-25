@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .constants import EPSILON_FLOW_RATE
+from .constants import EPSILON_FLOW_RATE, EPSILON_CONCENTRATION
 from .reactors import (
     integrate_batch_reactor,
     integrate_pfr_molar_flows,
@@ -16,7 +16,7 @@ from .reactors import (
 def _to_float_or_nan(value: object) -> float:
     try:
         return float(value)
-    except Exception:
+    except (ValueError, TypeError):
         return float("nan")
 
 
@@ -602,14 +602,14 @@ def _predict_outputs_for_row(
             elif output_mode == "xout (mole fraction)":
                 # 摩尔组成 y_i = F_i / Σ F_j = C_i / Σ C_j (体积流量可约掉)
                 total_conc = np.sum(conc_outlet)
-                if total_conc < 1e-30:
+                if total_conc < EPSILON_CONCENTRATION:
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = conc_outlet[idx] / total_conc
             elif output_mode == "X (conversion)":
                 c0 = conc_inlet[idx]
                 c_out = conc_outlet[idx]
-                if c0 < 1e-30:
+                if c0 < EPSILON_CONCENTRATION:
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = (c0 - c_out) / c0
@@ -702,7 +702,7 @@ def _predict_outputs_for_row(
             elif output_mode == "X (conversion)":
                 c0 = conc_initial[idx]
                 c_final = conc_final[idx]
-                if c0 < 1e-30:
+                if c0 < EPSILON_CONCENTRATION:
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = (c0 - c_final) / c0
