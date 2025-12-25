@@ -22,6 +22,12 @@ import modules.ui_components as ui_comp  # UI 组件工具函数
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 import modules.app_style as app_style
 
+from modules.constants import (
+    DEFAULT_ATOL,
+    DEFAULT_MAX_STEP_FRACTION,
+    DEFAULT_RTOL,
+    UI_TOLERANCE_FORMAT_STREAMLIT,
+)
 from modules.app_config_state import (
     _apply_imported_config_to_widget_state,
     _clear_config_related_state,
@@ -276,13 +282,14 @@ def main():
             phi_value = float(
                 fit_results.get("phi_final", fit_results.get("cost", 0.0))
             )
+            phi_text = ui_comp.smart_float_to_str(phi_value)
             st.session_state["fitting_timeline"].append(
-                ("✅", f"拟合完成，最终 Φ: {phi_value:.4e}")
+                ("✅", f"拟合完成，最终 Φ: {phi_text}")
             )
             st.session_state["fit_notice"] = {
                 "kind": "success",
                 "text": "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
-                f" 目标函数 Φ: {phi_value:.4e}",
+                f" 目标函数 Φ: {phi_text}",
             }
         except FittingStoppedError:
             st.session_state["fitting_status"] = "用户终止。"
@@ -491,15 +498,15 @@ def main():
             col_tol1, col_tol2 = st.columns(2)
             rtol = col_tol1.number_input(
                 "rtol",
-                value=get_cfg("rtol", 1e-6),
-                format="%.1e",
+                value=get_cfg("rtol", DEFAULT_RTOL),
+                format=UI_TOLERANCE_FORMAT_STREAMLIT,
                 key="cfg_rtol",
                 disabled=global_disabled,
             )
             atol = col_tol2.number_input(
                 "atol",
-                value=get_cfg("atol", 1e-9),
-                format="%.1e",
+                value=get_cfg("atol", DEFAULT_ATOL),
+                format=UI_TOLERANCE_FORMAT_STREAMLIT,
                 key="cfg_atol",
                 disabled=global_disabled,
             )
@@ -1062,7 +1069,9 @@ def main():
         export_n_starts = int(get_cfg("n_starts", 10))
         export_max_nfev_coarse = int(get_cfg("max_nfev_coarse", 300))
         export_random_seed = int(get_cfg("random_seed", 42))
-        export_max_step_fraction = float(get_cfg("max_step_fraction", 0.1))
+        export_max_step_fraction = float(
+            get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
+        )
 
         export_cfg = config_manager.collect_config(
             reactor_type=reactor_type,
@@ -1275,7 +1284,7 @@ def main():
             with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
-                    value=float(get_cfg("max_step_fraction", 0.1)),
+                    value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
                     min_value=0.0,
                     max_value=10.0,
                     step=0.05,
@@ -1737,8 +1746,9 @@ def main():
         res = st.session_state["fit_results"]
         tab_fit_results_container.divider()
         phi_value = float(res.get("phi_final", res.get("cost", 0.0)))
+        phi_text = ui_comp.smart_float_to_str(phi_value)
         tab_fit_results_container.markdown(
-            f"### 拟合结果 (目标函数 Φ: {phi_value:.4e})"
+            f"### 拟合结果 (目标函数 Φ: {phi_text})"
         )
         tab_fit_results_container.latex(
             r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
@@ -1752,7 +1762,7 @@ def main():
         rtol_fit = float(res.get("rtol", rtol))
         atol_fit = float(res.get("atol", atol))
         max_step_fraction_fit = float(
-            res.get("max_step_fraction", get_cfg("max_step_fraction", 0.1))
+            res.get("max_step_fraction", get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION))
         )
         reactor_type_fit = res.get("reactor_type", reactor_type)
         kinetic_model_fit = res.get("kinetic_model", kinetic_model)
@@ -1793,7 +1803,11 @@ def main():
                     index=reaction_names,
                 )
                 st.markdown("**k0 与 Ea**")
-                st.dataframe(df_k0_ea, use_container_width=True, height=250)
+                st.dataframe(
+                    ui_comp.format_dataframe_for_display(df_k0_ea),
+                    use_container_width=True,
+                    height=250,
+                )
 
             with col_p2:
                 st.markdown("**反应级数矩阵 $n$**")
@@ -1802,7 +1816,11 @@ def main():
                     index=reaction_names,
                     columns=species_names_fit,
                 )
-                st.dataframe(df_orders, use_container_width=True, height=250)
+                st.dataframe(
+                    ui_comp.format_dataframe_for_display(df_orders),
+                    use_container_width=True,
+                    height=250,
+                )
 
             if kinetic_model_fit == "langmuir_hinshelwood":
                 st.markdown("#### Langmuir-Hinshelwood 参数")
@@ -1819,14 +1837,22 @@ def main():
                             },
                             index=species_names_fit,
                         )
-                        st.dataframe(df_ads, use_container_width=True, height=250)
+                        st.dataframe(
+                            ui_comp.format_dataframe_for_display(df_ads),
+                            use_container_width=True,
+                            height=250,
+                        )
                 with col_lh2:
                     if fitted_params.get("m_inhibition", None) is not None:
                         df_m = pd.DataFrame(
                             {"m_inhibition [-]": fitted_params["m_inhibition"]},
                             index=reaction_names,
                         )
-                        st.dataframe(df_m, use_container_width=True, height=250)
+                        st.dataframe(
+                            ui_comp.format_dataframe_for_display(df_m),
+                            use_container_width=True,
+                            height=250,
+                        )
 
             if kinetic_model_fit == "reversible":
                 st.markdown("#### 可逆反应参数（逆反应）")
@@ -1841,7 +1867,11 @@ def main():
                         },
                         index=reaction_names,
                     )
-                    st.dataframe(df_rev, use_container_width=True, height=250)
+                    st.dataframe(
+                        ui_comp.format_dataframe_for_display(df_rev),
+                        use_container_width=True,
+                        height=250,
+                    )
                 if fitted_params.get("order_rev", None) is not None:
                     st.markdown("**逆反应级数矩阵 $n^-$**")
                     df_order_rev = pd.DataFrame(
@@ -1849,7 +1879,11 @@ def main():
                         index=reaction_names,
                         columns=species_names_fit,
                     )
-                    st.dataframe(df_order_rev, use_container_width=True, height=250)
+                    st.dataframe(
+                        ui_comp.format_dataframe_for_display(df_order_rev),
+                        use_container_width=True,
+                        height=250,
+                    )
 
         with tab_parity:
             st.markdown("#### 不同物种的奇偶校验图 (Measured vs Predicted)")

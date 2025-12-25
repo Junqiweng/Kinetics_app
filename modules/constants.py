@@ -33,3 +33,20 @@ PERCENTAGE_RESIDUAL_EPSILON_FACTOR = 0.01  # 1%
 DEFAULT_MAX_STEP_FRACTION = 0.1  # 默认 ODE 步长限制比例
 DEFAULT_RTOL = 1e-6  # 默认相对容限
 DEFAULT_ATOL = 1e-9  # 默认绝对容限
+
+# ========== UI 数字显示/输入格式（统一管理） ==========
+# 规则：当 |x| < UI_FLOAT_SCI_LOW 或 |x| >= UI_FLOAT_SCI_HIGH 时，使用科学计数法；
+# 否则使用常规数字显示（小数位自动裁剪，避免无意义的尾随 0）。
+UI_FLOAT_SCI_LOW = 1e-3  # 科学计数法阈值（小数太小）[-]
+UI_FLOAT_SCI_HIGH = 1e3  # 科学计数法阈值（数字太大）[-]
+UI_FLOAT_NORMAL_MAX_DECIMALS = 4  # 常规数字最多保留小数位（会自动去掉尾随 0）[-]
+UI_FLOAT_SCI_DECIMALS = 3  # 科学计数法小数位（例如 1.23e+04）[-]
+
+# Streamlit 的 number_input 仅支持固定显示格式；当触发科学计数时使用该格式。
+UI_FLOAT_SCI_FORMAT_STREAMLIT = "%.3e"
+
+# 表格（级数矩阵等）中数字列的固定显示格式
+UI_ORDER_MATRIX_NUMBER_FORMAT = "%.3f"
+
+# rtol/atol 等“典型很小”的数值输入格式（固定科学计数）
+UI_TOLERANCE_FORMAT_STREAMLIT = "%.1e"

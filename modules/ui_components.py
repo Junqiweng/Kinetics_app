@@ -8,25 +8,42 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 
-SMART_FLOAT_SIG_FIGS = 3
-SMART_FLOAT_SCI_LOW = 1e-3
-SMART_FLOAT_SCI_HIGH = 1e3
+from .constants import (
+    UI_FLOAT_NORMAL_MAX_DECIMALS,
+    UI_FLOAT_SCI_DECIMALS,
+    UI_FLOAT_SCI_FORMAT_STREAMLIT,
+    UI_FLOAT_SCI_HIGH,
+    UI_FLOAT_SCI_LOW,
+    UI_ORDER_MATRIX_NUMBER_FORMAT,
+)
 
-# 对于 Streamlit 的 number_input：仅支持固定“显示格式”；这里只在“极小/极大”时启用科学计数
-SMART_FLOAT_SCI_HIGH_STREAMLIT = 1e3
-SMART_FLOAT_SCI_FORMAT_STREAMLIT = "%.2e"
+
+def _trim_trailing_zeros(number_text: str) -> str:
+    """
+    去掉常规小数显示中无意义的尾随 0（以及可能的末尾小数点）。
+    """
+    text = str(number_text)
+    if ("e" in text) or ("E" in text):
+        return text
+    if "." not in text:
+        return text
+    text = text.rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "+0", "") else text
 
 
 def smart_float_to_str(
     value: float | int | None,
-    sig_figs: int = SMART_FLOAT_SIG_FIGS,
-    sci_low: float = SMART_FLOAT_SCI_LOW,
-    sci_high: float = SMART_FLOAT_SCI_HIGH,
+    sci_low: float = UI_FLOAT_SCI_LOW,
+    sci_high: float = UI_FLOAT_SCI_HIGH,
+    sci_decimals: int = UI_FLOAT_SCI_DECIMALS,
+    normal_max_decimals: int = UI_FLOAT_NORMAL_MAX_DECIMALS,
 ) -> str:
     """
     智能数字显示：小于 sci_low 或大于等于 sci_high 时用科学计数，否则用常规数字。
 
-    说明：这里“常规数字”使用有效数字格式（g），避免出现一长串小数 0。
+    说明：
+    - 常规数字：使用固定小数位再裁剪尾随 0，避免无意义的补 0。
+    - 科学计数：使用固定小数位（例如 1.23e+04）。
     """
     if value is None:
         return ""
@@ -44,9 +61,11 @@ def smart_float_to_str(
 
     abs_x = abs(x)
     if (abs_x < float(sci_low)) or (abs_x >= float(sci_high)):
-        return f"{x:.{int(max(1, sig_figs - 1))}e}"
+        sci_decimals = int(max(0, sci_decimals))
+        return f"{x:.{sci_decimals}e}"
 
-    return f"{x:.{int(sig_figs)}g}"
+    normal_max_decimals = int(max(0, normal_max_decimals))
+    return _trim_trailing_zeros(f"{x:.{normal_max_decimals}f}")
 
 
 def smart_number_input(
@@ -63,7 +82,7 @@ def smart_number_input(
 ) -> float:
     """
     智能 number_input：
-    - 当数值很小/很大时（默认 <1e-3 或 >=1e6），用科学计数显示（避免超长数字）。
+    - 当数值很小/很大时（阈值在 constants.py 统一配置），用科学计数显示（避免超长数字）。
     - 其它情况不传 format，使用 Streamlit 默认显示（更像“常规数字”，不会强制补 0）。
 
     说明：判断优先使用当前 session_state 中的值（用户正在编辑时更符合直觉）。
@@ -75,8 +94,7 @@ def smart_number_input(
         x = float(value)
 
     use_sci = (x != 0.0) and (
-        (abs(x) < float(SMART_FLOAT_SCI_LOW))
-        or (abs(x) >= float(SMART_FLOAT_SCI_HIGH_STREAMLIT))
+        (abs(x) < float(UI_FLOAT_SCI_LOW)) or (abs(x) >= float(UI_FLOAT_SCI_HIGH))
     )
 
     kwargs: dict = {
@@ -95,7 +113,7 @@ def smart_number_input(
         kwargs["step"] = float(step)
 
     if use_sci:
-        kwargs["format"] = SMART_FLOAT_SCI_FORMAT_STREAMLIT
+        kwargs["format"] = UI_FLOAT_SCI_FORMAT_STREAMLIT
 
     if container is None:
         return float(st.number_input(**kwargs))
@@ -153,6 +171,22 @@ def build_table_column_config(data_df: pd.DataFrame, number_format: str) -> dict
         else:
             column_config[col] = st.column_config.TextColumn(col)
     return column_config
+
+
+def format_dataframe_for_display(data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    将 DataFrame 中的数值列统一转成“智能显示”的字符串，便于 st.dataframe 显示时
+    与输入框的数字风格一致（常规/科学计数自动切换）。
+    """
+    if data_df is None:
+        return pd.DataFrame()
+
+    out_df = data_df.copy()
+    for col in out_df.columns:
+        if pd.api.types.is_numeric_dtype(out_df[col]):
+            col_values = out_df[col].to_numpy(dtype=float, copy=False)
+            out_df[col] = [smart_float_to_str(v) for v in col_values]
+    return out_df
 
 
 def render_param_table(
@@ -312,7 +346,7 @@ def render_order_table(
     col_cfg = {}
     for sp_name in species_names:
         col_cfg[f"n_{sp_name}"] = st.column_config.NumberColumn(
-            f"n_{sp_name}", format="%.2f"
+            f"n_{sp_name}", format=UI_ORDER_MATRIX_NUMBER_FORMAT
         )
         col_cfg[f"Fit_{sp_name}"] = st.column_config.CheckboxColumn(
             f"拟合 {sp_name}", default=False
