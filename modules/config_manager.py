@@ -41,10 +41,12 @@ from .constants import (
     DEFAULT_ORDER_REV_MIN,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
+    PERSIST_DIR_NAME,
 )
+from .file_utils import atomic_write_text
 
-# 持久化基础目录
-_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+# 持久化基础目录（从 constants 统一管理目录名）
+_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), PERSIST_DIR_NAME)
 
 
 def _get_auto_save_file(session_id: str | None = None) -> str:
@@ -64,21 +66,6 @@ def _get_auto_save_file(session_id: str | None = None) -> str:
     os.makedirs(persist_dir, exist_ok=True)
     return os.path.join(persist_dir, "last_config.json")
 
-
-def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
-    dir_name = os.path.dirname(os.path.abspath(file_path))
-    os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".txt", dir=dir_name)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as f:
-            f.write(text)
-        os.replace(temp_path, file_path)
-    finally:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
 
 
 def _convert_to_serializable(obj: Any) -> Any:
@@ -296,7 +283,7 @@ def auto_save_config(config: dict, session_id: str | None = None) -> tuple[bool,
     file_path = _get_auto_save_file(session_id)
     try:
         text = json.dumps(config, indent=2, ensure_ascii=False)
-        _atomic_write_text(file_path, text, encoding="utf-8")
+        atomic_write_text(file_path, text, encoding="utf-8")
         return True, "OK"
     except Exception as exc:
         return False, f"自动保存失败: {exc}"

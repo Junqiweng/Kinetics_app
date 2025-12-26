@@ -15,13 +15,14 @@ import time
 
 from .constants import (
     DEFAULT_SESSION_MAX_AGE_HOURS,
+    PERSIST_DIR_NAME,
     SECONDS_PER_HOUR,
     UUID_HYPHEN_COUNT,
     UUID_STRING_LENGTH,
 )
 
-# 持久化基础目录
-_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
+# 持久化基础目录（从 constants 统一管理目录名）
+_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), PERSIST_DIR_NAME)
 
 # 默认最大会话年龄（小时）
 DEFAULT_MAX_AGE_HOURS = DEFAULT_SESSION_MAX_AGE_HOURS

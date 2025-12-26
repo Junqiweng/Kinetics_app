@@ -11,6 +11,12 @@ import time
 
 import pandas as pd
 
+from .constants import PERSIST_DIR_NAME
+from .file_utils import atomic_write_bytes, atomic_write_text
+
+# 持久化基础目录（从 constants 统一管理目录名）
+_PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), PERSIST_DIR_NAME)
+
 
 def _read_csv_bytes_cached(uploaded_bytes: bytes) -> pd.DataFrame:
     """
@@ -34,45 +40,12 @@ def _get_persist_dir(session_id: str | None = None) -> str:
     返回:
         持久化目录路径
     """
-    base_dir = os.path.join(tempfile.gettempdir(), "Kinetics_app_persist")
     if session_id:
-        persist_dir = os.path.join(base_dir, session_id)
+        persist_dir = os.path.join(_PERSIST_BASE_DIR, session_id)
     else:
-        persist_dir = base_dir
+        persist_dir = _PERSIST_BASE_DIR
     os.makedirs(persist_dir, exist_ok=True)
     return persist_dir
-
-
-def _atomic_write_bytes(file_path: str, data: bytes) -> None:
-    dir_name = os.path.dirname(os.path.abspath(file_path))
-    os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".bin", dir=dir_name)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(temp_path, file_path)
-    finally:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
-
-
-def _atomic_write_text(file_path: str, text: str, encoding: str = "utf-8") -> None:
-    dir_name = os.path.dirname(os.path.abspath(file_path))
-    os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix="tmp_", suffix=".txt", dir=dir_name)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as f:
-            f.write(text)
-        os.replace(temp_path, file_path)
-    finally:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
 
 
 def _get_upload_file_paths(session_id: str | None = None) -> tuple[str, str]:
@@ -141,12 +114,12 @@ def _save_persisted_upload(
     """
     csv_path, meta_path = _get_upload_file_paths(session_id)
     try:
-        _atomic_write_bytes(csv_path, uploaded_bytes)
+        atomic_write_bytes(csv_path, uploaded_bytes)
         meta = {
             "name": str(uploaded_name).strip(),
             "saved_at_unix_s": float(time.time()),
         }
-        _atomic_write_text(
+        atomic_write_text(
             meta_path, json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         return True, "OK"

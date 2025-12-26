@@ -85,7 +85,8 @@ FITTING_EPSILON_NORM = 1e-12  # 参数相对变化计算的分母保护值 [-]
 FITTING_STOP_WAIT_TRIES = 10  # 轮询次数 [-]
 FITTING_STOP_WAIT_SLEEP_S = 0.05  # 每次轮询睡眠时间 [s]
 
-# ========== 会话清理相关常量 ==========
+# ========== 会话/持久化相关常量 ==========
+PERSIST_DIR_NAME = "Kinetics_app_persist"  # 持久化目录名（在系统临时目录下）
 SESSION_CLEANUP_EVERY_N_PAGE_LOADS = 20  # 每 N 次页面加载清理一次 [-]
 DEFAULT_SESSION_MAX_AGE_HOURS = 24  # 默认最大会话年龄 [h]
 SECONDS_PER_HOUR = 3600  # 1 小时对应秒数 [s]
