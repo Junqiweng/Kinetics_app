@@ -46,6 +46,10 @@ def calc_rate_vector_power_law(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_value = rate_value * (conc_value**order_value)
+            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
+            if not np.isfinite(rate_value):
+                rate_value = 0.0
+                break
         rate_vector[reaction_index] = rate_value
     return rate_vector
 
@@ -103,6 +107,10 @@ def calc_rate_vector_langmuir_hinshelwood(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_numerator = rate_numerator * (conc_value**order_value)
+            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
+            if not np.isfinite(rate_numerator):
+                rate_numerator = 0.0
+                break
 
         # 分母：(1 + Σ_i K_i(T) * C_i)^m_j
         m_j = m_inhibition[reaction_index]
@@ -160,6 +168,10 @@ def calc_rate_vector_reversible(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_fwd = rate_fwd * (conc_value**order_value)
+            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
+            if not np.isfinite(rate_fwd):
+                rate_fwd = 0.0
+                break
 
         # 逆反应速率
         rate_rev = k_rev_T[reaction_index]
@@ -171,6 +183,10 @@ def calc_rate_vector_reversible(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_rev = rate_rev * (conc_value**order_value)
+            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
+            if not np.isfinite(rate_rev):
+                rate_rev = 0.0
+                break
 
         # 净反应速率
         rate_vector[reaction_index] = rate_fwd - rate_rev

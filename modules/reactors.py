@@ -38,7 +38,7 @@ def _compute_max_step(total_span: float, max_step_fraction: float | None) -> flo
         return np.inf
     try:
         fraction = float(max_step_fraction)
-    except Exception:
+    except (ValueError, TypeError):
         return np.inf
     if (not np.isfinite(fraction)) or (fraction <= 0.0):
         return np.inf
@@ -100,7 +100,7 @@ def integrate_pfr_molar_flows(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
@@ -182,7 +182,7 @@ def integrate_pfr_molar_flows(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return molar_flow_inlet_mol_s.copy(), False, f"solve_ivp异常: {exc}"
 
     if not solution.success:
@@ -244,7 +244,7 @@ def integrate_batch_reactor(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             (not np.isfinite(max_wall_time_s)) or (max_wall_time_s <= 0.0)
@@ -324,7 +324,7 @@ def integrate_batch_reactor(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return conc_initial_mol_m3.copy(), False, f"solve_ivp异常: {exc}"
 
     if not solution.success:
@@ -394,7 +394,7 @@ def solve_cstr_steady_state_concentrations(
 
     try:
         max_nfev = int(max_nfev)
-    except Exception:
+    except (ValueError, TypeError):
         max_nfev = DEFAULT_CSTR_STEADY_MAX_NFEV
     if max_nfev <= 0:
         max_nfev = DEFAULT_CSTR_STEADY_MAX_NFEV
@@ -411,7 +411,7 @@ def solve_cstr_steady_state_concentrations(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             (not np.isfinite(max_wall_time_s)) or (max_wall_time_s <= 0.0)
@@ -496,7 +496,7 @@ def solve_cstr_steady_state_concentrations(
             ftol=float(ftol),
             gtol=float(gtol),
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return conc_inlet_mol_m3.copy(), False, f"CSTR 稳态求解异常: {exc}"
 
     conc_outlet_mol_m3 = result.x.astype(float)
@@ -627,7 +627,7 @@ def integrate_cstr_profile(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
@@ -715,7 +715,7 @@ def integrate_cstr_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             time_grid_s,
             conc_inlet_mol_m3.astype(float)[:, None],
@@ -835,7 +835,7 @@ def integrate_pfr_profile(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             (not np.isfinite(max_wall_time_s)) or (max_wall_time_s <= 0.0)
@@ -920,7 +920,7 @@ def integrate_pfr_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             volume_grid_m3,
             molar_flow_inlet_mol_s.astype(float)[:, None],
@@ -1022,7 +1022,7 @@ def integrate_batch_profile(
     if max_wall_time_s is not None:
         try:
             max_wall_time_s = float(max_wall_time_s)
-        except Exception:
+        except (ValueError, TypeError):
             max_wall_time_s = None
         if (max_wall_time_s is not None) and (
             not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
@@ -1104,7 +1104,7 @@ def integrate_batch_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:
+    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             time_grid_s,
             conc_initial_mol_m3.astype(float)[:, None],

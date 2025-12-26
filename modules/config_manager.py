@@ -612,4 +612,59 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if not ok:
             return ok, msg
 
+    # 验证参数边界的合理性
+    if "k0_min" in config and "k0_max" in config:
+        try:
+            k0_min = float(config["k0_min"])
+            k0_max = float(config["k0_max"])
+        except (ValueError, TypeError):
+            return False, "k0_min 或 k0_max 无法转换为数值"
+        if not (np.isfinite(k0_min) and np.isfinite(k0_max)):
+            return False, "k0_min 或 k0_max 包含无效值（NaN 或 Inf）"
+        if k0_min <= 0:
+            return False, "k0_min 必须为正值"
+        if k0_max <= 0:
+            return False, "k0_max 必须为正值"
+        if k0_min >= k0_max:
+            return False, f"k0_min ({k0_min}) 必须小于 k0_max ({k0_max})"
+
+    if "ea_min_J_mol" in config and "ea_max_J_mol" in config:
+        try:
+            ea_min = float(config["ea_min_J_mol"])
+            ea_max = float(config["ea_max_J_mol"])
+        except (ValueError, TypeError):
+            return False, "ea_min_J_mol 或 ea_max_J_mol 无法转换为数值"
+        if not (np.isfinite(ea_min) and np.isfinite(ea_max)):
+            return False, "ea_min_J_mol 或 ea_max_J_mol 包含无效值（NaN 或 Inf）"
+        if ea_min >= ea_max:
+            return False, f"ea_min_J_mol ({ea_min}) 必须小于 ea_max_J_mol ({ea_max})"
+
+    # 验证拟合参数边界（针对可逆反应模型）
+    if config["kinetic_model"] == "reversible":
+        if "k0_rev_min" in config and "k0_rev_max" in config:
+            try:
+                k0_rev_min = float(config["k0_rev_min"])
+                k0_rev_max = float(config["k0_rev_max"])
+            except (ValueError, TypeError):
+                return False, "k0_rev_min 或 k0_rev_max 无法转换为数值"
+            if not (np.isfinite(k0_rev_min) and np.isfinite(k0_rev_max)):
+                return False, "k0_rev_min 或 k0_rev_max 包含无效值（NaN 或 Inf）"
+            if k0_rev_min <= 0:
+                return False, "k0_rev_min 必须为正值"
+            if k0_rev_max <= 0:
+                return False, "k0_rev_max 必须为正值"
+            if k0_rev_min >= k0_rev_max:
+                return False, f"k0_rev_min ({k0_rev_min}) 必须小于 k0_rev_max ({k0_rev_max})"
+
+        if "ea_rev_min_J_mol" in config and "ea_rev_max_J_mol" in config:
+            try:
+                ea_rev_min = float(config["ea_rev_min_J_mol"])
+                ea_rev_max = float(config["ea_rev_max_J_mol"])
+            except (ValueError, TypeError):
+                return False, "ea_rev_min_J_mol 或 ea_rev_max_J_mol 无法转换为数值"
+            if not (np.isfinite(ea_rev_min) and np.isfinite(ea_rev_max)):
+                return False, "ea_rev_min_J_mol 或 ea_rev_max_J_mol 包含无效值（NaN 或 Inf）"
+            if ea_rev_min >= ea_rev_max:
+                return False, f"ea_rev_min_J_mol ({ea_rev_min}) 必须小于 ea_rev_max_J_mol ({ea_rev_max})"
+
     return True, ""
