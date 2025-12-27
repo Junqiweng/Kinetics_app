@@ -553,9 +553,16 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("K0_ads", (n_species,), float)
         if not ok:
             return ok, msg
-        ok, msg = _check_array_values("K0_ads", must_be_positive=True)
-        if not ok:
-            return ok, msg
+        # K0_ads 允许为0（不参与吸附的物种），只需检查非负即可
+        if "K0_ads" in config:
+            try:
+                K0_ads_arr = np.asarray(config["K0_ads"], dtype=float)
+            except (ValueError, TypeError):
+                return False, "配置项 K0_ads 无法转换为数值数组"
+            if not np.all(np.isfinite(K0_ads_arr)):
+                return False, "配置项 K0_ads 包含无效值（NaN 或 Inf）"
+            if np.any(K0_ads_arr < 0):
+                return False, "配置项 K0_ads 必须全部为非负值"
 
         ok, msg = _check_array_shape("Ea_K_J_mol", (n_species,), float)
         if not ok:
