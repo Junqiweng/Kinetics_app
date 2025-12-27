@@ -40,9 +40,15 @@ from modules.constants import (
     DEFAULT_N_STARTS,
     DEFAULT_ORDER_MAX,
     DEFAULT_ORDER_MIN,
+    DEFAULT_ORDER_REV_MAX,
+    DEFAULT_ORDER_REV_MIN,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
     DEFAULT_SESSION_MAX_AGE_HOURS,
+    DEFAULT_EA_REV_MAX_J_MOL,
+    DEFAULT_EA_REV_MIN_J_MOL,
+    DEFAULT_K0_REV_MAX,
+    DEFAULT_K0_REV_MIN,
     EPSILON_CONCENTRATION,
     EPSILON_FLOW_RATE,
     FITTING_STOP_WAIT_SLEEP_S,
@@ -1313,6 +1319,50 @@ def main():
                         key="cfg_Ea_K_max",
                     )
 
+            # 可逆反应边界（逆反应）
+            k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
+            k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
+            ea_rev_min_J_mol = float(get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
+            ea_rev_max_J_mol = float(get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
+            order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
+            order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
+            if kinetic_model == "reversible":
+                st.markdown("**1.3 可逆反应边界设置（逆反应）**")
+                col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
+                with col_rev_b1:
+                    k0_rev_min = ui_comp.smart_number_input(
+                        "k0_rev Min",
+                        value=k0_rev_min,
+                        key="cfg_k0_rev_min",
+                    )
+                    k0_rev_max = ui_comp.smart_number_input(
+                        "k0_rev Max",
+                        value=k0_rev_max,
+                        key="cfg_k0_rev_max",
+                    )
+                with col_rev_b2:
+                    ea_rev_min_J_mol = ui_comp.smart_number_input(
+                        "Ea_rev Min",
+                        value=ea_rev_min_J_mol,
+                        key="cfg_ea_rev_min_J_mol",
+                    )
+                    ea_rev_max_J_mol = ui_comp.smart_number_input(
+                        "Ea_rev Max",
+                        value=ea_rev_max_J_mol,
+                        key="cfg_ea_rev_max_J_mol",
+                    )
+                with col_rev_b3:
+                    order_rev_min = ui_comp.smart_number_input(
+                        "Order_rev Min",
+                        value=order_rev_min,
+                        key="cfg_order_rev_min",
+                    )
+                    order_rev_max = ui_comp.smart_number_input(
+                        "Order_rev Max",
+                        value=order_rev_max,
+                        key="cfg_order_rev_max",
+                    )
+
             st.divider()
             st.markdown("**2. 算法与鲁棒性**")
 
@@ -1525,6 +1575,12 @@ def main():
                 K0_ads_max=float(K0_ads_max),
                 Ea_K_min=float(Ea_K_min),
                 Ea_K_max=float(Ea_K_max),
+                k0_rev_min=float(k0_rev_min),
+                k0_rev_max=float(k0_rev_max),
+                ea_rev_min_J_mol=float(ea_rev_min_J_mol),
+                ea_rev_max_J_mol=float(ea_rev_max_J_mol),
+                order_rev_min=float(order_rev_min),
+                order_rev_max=float(order_rev_max),
                 residual_type=str(residual_type),
                 diff_step_rel=float(diff_step_rel),
                 max_nfev=int(max_nfev),
@@ -1765,6 +1821,12 @@ def main():
                     "ea_max": ea_max,
                     "ord_min": ord_min,
                     "ord_max": ord_max,
+                    "k0_rev_min": float(k0_rev_min),
+                    "k0_rev_max": float(k0_rev_max),
+                    "ea_rev_min_J_mol": float(ea_rev_min_J_mol),
+                    "ea_rev_max_J_mol": float(ea_rev_max_J_mol),
+                    "order_rev_min": float(order_rev_min),
+                    "order_rev_max": float(order_rev_max),
                     "K0_ads_min": float(K0_ads_min),
                     "K0_ads_max": float(K0_ads_max),
                     "Ea_K_min": float(Ea_K_min),

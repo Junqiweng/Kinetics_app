@@ -22,10 +22,16 @@ from .constants import (
     CSV_INVALID_INDEX_PREVIEW_COUNT,
     DEFAULT_EA_K_MAX_J_MOL,
     DEFAULT_EA_K_MIN_J_MOL,
+    DEFAULT_EA_REV_MAX_J_MOL,
+    DEFAULT_EA_REV_MIN_J_MOL,
     DEFAULT_K0_ADS_MAX,
+    DEFAULT_K0_REV_MAX,
+    DEFAULT_K0_REV_MIN,
     DEFAULT_M_INHIBITION_MAX,
     DEFAULT_M_INHIBITION_MIN,
     DEFAULT_MAX_STEP_FRACTION,
+    DEFAULT_ORDER_REV_MAX,
+    DEFAULT_ORDER_REV_MIN,
     DEFAULT_RESIDUAL_PENALTY_MULTIPLIER,
     DEFAULT_RESIDUAL_PENALTY_MIN_ABS,
     EPSILON_RELATIVE,
@@ -301,6 +307,12 @@ def _run_fitting_job(
     ea_max = job_inputs["ea_max"]
     ord_min = job_inputs["ord_min"]
     ord_max = job_inputs["ord_max"]
+    k0_rev_min = float(job_inputs.get("k0_rev_min", DEFAULT_K0_REV_MIN))
+    k0_rev_max = float(job_inputs.get("k0_rev_max", DEFAULT_K0_REV_MAX))
+    ea_rev_min_J_mol = float(job_inputs.get("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
+    ea_rev_max_J_mol = float(job_inputs.get("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
+    ord_rev_min = float(job_inputs.get("order_rev_min", DEFAULT_ORDER_REV_MIN))
+    ord_rev_max = float(job_inputs.get("order_rev_max", DEFAULT_ORDER_REV_MAX))
     K0_ads_min = job_inputs.get("K0_ads_min", 0.0)
     K0_ads_max = job_inputs.get("K0_ads_max", DEFAULT_K0_ADS_MAX)
     Ea_K_min = job_inputs.get("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL)
@@ -360,12 +372,12 @@ def _run_fitting_job(
         fit_k0_rev_flags,
         fit_ea_rev_flags,
         fit_order_rev_flags_matrix,
-        k0_min,
-        k0_max,
-        ea_min,
-        ea_max,
-        ord_min,
-        ord_max,
+        k0_rev_min,
+        k0_rev_max,
+        ea_rev_min_J_mol,
+        ea_rev_max_J_mol,
+        ord_rev_min,
+        ord_rev_max,
     )
 
     output_column_names = []
@@ -374,9 +386,11 @@ def _run_fitting_job(
             column_name = f"Fout_{species_name}_mol_s"
         elif output_mode.startswith("C"):
             column_name = f"Cout_{species_name}_mol_m3"
+        elif output_mode.startswith("x"):
+            column_name = f"xout_{species_name}"
         else:
             raise ValueError(
-                "当前版本已移除 X (conversion) 作为拟合目标变量；请改用 Cout 或 Fout。"
+                "未知输出模式；当前支持：Cout、Fout、xout（出口摩尔组成）。"
             )
         output_column_names.append(column_name)
 
