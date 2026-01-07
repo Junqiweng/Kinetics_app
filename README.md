@@ -34,17 +34,17 @@ $$r_j = k_j(T) \prod_i C_i^{n_{i,j}}$$
 
 **(2) Langmuir-Hinshelwood（吸附抑制）**
 
-$$r_j = \\frac{k_j(T) \\prod_i C_i^{n_{i,j}}}{\\left(1 + \\sum_i K_i(T) C_i\\right)^{m_j}}$$
+$$r_j = \frac{k_j(T) \prod_i C_i^{n_{i,j}}}{\left(1 + \sum_i K_i(T) C_i\right)^{m_j}}$$
 
-$$K_i(T) = K_{0,i} \\exp\\left(-\\frac{E_{a,K,i}}{RT}\\right)$$
+$$K_i(T) = K_{0,i} \exp\left(-\frac{E_{a,K,i}}{RT}\right)$$
 
 **(3) 可逆反应 (Reversible)**
 
-$$r_j = k_j^+(T) \\prod_i C_i^{n_{i,j}^+} - k_j^-(T) \\prod_i C_i^{n_{i,j}^-}$$
+$$r_j = k_j^+(T) \prod_i C_i^{n_{i,j}^+} - k_j^-(T) \prod_i C_i^{n_{i,j}^-}$$
 
 其中 Arrhenius 形式为：
 
-$$k_j^{\\pm}(T) = k_{0,j}^{\\pm} \\exp\\left(-\\frac{E_{a,j}^{\\pm}}{RT}\\right)$$
+$$k_j^{\pm}(T) = k_{0,j}^{\pm} \exp\left(-\frac{E_{a,j}^{\pm}}{RT}\right)$$
 
 ### PFR 设计方程
 
