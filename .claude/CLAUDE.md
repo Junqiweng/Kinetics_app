@@ -11,12 +11,15 @@ Kinetics_app is a **Streamlit-based web application** for chemical reaction kine
 ## Common Commands
 
 ### Run the Application
+
 ```bash
 streamlit run app.py
 ```
+
 The app will open at http://localhost:8501
 
 ### Generate Test Data
+
 ```bash
 # Generate simple PFR example (orthogonal design, 27 runs)
 python test_data/generate_orthogonal_design.py
@@ -26,6 +29,7 @@ python test_data/generate_complex_data.py
 ```
 
 ### Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -127,17 +131,20 @@ modules/
 ## Important Constraints
 
 ### Numerical Stability
+
 - **Negative reaction orders**: When `n < 0` and `C → 0`, code clamps concentration to `EPSILON_CONCENTRATION` to avoid division by zero
 - **Stiff ODEs**: For systems with widely varying timescales, users can switch ODE method to `BDF` or `Radau`
 - **Parameter scaling**: `least_squares` uses `x_scale="jac"` to handle parameters of different magnitudes
 
 ### Assumptions and Limitations
+
 - **PFR**: Assumes constant volumetric flow rate (liquid-phase, no pressure drop)
 - **CSTR**: Solves for steady-state only (no transient dynamics)
 - **BSTR**: Assumes constant volume, no inflow/outflow
 - **Missing measurements**: Selected target species **must have valid measurements** in every row
 
 ### Configuration Management
+
 - Configuration JSON includes all UI inputs: species, stoichiometry, initial guesses, bounds, fitting options
 - Auto-save triggers: after successful fit, manual config export
 - Auto-restore: on app startup, loads last config from temp directory (if exists)
@@ -146,6 +153,7 @@ modules/
 ## Testing and Validation
 
 ### Quick Validation Workflow
+
 1. Generate test data: `python test_data/generate_orthogonal_design.py`
 2. Run app: `streamlit run app.py`
 3. Upload `test_data/orthogonal_design_data.csv`
@@ -154,6 +162,7 @@ modules/
 6. Expected result: k₀ ≈ 1e6 s⁻¹, Eₐ ≈ 5e4 J/mol
 
 ### Validation Data Sets
+
 - `orthogonal_design_data.csv`: Simple PFR, single reaction A→B
 - `validation_PFR_Mixed.csv`: Complex PFR with 4 reactions (mixed kinetics)
 - `validation_Batch_Series.csv`: BSTR with series reactions A→B→C→D→E
@@ -175,6 +184,7 @@ When starting work on this codebase, read these files in order:
 ## Development Guidelines
 
 ### Code Style
+
 - **Procedural over OOP**: Use simple functions, avoid classes unless managing complex state
 - **Variable naming**: Use descriptive names with physical meaning
   - Good: `temperature_K`, `reactor_volume_m3`, `activation_energy_J_mol`
@@ -183,18 +193,21 @@ When starting work on this codebase, read these files in order:
 - **Comments**: Explain "why" not "what"; chemical engineering context is valuable
 
 ### When Adding Features
+
 - **Check constants.py first**: Add new defaults/bounds there, not in UI code
 - **Update config schema**: If adding new inputs, update `config_manager.collect_config_from_state()` and `apply_config_to_state()`
 - **Validate input data**: Add checks in `app_data_utils.py` for new column requirements
 - **Document in docs/**: Update relevant `docs/help_*.md` files for user-facing changes
 
 ### Numerical Considerations
+
 - Always use constants from `constants.py` (e.g., `R_GAS_J_MOL_K`, `EPSILON_CONCENTRATION`)
 - For new kinetic models: follow the interface in `kinetics.py` (input conc/T, output rate vector)
 - For new reactors: follow the interface in `reactors.py` (return outlet composition + optional profile)
 - Test with stiff systems: verify BDF/Radau solvers work correctly
 
 ### UI Patterns
+
 - Use `st.expander` for advanced options to reduce clutter
 - Display units in labels: "Temperature [K]", "Volume [m³]"
 - Provide download buttons for templates/examples

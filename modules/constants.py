@@ -60,7 +60,7 @@ DEFAULT_ORDER_REV_MIN = DEFAULT_ORDER_MIN  # 逆反应级数下界 [-]
 DEFAULT_ORDER_REV_MAX = DEFAULT_ORDER_MAX  # 逆反应级数上界 [-]
 
 # 优化器/数值差分默认值
-DEFAULT_DIFF_STEP_REL = 1e-2  # least_squares 数值差分相对步长 [-]
+DEFAULT_DIFF_STEP_REL = 1e-3  # least_squares 数值差分相对步长 [-]
 DEFAULT_MAX_NFEV = 3000  # least_squares 最大迭代次数 [-]
 DEFAULT_N_STARTS = 10  # multi-start 起点数量 [-]
 DEFAULT_MAX_NFEV_COARSE = 300  # multi-start 粗略阶段最大迭代次数 [-]
