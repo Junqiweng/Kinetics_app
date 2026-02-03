@@ -115,7 +115,9 @@ def main():
     cleanup_counter = st.session_state.get("_cleanup_counter", 0) + 1
     st.session_state["_cleanup_counter"] = cleanup_counter
     if cleanup_counter % SESSION_CLEANUP_EVERY_N_PAGE_LOADS == 1:
-        session_cleanup.cleanup_old_sessions(max_age_hours=DEFAULT_SESSION_MAX_AGE_HOURS)
+        session_cleanup.cleanup_old_sessions(
+            max_age_hours=DEFAULT_SESSION_MAX_AGE_HOURS
+        )
 
     MAIN_TAB_LABELS = ["反应与模型", "实验数据", "拟合与结果"]
 
@@ -1127,7 +1129,9 @@ def main():
         export_use_x_scale_jac = bool(get_cfg("use_x_scale_jac", True))
         export_use_ms = bool(get_cfg("use_multi_start", True))
         export_n_starts = int(get_cfg("n_starts", DEFAULT_N_STARTS))
-        export_max_nfev_coarse = int(get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE))
+        export_max_nfev_coarse = int(
+            get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE)
+        )
         export_random_seed = int(get_cfg("random_seed", DEFAULT_RANDOM_SEED))
         export_max_step_fraction = float(
             get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
@@ -1322,8 +1326,12 @@ def main():
             # 可逆反应边界（逆反应）
             k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
             k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
-            ea_rev_min_J_mol = float(get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
-            ea_rev_max_J_mol = float(get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
+            ea_rev_min_J_mol = float(
+                get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL)
+            )
+            ea_rev_max_J_mol = float(
+                get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL)
+            )
             order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
             order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
             if kinetic_model == "reversible":
@@ -1383,12 +1391,14 @@ def main():
                     "diff_step (Finite Diff)",
                     value=get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL),
                     key="cfg_diff_step_rel",
-                    help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值。",
+                    help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值，误差较大时可尝试调小该值。",
                 )
             with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
                     "max_step_fraction (ODE)",
-                    value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
+                    value=float(
+                        get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
+                    ),
                     min_value=0.0,
                     max_value=10.0,
                     step=UI_MAX_STEP_FRACTION_STEP,
@@ -2238,14 +2248,14 @@ def main():
                     index=0,
                 )
                 profile_points = int(
-                        st.number_input(
-                            "剖面点数",
-                            min_value=UI_PROFILE_POINTS_MIN,
-                            max_value=UI_PROFILE_POINTS_MAX,
-                            value=UI_PROFILE_POINTS_DEFAULT,
-                            step=UI_PROFILE_POINTS_STEP,
-                        )
+                    st.number_input(
+                        "剖面点数",
+                        min_value=UI_PROFILE_POINTS_MIN,
+                        max_value=UI_PROFILE_POINTS_MAX,
+                        value=UI_PROFILE_POINTS_DEFAULT,
+                        step=UI_PROFILE_POINTS_STEP,
                     )
+                )
                 profile_species = st.multiselect(
                     "选择要画剖面的物种（可多选）",
                     list(species_names_fit),
@@ -2312,14 +2322,19 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("F"):
                                 y = molar_flow_profile[idx, :]
-                                ax_pf.plot(volume_grid_m3, y, linewidth=2, label=species_name)
+                                ax_pf.plot(
+                                    volume_grid_m3, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"F_{species_name}_mol_s"] = y
                             else:
                                 conc = molar_flow_profile[idx, :] / max(
                                     vdot_m3_s, EPSILON_FLOW_RATE
                                 )
                                 ax_pf.plot(
-                                    volume_grid_m3, conc, linewidth=2, label=species_name
+                                    volume_grid_m3,
+                                    conc,
+                                    linewidth=2,
+                                    label=species_name,
                                 )
                                 profile_df[f"C_{species_name}_mol_m3"] = conc
 
@@ -2375,28 +2390,32 @@ def main():
                     tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)
                     simulation_time_s = float(5.0 * tau_s)
 
-                    time_grid_s, conc_profile, ok, message = reactors.integrate_cstr_profile(
-                        simulation_time_s=simulation_time_s,
-                        temperature_K=temperature_K,
-                        reactor_volume_m3=reactor_volume_m3,
-                        vdot_m3_s=vdot_m3_s,
-                        conc_inlet_mol_m3=conc_inlet,
-                        stoich_matrix=stoich_matrix_fit,
-                        k0=fitted_params["k0"],
-                        ea_J_mol=fitted_params["ea_J_mol"],
-                        reaction_order_matrix=fitted_params["reaction_order_matrix"],
-                        solver_method=solver_method_fit,
-                        rtol=rtol_fit,
-                        atol=atol_fit,
-                        n_points=profile_points,
-                        kinetic_model=kinetic_model_fit,
-                        max_step_fraction=max_step_fraction_fit,
-                        K0_ads=fitted_params.get("K0_ads", None),
-                        Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                        m_inhibition=fitted_params.get("m_inhibition", None),
-                        k0_rev=fitted_params.get("k0_rev", None),
-                        ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                        order_rev_matrix=fitted_params.get("order_rev", None),
+                    time_grid_s, conc_profile, ok, message = (
+                        reactors.integrate_cstr_profile(
+                            simulation_time_s=simulation_time_s,
+                            temperature_K=temperature_K,
+                            reactor_volume_m3=reactor_volume_m3,
+                            vdot_m3_s=vdot_m3_s,
+                            conc_inlet_mol_m3=conc_inlet,
+                            stoich_matrix=stoich_matrix_fit,
+                            k0=fitted_params["k0"],
+                            ea_J_mol=fitted_params["ea_J_mol"],
+                            reaction_order_matrix=fitted_params[
+                                "reaction_order_matrix"
+                            ],
+                            solver_method=solver_method_fit,
+                            rtol=rtol_fit,
+                            atol=atol_fit,
+                            n_points=profile_points,
+                            kinetic_model=kinetic_model_fit,
+                            max_step_fraction=max_step_fraction_fit,
+                            K0_ads=fitted_params.get("K0_ads", None),
+                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                            m_inhibition=fitted_params.get("m_inhibition", None),
+                            k0_rev=fitted_params.get("k0_rev", None),
+                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                            order_rev_matrix=fitted_params.get("order_rev", None),
+                        )
                     )
 
                     if not ok:
@@ -2414,7 +2433,9 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
+                                ax_cs.plot(
+                                    time_grid_s, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_inlet[idx])
@@ -2422,7 +2443,9 @@ def main():
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_cs.plot(time_grid_s, x, linewidth=2, label=species_name)
+                                ax_cs.plot(
+                                    time_grid_s, x, linewidth=2, label=species_name
+                                )
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_cs.set_xlabel("Time t [s]")
@@ -2512,7 +2535,9 @@ def main():
                             idx = name_to_index[species_name]
                             if profile_kind.startswith("C"):
                                 y = conc_profile[idx, :]
-                                ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
+                                ax_bt.plot(
+                                    time_grid_s, y, linewidth=2, label=species_name
+                                )
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 c0 = float(conc_initial[idx])
@@ -2520,7 +2545,9 @@ def main():
                                     x = np.full_like(time_grid_s, np.nan, dtype=float)
                                 else:
                                     x = (c0 - conc_profile[idx, :]) / c0
-                                ax_bt.plot(time_grid_s, x, linewidth=2, label=species_name)
+                                ax_bt.plot(
+                                    time_grid_s, x, linewidth=2, label=species_name
+                                )
                                 profile_df[f"X_{species_name}"] = x
 
                         ax_bt.set_xlabel("Time t [s]")
