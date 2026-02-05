@@ -431,8 +431,14 @@ def _predict_outputs_for_row(
                 "体积流量 vdot_m3_s 无效（请检查 CSV 的 vdot_m3_s 列）",
             )
 
+        # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
+        use_conc_inlet = str(output_mode).startswith("C")
         if inlet_column_names is None:
-            inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
+            inlet_column_names = (
+                [f"C0_{name}_mol_m3" for name in species_names]
+                if use_conc_inlet
+                else [f"F0_{name}_mol_s" for name in species_names]
+            )
 
         molar_flow_inlet = np.zeros(len(species_names), dtype=float)
         for i, col in enumerate(inlet_column_names):
@@ -449,7 +455,11 @@ def _predict_outputs_for_row(
                     False,
                     f"{col} 不能为负",
                 )
-            molar_flow_inlet[i] = float(value)
+            if use_conc_inlet:
+                # C0 [mol/m^3] -> F0 [mol/s] = C0 * vdot
+                molar_flow_inlet[i] = float(value) * float(vdot_m3_s)
+            else:
+                molar_flow_inlet[i] = float(value)
 
         molar_flow_outlet = None
         ok = True
@@ -515,13 +525,6 @@ def _predict_outputs_for_row(
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = molar_flow_outlet[idx] / total_flow
-            elif output_mode == "X (conversion)":
-                f0 = molar_flow_inlet[idx]
-                fout = molar_flow_outlet[idx]
-                if f0 < EPSILON_FLOW_RATE:
-                    output_values[out_i] = np.nan
-                else:
-                    output_values[out_i] = (f0 - fout) / f0
             else:
                 return (
                     np.zeros(len(output_species_list), dtype=float),
@@ -622,13 +625,6 @@ def _predict_outputs_for_row(
                     output_values[out_i] = np.nan
                 else:
                     output_values[out_i] = conc_outlet[idx] / total_conc
-            elif output_mode == "X (conversion)":
-                c0 = conc_inlet[idx]
-                c_out = conc_outlet[idx]
-                if c0 < EPSILON_CONCENTRATION:
-                    output_values[out_i] = np.nan
-                else:
-                    output_values[out_i] = (c0 - c_out) / c0
             else:
                 return (
                     np.zeros(len(output_species_list), dtype=float),
@@ -715,19 +711,12 @@ def _predict_outputs_for_row(
         for out_i, idx in enumerate(output_species_indices):
             if output_mode == "Cout (mol/m^3)":
                 output_values[out_i] = conc_final[idx]
-            elif output_mode == "X (conversion)":
-                c0 = conc_initial[idx]
-                c_final = conc_final[idx]
-                if c0 < EPSILON_CONCENTRATION:
-                    output_values[out_i] = np.nan
-                else:
-                    output_values[out_i] = (c0 - c_final) / c0
             else:
                 # 间歇釜（BSTR）不支持 Fout 模式
                 return (
                     np.zeros(len(output_species_list), dtype=float),
                     False,
-                    "BSTR 反应器不支持 Fout 输出模式，请选择 Cout 或 X",
+                    "BSTR 反应器仅支持 Cout 输出模式",
                 )
 
     else:

@@ -34,7 +34,6 @@ def _build_example_batch_csv_bytes() -> bytes:
     time_s = np.array([0, 20, 40, 60, 90, 120, 180, 240, 360, 480], dtype=float)
     conc_A_t = conc_A0_mol_m3 * np.exp(-rate_constant_1_s * time_s)
     conc_B_t = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_t)
-    conversion_A = 1.0 - conc_A_t / max(conc_A0_mol_m3, EPSILON_CONCENTRATION)
 
     data_df = pd.DataFrame(
         {
@@ -44,7 +43,6 @@ def _build_example_batch_csv_bytes() -> bytes:
             "C0_B_mol_m3": np.full(time_s.size, conc_B0_mol_m3, dtype=float),
             "Cout_A_mol_m3": conc_A_t,
             "Cout_B_mol_m3": conc_B_t,
-            "X_A": conversion_A,
         }
     )
     return data_df.to_csv(index=False).encode("utf-8")
@@ -70,7 +68,6 @@ def _build_example_cstr_csv_bytes() -> bytes:
     # 一阶 CSTR：C_A = C_A0 / (1 + k*tau)
     conc_A_out = conc_A0_mol_m3 / (1.0 + rate_constant_1_s * tau_s)
     conc_B_out = conc_B0_mol_m3 + (conc_A0_mol_m3 - conc_A_out)
-    conversion_A = 1.0 - conc_A_out / max(conc_A0_mol_m3, EPSILON_CONCENTRATION)
 
     fout_A_mol_s = vdot_m3_s * conc_A_out
     fout_B_mol_s = vdot_m3_s * conc_B_out
@@ -86,7 +83,6 @@ def _build_example_cstr_csv_bytes() -> bytes:
             "Cout_B_mol_m3": conc_B_out,
             "Fout_A_mol_s": fout_A_mol_s,
             "Fout_B_mol_s": fout_B_mol_s,
-            "X_A": conversion_A,
         }
     )
     return data_df.to_csv(index=False).encode("utf-8")
@@ -179,7 +175,7 @@ def render_help_page() -> None:
                 data=cstr_example_bytes,
                 file_name="cstr_example.csv",
                 mime="text/csv",
-                help="示例：A → B 一级反应稳态 CSTR，列包含 V_m3/T_K/vdot/C0_*/Cout_*/Fout_*/X_A。",
+                help="示例：A → B 一级反应稳态 CSTR，列包含 V_m3/T_K/vdot/C0_*/Cout_*/Fout_*。",
                 use_container_width=True,
             )
         with col_ex3:
@@ -189,7 +185,7 @@ def render_help_page() -> None:
                 data=batch_example_bytes,
                 file_name="batch_example.csv",
                 mime="text/csv",
-                help="示例：A → B 一级反应，列包含 t_s/T_K/C0_*/Cout_*/X_A。",
+                help="示例：A → B 一级反应，列包含 t_s/T_K/C0_*/Cout_*。",
                 use_container_width=True,
             )
 

@@ -16,7 +16,7 @@
 - 🧪 **多反应器类型**：支持 PFR / CSTR / BSTR
 - 🔬 **多种动力学模型**：幂律（Power-law）、Langmuir-Hinshelwood（吸附抑制）、可逆反应（Reversible）
 - 🎯 **灵活的参数拟合**：可选择性拟合 k₀、Eₐ 和反应级数
-- 📈 **多种目标变量**：支持出口摩尔流量或出口浓度作为拟合目标
+- 📈 **多种目标变量**：支持出口摩尔流量、出口浓度或出口摩尔分数作为拟合目标（xout 仅 PFR/CSTR）
 - 🚀 **高级拟合选项**：多起点拟合、参数缩放、可调有限差分步长
 - 📉 **可视化结果**：奇偶校验图（Parity Plot）、误差图，以及剖面图（PFR: 随 $V$；BSTR: 随 $t$；CSTR: 随 $t$ 逼近稳态）
 - 📥 **一键导出**：拟合参数/对比数据/报告表（CSV）与图像（PNG/SVG）
@@ -128,7 +128,8 @@ python test_data/generate_orthogonal_design.py
 | `V_m3` | 反应器体积 | m³ |
 | `T_K` | 反应温度 | K |
 | `vdot_m3_s` | 体积流量 | m³/s |
-| `F0_<物种名>_mol_s` | 各物种入口摩尔流量 | mol/s |
+| `F0_<物种名>_mol_s` | 各物种入口摩尔流量（拟合目标为 `Fout/xout` 时使用） | mol/s |
+| `C0_<物种名>_mol_m3` | 各物种入口浓度（拟合目标为 `Cout` 时使用） | mol/m³ |
 
 **CSTR 输入列**
 
@@ -150,6 +151,7 @@ python test_data/generate_orthogonal_design.py
 测量值列（任选一种类型；允许缺测，但缺测会在拟合中被赋予较大惩罚残差）：
 - `Fout_<物种名>_mol_s`：出口摩尔流量 [mol/s]（PFR / CSTR）
 - `Cout_<物种名>_mol_m3`：出口浓度 [mol/m³]
+- `xout_<物种名>`：出口摩尔分数 [-]（仅 PFR / CSTR）
 
 重要：当前版本对“你选中的测量列”（由 **拟合目标变量 + 目标物种** 决定）要求 **每一行都是数字**，不允许 NaN/空值/非数字；否则会停止拟合并提示具体列与行号。
 
@@ -157,7 +159,7 @@ python test_data/generate_orthogonal_design.py
 
 ### 3. 参数拟合
 
-- 选择拟合目标变量类型（Fout / Cout / X）
+- 选择拟合目标变量类型（Fout / Cout / xout）
 - 选择参与目标函数的物种
 - 设置参数边界和高级拟合选项
 - 点击"开始拟合"

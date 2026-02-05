@@ -8,8 +8,10 @@ import json
 import os
 import tempfile
 import time
+import uuid
 
 import pandas as pd
+import streamlit as st
 
 from .constants import PERSIST_DIR_NAME
 from .file_utils import atomic_write_bytes, atomic_write_text
@@ -18,6 +20,7 @@ from .file_utils import atomic_write_bytes, atomic_write_text
 _PERSIST_BASE_DIR = os.path.join(tempfile.gettempdir(), PERSIST_DIR_NAME)
 
 
+@st.cache_data(show_spinner=False)
 def _read_csv_bytes_cached(uploaded_bytes: bytes) -> pd.DataFrame:
     """
     从 bytes 读取 CSV。
@@ -40,8 +43,15 @@ def _get_persist_dir(session_id: str | None = None) -> str:
     返回:
         持久化目录路径
     """
+    normalized_sid = None
     if session_id:
-        persist_dir = os.path.join(_PERSIST_BASE_DIR, session_id)
+        try:
+            normalized_sid = str(uuid.UUID(str(session_id).strip()))
+        except Exception:
+            normalized_sid = None
+
+    if normalized_sid:
+        persist_dir = os.path.join(_PERSIST_BASE_DIR, normalized_sid)
     else:
         persist_dir = _PERSIST_BASE_DIR
     os.makedirs(persist_dir, exist_ok=True)

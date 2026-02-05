@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import uuid
 from typing import Any
 
 import numpy as np
@@ -59,8 +60,15 @@ def _get_auto_save_file(session_id: str | None = None) -> str:
     返回:
         配置文件路径
     """
+    normalized_sid = None
     if session_id:
-        persist_dir = os.path.join(_PERSIST_BASE_DIR, session_id)
+        try:
+            normalized_sid = str(uuid.UUID(str(session_id).strip()))
+        except Exception:
+            normalized_sid = None
+
+    if normalized_sid:
+        persist_dir = os.path.join(_PERSIST_BASE_DIR, normalized_sid)
     else:
         persist_dir = _PERSIST_BASE_DIR
     os.makedirs(persist_dir, exist_ok=True)
@@ -477,8 +485,6 @@ def validate_config(config: dict) -> tuple[bool, str]:
     # 可选项：输出模式与目标物种
     if "output_mode" in config:
         output_mode = str(config["output_mode"])
-        if output_mode == "X (conversion)":
-            return False, "当前版本已移除 X (conversion) 作为拟合目标变量"
 
         if reactor_type == "BSTR":
             allowed_output_modes = ["Cout (mol/m^3)"]
@@ -593,9 +599,19 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("k0_rev", (n_reactions,), float)
         if not ok:
             return ok, msg
-        ok, msg = _check_array_values("k0_rev", must_be_positive=True)
-        if not ok:
-            return ok, msg
+        # 说明：
+        # - k0_rev 作为“逆反应初值”允许为 0（表示逆向贡献为 0 或暂不启用逆向）。
+        # - 但若用户选择“拟合 k0_rev”，则对应反应的 k0_rev 必须严格为正，
+        #   否则优化器在边界/比例上更容易出现不可解释行为。
+        if "k0_rev" in config:
+            try:
+                k0_rev_arr = np.asarray(config["k0_rev"], dtype=float)
+            except (ValueError, TypeError):
+                return False, "配置项 k0_rev 无法转换为数值数组"
+            if not np.all(np.isfinite(k0_rev_arr)):
+                return False, "配置项 k0_rev 包含无效值（NaN 或 Inf）"
+            if np.any(k0_rev_arr < 0):
+                return False, "配置项 k0_rev 必须全部为非负值（允许为 0）"
 
         ok, msg = _check_array_shape("ea_rev_J_mol", (n_reactions,), float)
         if not ok:
@@ -610,6 +626,17 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("fit_ea_rev_flags", (n_reactions,), bool)
         if not ok:
             return ok, msg
+
+        # 若拟合 k0_rev，则对应初值必须 > 0
+        if ("fit_k0_rev_flags" in config) and np.any(
+            np.asarray(config["fit_k0_rev_flags"], dtype=bool)
+        ):
+            if "k0_rev" not in config:
+                return False, "拟合 k0_rev 时必须提供 k0_rev 初值"
+            k0_rev_arr = np.asarray(config["k0_rev"], dtype=float)
+            fit_mask = np.asarray(config["fit_k0_rev_flags"], dtype=bool)
+            if np.any(k0_rev_arr[fit_mask] <= 0.0):
+                return False, "配置项 k0_rev：被选中拟合的位置必须为正值（>0）"
         ok, msg = _check_array_shape("order_rev", (n_reactions, n_species), float)
         if not ok:
             return ok, msg

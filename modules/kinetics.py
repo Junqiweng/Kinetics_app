@@ -32,6 +32,8 @@ def calc_rate_vector_power_law(
     """
     conc_mol_m3 = safe_nonnegative(conc_mol_m3)
     k_T = k0 * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
+    if not np.all(np.isfinite(k_T)):
+        raise FloatingPointError("power_law: Arrhenius 计算得到 NaN/Inf（k_T）")
 
     # 速率表达式：rate_j = k_j(T) * Π_i C_i^(n_ij)
     n_reactions = k0.size
@@ -46,10 +48,12 @@ def calc_rate_vector_power_law(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_value = rate_value * (conc_value**order_value)
-            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
+            # 数值异常：极端情况下（如极小浓度+大负反应级数）可能产生 Inf/NaN；
+            # 这里选择“显式失败”而不是静默置 0，以避免拟合得到不可解释的假收敛。
             if not np.isfinite(rate_value):
-                rate_value = 0.0
-                break
+                raise FloatingPointError(
+                    f"power_law: rate 非有限（reaction={reaction_index}, species={species_index}）"
+                )
         rate_vector[reaction_index] = rate_value
     return rate_vector
 
@@ -87,12 +91,22 @@ def calc_rate_vector_langmuir_hinshelwood(
     """
     conc_mol_m3 = safe_nonnegative(conc_mol_m3)
     k_T = k0 * np.exp(-ea_J_mol / (R_GAS_J_MOL_K * temperature_K))
+    if not np.all(np.isfinite(k_T)):
+        raise FloatingPointError("langmuir_hinshelwood: Arrhenius 计算得到 NaN/Inf（k_T）")
 
     # 计算温度依赖的吸附常数 K_i(T)
     K_ads_T = K0_ads * np.exp(-Ea_K_J_mol / (R_GAS_J_MOL_K * temperature_K))
+    if not np.all(np.isfinite(K_ads_T)):
+        raise FloatingPointError(
+            "langmuir_hinshelwood: Arrhenius 计算得到 NaN/Inf（K_ads_T）"
+        )
 
     # 计算分母：(1 + Σ_i K_i(T) * C_i)
     denominator_base = 1.0 + np.sum(K_ads_T * conc_mol_m3)
+    if not np.isfinite(denominator_base):
+        raise FloatingPointError(
+            "langmuir_hinshelwood: 分母基底得到 NaN/Inf（denominator_base）"
+        )
 
     n_reactions = k0.size
     rate_vector = np.zeros(n_reactions, dtype=float)
@@ -107,14 +121,18 @@ def calc_rate_vector_langmuir_hinshelwood(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_numerator = rate_numerator * (conc_value**order_value)
-            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
             if not np.isfinite(rate_numerator):
-                rate_numerator = 0.0
-                break
+                raise FloatingPointError(
+                    f"langmuir_hinshelwood: 分子非有限（reaction={reaction_index}, species={species_index}）"
+                )
 
         # 分母：(1 + Σ_i K_i(T) * C_i)^m_j
         m_j = m_inhibition[reaction_index]
         denominator = denominator_base**m_j if abs(m_j) >= FLOAT_EQUALITY_TOLERANCE else 1.0
+        if not np.isfinite(denominator):
+            raise FloatingPointError(
+                f"langmuir_hinshelwood: 分母非有限（reaction={reaction_index}）"
+            )
 
         rate_vector[reaction_index] = rate_numerator / max(
             denominator, EPSILON_DENOMINATOR
@@ -153,6 +171,10 @@ def calc_rate_vector_reversible(
     conc_mol_m3 = safe_nonnegative(conc_mol_m3)
     k_fwd_T = k0_fwd * np.exp(-ea_fwd_J_mol / (R_GAS_J_MOL_K * temperature_K))
     k_rev_T = k0_rev * np.exp(-ea_rev_J_mol / (R_GAS_J_MOL_K * temperature_K))
+    if not np.all(np.isfinite(k_fwd_T)):
+        raise FloatingPointError("reversible: Arrhenius 计算得到 NaN/Inf（k_fwd_T）")
+    if not np.all(np.isfinite(k_rev_T)):
+        raise FloatingPointError("reversible: Arrhenius 计算得到 NaN/Inf（k_rev_T）")
 
     n_reactions = k0_fwd.size
     rate_vector = np.zeros(n_reactions, dtype=float)
@@ -168,10 +190,10 @@ def calc_rate_vector_reversible(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_fwd = rate_fwd * (conc_value**order_value)
-            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
             if not np.isfinite(rate_fwd):
-                rate_fwd = 0.0
-                break
+                raise FloatingPointError(
+                    f"reversible: 正向速率非有限（reaction={reaction_index}, species={species_index}）"
+                )
 
         # 逆反应速率
         rate_rev = k_rev_T[reaction_index]
@@ -183,10 +205,10 @@ def calc_rate_vector_reversible(
             if order_value < 0.0:
                 conc_value = max(conc_value, EPSILON_CONCENTRATION)
             rate_rev = rate_rev * (conc_value**order_value)
-            # 数值溢出保护：极端情况下（如极小浓度+大负反应级数）可能产生Inf/NaN
             if not np.isfinite(rate_rev):
-                rate_rev = 0.0
-                break
+                raise FloatingPointError(
+                    f"reversible: 逆向速率非有限（reaction={reaction_index}, species={species_index}）"
+                )
 
         # 净反应速率
         rate_vector[reaction_index] = rate_fwd - rate_rev

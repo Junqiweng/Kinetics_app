@@ -19,7 +19,9 @@
   },
   "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
   "postAttachCommand": {
-    "server": "streamlit run app.py --server.enableCORS false --server.enableXsrfProtection false"
+    // 说明：容器开发默认使用 Streamlit 的安全默认值（启用 XSRF/CORS 保护）。
+    // 如确需在特定开发环境关闭，请在本地自行覆盖，不要作为仓库默认值提交。
+    "server": "streamlit run app.py"
   },
   "portsAttributes": {
     "8501": {

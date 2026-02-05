@@ -109,6 +109,8 @@ def main():
     # 将 session_id 存储到 session_state 供后续使用
     if session_id:
         st.session_state["_current_session_id"] = session_id
+        # 更新会话活跃标记，避免长时间打开页面的活跃会话被清理策略误删
+        session_cleanup.update_session_activity(session_id)
 
     # ========= 定期清理过期会话 =========
     # 每 20 次页面加载执行一次清理（避免频繁 IO）
@@ -429,6 +431,14 @@ def main():
     # 如果刚刚重置，则不注入脚本，避免加载旧配置
     if not just_reset:
         browser_storage.inject_config_loader_script()
+
+    # 若浏览器配置恢复失败，给出一次性提示（避免无休止刷新时用户无从下手）
+    browser_cfg_error = str(
+        st.session_state.get("_browser_config_load_error", "")
+    ).strip()
+    if browser_cfg_error and (not bool(st.session_state.get("_warned_browser_cfg_error", False))):
+        st.session_state["_warned_browser_cfg_error"] = True
+        st.warning(browser_cfg_error + "（已停止自动恢复；如需重试可在侧边栏执行“重置为默认”或清除浏览器缓存配置。）")
 
     def get_cfg(key, default):
         if "imported_config" in st.session_state:
@@ -1008,9 +1018,15 @@ def main():
 
             # 根据反应器类型决定输入条件列
             if reactor_type == "PFR":
+                # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
+                inlet_cols = (
+                    [f"C0_{s}_mol_m3" for s in species_names]
+                    if output_mode.startswith("C")
+                    else [f"F0_{s}_mol_s" for s in species_names]
+                )
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
-                    + [f"F0_{s}_mol_s" for s in species_names]
+                    + inlet_cols
                     + meas_cols
                 )
             elif reactor_type == "CSTR":
@@ -2275,10 +2291,15 @@ def main():
                     vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
 
                     molar_flow_inlet = np.zeros(len(species_names_fit), dtype=float)
+                    use_conc_inlet = str(output_mode_fit).strip().startswith("C")
                     for i, sp_name in enumerate(species_names_fit):
-                        molar_flow_inlet[i] = float(
-                            row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
-                        )
+                        if use_conc_inlet:
+                            c0 = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
+                            molar_flow_inlet[i] = c0 * float(vdot_m3_s)
+                        else:
+                            molar_flow_inlet[i] = float(
+                                row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
+                            )
 
                     volume_grid_m3, molar_flow_profile, ok, message = (
                         reactors.integrate_pfr_profile(
@@ -2371,12 +2392,7 @@ def main():
                         plt.close(fig_pf)
 
                 elif reactor_type_fit == "CSTR":
-                    profile_kind = st.radio(
-                        "剖面变量",
-                        ["C (mol/m^3)", "X (conversion)"],
-                        index=0,
-                        horizontal=True,
-                    )
+                    profile_kind = "C (mol/m^3)"
                     reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
                     temperature_K = float(row_sel.get("T_K", np.nan))
                     vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
@@ -2431,27 +2447,12 @@ def main():
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
                         for species_name in profile_species:
                             idx = name_to_index[species_name]
-                            if profile_kind.startswith("C"):
-                                y = conc_profile[idx, :]
-                                ax_cs.plot(
-                                    time_grid_s, y, linewidth=2, label=species_name
-                                )
-                                profile_df[f"C_{species_name}_mol_m3"] = y
-                            else:
-                                c0 = float(conc_inlet[idx])
-                                if c0 < EPSILON_CONCENTRATION:
-                                    x = np.full_like(time_grid_s, np.nan, dtype=float)
-                                else:
-                                    x = (c0 - conc_profile[idx, :]) / c0
-                                ax_cs.plot(
-                                    time_grid_s, x, linewidth=2, label=species_name
-                                )
-                                profile_df[f"X_{species_name}"] = x
+                            y = conc_profile[idx, :]
+                            ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
+                            profile_df[f"C_{species_name}_mol_m3"] = y
 
                         ax_cs.set_xlabel("Time t [s]")
-                        ax_cs.set_ylabel(
-                            f"{profile_kind} [{('mol/m^3' if profile_kind.startswith('C') else '-')}]"
-                        )
+                        ax_cs.set_ylabel("C (mol/m^3) [mol/m^3]")
                         ax_cs.grid(True)
                         ax_cs.legend()
                         st.pyplot(fig_cs)
@@ -2481,12 +2482,7 @@ def main():
                         plt.close(fig_cs)
 
                 else:
-                    profile_kind = st.radio(
-                        "剖面变量",
-                        ["C (mol/m^3)", "X (conversion)"],
-                        index=0,
-                        horizontal=True,
-                    )
+                    profile_kind = "C (mol/m^3)"
                     reaction_time_s = float(row_sel.get("t_s", np.nan))
                     temperature_K = float(row_sel.get("T_K", np.nan))
                     conc_initial = np.zeros(len(species_names_fit), dtype=float)
@@ -2533,27 +2529,12 @@ def main():
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
                         for species_name in profile_species:
                             idx = name_to_index[species_name]
-                            if profile_kind.startswith("C"):
-                                y = conc_profile[idx, :]
-                                ax_bt.plot(
-                                    time_grid_s, y, linewidth=2, label=species_name
-                                )
-                                profile_df[f"C_{species_name}_mol_m3"] = y
-                            else:
-                                c0 = float(conc_initial[idx])
-                                if c0 < EPSILON_CONCENTRATION:
-                                    x = np.full_like(time_grid_s, np.nan, dtype=float)
-                                else:
-                                    x = (c0 - conc_profile[idx, :]) / c0
-                                ax_bt.plot(
-                                    time_grid_s, x, linewidth=2, label=species_name
-                                )
-                                profile_df[f"X_{species_name}"] = x
+                            y = conc_profile[idx, :]
+                            ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
+                            profile_df[f"C_{species_name}_mol_m3"] = y
 
                         ax_bt.set_xlabel("Time t [s]")
-                        ax_bt.set_ylabel(
-                            f"{profile_kind} [{('mol/m^3' if profile_kind.startswith('C') else '-')}]"
-                        )
+                        ax_bt.set_ylabel("C (mol/m^3) [mol/m^3]")
                         ax_bt.grid(True)
                         ax_bt.legend()
                         st.pyplot(fig_bt)

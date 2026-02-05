@@ -310,8 +310,8 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 剖面是**模型预测**（不是实验测量值）：
 
-- PFR：沿体积 $V$ 的 $F_i(V)$、$C_i(V)$、$X_i(V)$
-- BSTR：随时间 $t$ 的 $C_i(t)$、$X_i(t)$
+- PFR：沿体积 $V$ 的 $F_i(V)$、$C_i(V)$
+- CSTR/BSTR：随时间 $t$ 的 $C_i(t)$
 
 ### 8.5 导出
 

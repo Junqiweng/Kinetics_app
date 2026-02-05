@@ -142,9 +142,6 @@ for exp_idx, (idx_t, idx_f, idx_v) in enumerate(orthogonal_table, 1):
     F_out_noisy = F_out * (1 + noise)
     F_out_noisy = max(F_out_noisy, 0)
 
-    # 计算转化率
-    X_A = (F0_A - F_out_noisy) / F0_A if F0_A > 0 else 0
-
     # ========== 保存数据行 ==========
     rows.append(
         {
