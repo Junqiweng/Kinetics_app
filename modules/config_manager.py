@@ -43,6 +43,14 @@ from .constants import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
     PERSIST_DIR_NAME,
+    KINETIC_MODELS,
+    KINETIC_MODEL_POWER_LAW,
+    OUTPUT_MODE_FOUT,
+    OUTPUT_MODES_BATCH,
+    OUTPUT_MODES_FLOW,
+    REACTOR_TYPES,
+    REACTOR_TYPE_BSTR,
+    REACTOR_TYPE_PFR,
 )
 from .file_utils import atomic_write_text
 
@@ -146,7 +154,7 @@ def collect_config(
     order_rev: np.ndarray | None = None,
     fit_order_rev_flags_matrix: np.ndarray | None = None,
     # --- 拟合目标 ---
-    output_mode: str = "Fout (mol/s)",
+    output_mode: str = OUTPUT_MODE_FOUT,
     output_species_list: list[str] | None = None,
     # --- 参数边界 ---
     k0_min: float = DEFAULT_K0_MIN,
@@ -339,8 +347,8 @@ def get_default_config() -> dict:
     return {
         "version": "1.0",
         # 基础设置
-        "reactor_type": "PFR",
-        "kinetic_model": "power_law",
+        "reactor_type": REACTOR_TYPE_PFR,
+        "kinetic_model": KINETIC_MODEL_POWER_LAW,
         "solver_method": "RK45",
         "rtol": DEFAULT_RTOL,
         "atol": DEFAULT_ATOL,
@@ -355,7 +363,7 @@ def get_default_config() -> dict:
         "plot_number_style": "科学计数",
         "plot_decimal_places": 3,
         # 拟合目标
-        "output_mode": "Fout (mol/s)",
+        "output_mode": OUTPUT_MODE_FOUT,
         "output_species_list": ["A"],
         # 参数边界
         "k0_min": DEFAULT_K0_MIN,
@@ -437,17 +445,13 @@ def validate_config(config: dict) -> tuple[bool, str]:
 
     reactor_type = str(config.get("reactor_type", "")).strip()
     if reactor_type == "Batch":
-        reactor_type = "BSTR"
+        reactor_type = REACTOR_TYPE_BSTR
         config["reactor_type"] = reactor_type
 
-    if reactor_type not in ["PFR", "CSTR", "BSTR"]:
+    if reactor_type not in REACTOR_TYPES:
         return False, f"无效的反应器类型：{reactor_type}"
 
-    if config["kinetic_model"] not in [
-        "power_law",
-        "langmuir_hinshelwood",
-        "reversible",
-    ]:
+    if config["kinetic_model"] not in KINETIC_MODELS:
         return False, f"无效的动力学模型：{config['kinetic_model']}"
 
     if config.get("version", "1.0") != "1.0":
@@ -486,14 +490,9 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if "output_mode" in config:
         output_mode = str(config["output_mode"])
 
-        if reactor_type == "BSTR":
-            allowed_output_modes = ["Cout (mol/m^3)"]
-        else:
-            allowed_output_modes = [
-                "Fout (mol/s)",
-                "Cout (mol/m^3)",
-                "xout (mole fraction)",
-            ]
+        allowed_output_modes = (
+            OUTPUT_MODES_BATCH if reactor_type == REACTOR_TYPE_BSTR else OUTPUT_MODES_FLOW
+        )
 
         if output_mode not in allowed_output_modes:
             return False, f"无效的 output_mode：{output_mode}"

@@ -39,6 +39,8 @@ from .constants import (
     FITTING_EPSILON_PHI_RATIO,
     FITTING_UI_UPDATE_INTERVAL_S,
     PERCENTAGE_RESIDUAL_EPSILON_FACTOR,
+    REACTOR_TYPE_CSTR,
+    REACTOR_TYPE_PFR,
 )
 
 
@@ -425,7 +427,7 @@ def _run_fitting_job(
         )
 
     # --- 必要输入列检查（避免所有行都“失败罚项”，看起来像卡住）---
-    if reactor_type == "PFR":
+    if reactor_type == REACTOR_TYPE_PFR:
         # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
         inlet_cols = (
             [f"C0_{name}_mol_m3" for name in species_names]
@@ -433,7 +435,7 @@ def _run_fitting_job(
             else [f"F0_{name}_mol_s" for name in species_names]
         )
         required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + inlet_cols
-    elif reactor_type == "CSTR":
+    elif reactor_type == REACTOR_TYPE_CSTR:
         required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + [
             f"C0_{name}_mol_m3" for name in species_names
         ]
@@ -612,7 +614,7 @@ def _run_fitting_job(
     except Exception:
         raise ValueError("输出物种不在物种列表中（请检查物种名是否匹配）")
 
-    if reactor_type == "PFR":
+    if reactor_type == REACTOR_TYPE_PFR:
         inlet_column_names = (
             [f"C0_{name}_mol_m3" for name in species_names]
             if str(output_mode).startswith("C")

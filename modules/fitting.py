@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 import pandas as pd
 
@@ -21,6 +23,12 @@ from .constants import (
     DEFAULT_ORDER_REV_MIN,
     EPSILON_CONCENTRATION,
     EPSILON_FLOW_RATE,
+    OUTPUT_MODE_COUT,
+    OUTPUT_MODE_FOUT,
+    OUTPUT_MODE_XOUT,
+    REACTOR_TYPE_BSTR,
+    REACTOR_TYPE_CSTR,
+    REACTOR_TYPE_PFR,
 )
 from .reactors import (
     integrate_batch_reactor,
@@ -57,19 +65,19 @@ def _pack_parameters(
     fit_ea_flags: np.ndarray,
     fit_order_flags_matrix: np.ndarray,
     # 朗缪尔-辛斯伍德（L-H）参数
-    K0_ads_guess: np.ndarray = None,
-    Ea_K_guess: np.ndarray = None,
-    m_inhibition_guess: np.ndarray = None,
-    fit_K0_ads_flags: np.ndarray = None,
-    fit_Ea_K_flags: np.ndarray = None,
-    fit_m_flags: np.ndarray = None,
+    K0_ads_guess: np.ndarray | None = None,
+    Ea_K_guess: np.ndarray | None = None,
+    m_inhibition_guess: np.ndarray | None = None,
+    fit_K0_ads_flags: np.ndarray | None = None,
+    fit_Ea_K_flags: np.ndarray | None = None,
+    fit_m_flags: np.ndarray | None = None,
     # 可逆反应参数
-    k0_rev_guess: np.ndarray = None,
-    ea_rev_guess: np.ndarray = None,
-    order_rev_guess: np.ndarray = None,
-    fit_k0_rev_flags: np.ndarray = None,
-    fit_ea_rev_flags: np.ndarray = None,
-    fit_order_rev_flags_matrix: np.ndarray = None,
+    k0_rev_guess: np.ndarray | None = None,
+    ea_rev_guess: np.ndarray | None = None,
+    order_rev_guess: np.ndarray | None = None,
+    fit_k0_rev_flags: np.ndarray | None = None,
+    fit_ea_rev_flags: np.ndarray | None = None,
+    fit_order_rev_flags_matrix: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     将所有需要拟合的参数打包成一个向量。
@@ -130,19 +138,19 @@ def _unpack_parameters(
     fit_ea_flags: np.ndarray,
     fit_order_flags_matrix: np.ndarray,
     # 朗缪尔-辛斯伍德（L-H）参数
-    K0_ads_guess: np.ndarray = None,
-    Ea_K_guess: np.ndarray = None,
-    m_inhibition_guess: np.ndarray = None,
-    fit_K0_ads_flags: np.ndarray = None,
-    fit_Ea_K_flags: np.ndarray = None,
-    fit_m_flags: np.ndarray = None,
+    K0_ads_guess: np.ndarray | None = None,
+    Ea_K_guess: np.ndarray | None = None,
+    m_inhibition_guess: np.ndarray | None = None,
+    fit_K0_ads_flags: np.ndarray | None = None,
+    fit_Ea_K_flags: np.ndarray | None = None,
+    fit_m_flags: np.ndarray | None = None,
     # 可逆反应参数
-    k0_rev_guess: np.ndarray = None,
-    ea_rev_guess: np.ndarray = None,
-    order_rev_guess: np.ndarray = None,
-    fit_k0_rev_flags: np.ndarray = None,
-    fit_ea_rev_flags: np.ndarray = None,
-    fit_order_rev_flags_matrix: np.ndarray = None,
+    k0_rev_guess: np.ndarray | None = None,
+    ea_rev_guess: np.ndarray | None = None,
+    order_rev_guess: np.ndarray | None = None,
+    fit_k0_rev_flags: np.ndarray | None = None,
+    fit_ea_rev_flags: np.ndarray | None = None,
+    fit_order_rev_flags_matrix: np.ndarray | None = None,
 ) -> dict:
     """
     从参数向量中解包所有参数。
@@ -263,9 +271,9 @@ def _build_bounds(
     order_min: float,
     order_max: float,
     # 朗缪尔-辛斯伍德（L-H）边界参数
-    fit_K0_ads_flags: np.ndarray = None,
-    fit_Ea_K_flags: np.ndarray = None,
-    fit_m_flags: np.ndarray = None,
+    fit_K0_ads_flags: np.ndarray | None = None,
+    fit_Ea_K_flags: np.ndarray | None = None,
+    fit_m_flags: np.ndarray | None = None,
     K0_ads_min: float = DEFAULT_K0_ADS_MIN,
     K0_ads_max: float = DEFAULT_K0_ADS_MAX,
     Ea_K_min: float = DEFAULT_EA_K_MIN_J_MOL,  # 允许负值（放热吸附）
@@ -273,9 +281,9 @@ def _build_bounds(
     m_min: float = DEFAULT_M_INHIBITION_MIN,
     m_max: float = DEFAULT_M_INHIBITION_MAX,
     # 可逆反应边界参数
-    fit_k0_rev_flags: np.ndarray = None,
-    fit_ea_rev_flags: np.ndarray = None,
-    fit_order_rev_flags_matrix: np.ndarray = None,
+    fit_k0_rev_flags: np.ndarray | None = None,
+    fit_ea_rev_flags: np.ndarray | None = None,
+    fit_order_rev_flags_matrix: np.ndarray | None = None,
     k0_rev_min: float = DEFAULT_K0_REV_MIN,
     k0_rev_max: float = DEFAULT_K0_REV_MAX,
     ea_rev_min: float = DEFAULT_EA_REV_MIN_J_MOL,
@@ -369,20 +377,20 @@ def _predict_outputs_for_row(
     solver_method: str,
     rtol: float,
     atol: float,
-    reactor_type: str = "PFR",
+    reactor_type: str = REACTOR_TYPE_PFR,
     kinetic_model: str = "power_law",
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     name_to_index: dict[str, int] | None = None,
     output_species_indices: list[int] | None = None,
     inlet_column_names: list[str] | None = None,
     model_eval_cache: dict | None = None,
-    stop_event=None,
+    stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
     """
@@ -411,7 +419,7 @@ def _predict_outputs_for_row(
                 "输出物种不在物种列表中（请检查物种名是否匹配）",
             )
 
-    if reactor_type == "PFR":
+    if reactor_type == REACTOR_TYPE_PFR:
         # 流动反应器（PFR）需要 V_m3, vdot_m3_s, F0_*
         reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
         if not np.isfinite(reactor_volume_m3):
@@ -512,13 +520,13 @@ def _predict_outputs_for_row(
         # 计算输出值
         output_values = np.zeros(len(output_species_list), dtype=float)
         for out_i, idx in enumerate(output_species_indices):
-            if output_mode == "Fout (mol/s)":
+            if output_mode == OUTPUT_MODE_FOUT:
                 output_values[out_i] = molar_flow_outlet[idx]
-            elif output_mode == "Cout (mol/m^3)":
+            elif output_mode == OUTPUT_MODE_COUT:
                 output_values[out_i] = molar_flow_outlet[idx] / max(
                     vdot_m3_s, EPSILON_FLOW_RATE
                 )
-            elif output_mode == "xout (mole fraction)":
+            elif output_mode == OUTPUT_MODE_XOUT:
                 # 摩尔组成 y_i = F_i / Σ F_j
                 total_flow = np.sum(molar_flow_outlet)
                 if total_flow < EPSILON_FLOW_RATE:
@@ -532,7 +540,7 @@ def _predict_outputs_for_row(
                     "未知输出模式",
                 )
 
-    elif reactor_type == "CSTR":
+    elif reactor_type == REACTOR_TYPE_CSTR:
         reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
         if not np.isfinite(reactor_volume_m3):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 V_m3"
@@ -614,11 +622,11 @@ def _predict_outputs_for_row(
 
         output_values = np.zeros(len(output_species_list), dtype=float)
         for out_i, idx in enumerate(output_species_indices):
-            if output_mode == "Cout (mol/m^3)":
+            if output_mode == OUTPUT_MODE_COUT:
                 output_values[out_i] = conc_outlet[idx]
-            elif output_mode == "Fout (mol/s)":
+            elif output_mode == OUTPUT_MODE_FOUT:
                 output_values[out_i] = float(vdot_m3_s) * conc_outlet[idx]
-            elif output_mode == "xout (mole fraction)":
+            elif output_mode == OUTPUT_MODE_XOUT:
                 # 摩尔组成 y_i = F_i / Σ F_j = C_i / Σ C_j (体积流量可约掉)
                 total_conc = np.sum(conc_outlet)
                 if total_conc < EPSILON_CONCENTRATION:
@@ -632,7 +640,7 @@ def _predict_outputs_for_row(
                     "未知输出模式",
                 )
 
-    elif reactor_type in ("BSTR", "Batch"):
+    elif reactor_type in (REACTOR_TYPE_BSTR, "Batch"):
         # 间歇釜（BSTR）需要 t_s, C0_*
         reaction_time_s = _to_float_or_nan(_row_get_value(row, "t_s", np.nan))
         if not np.isfinite(reaction_time_s):
@@ -709,7 +717,7 @@ def _predict_outputs_for_row(
         # 计算输出值
         output_values = np.zeros(len(output_species_list), dtype=float)
         for out_i, idx in enumerate(output_species_indices):
-            if output_mode == "Cout (mol/m^3)":
+            if output_mode == OUTPUT_MODE_COUT:
                 output_values[out_i] = conc_final[idx]
             else:
                 # 间歇釜（BSTR）不支持 Fout 模式

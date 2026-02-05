@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from . import fitting
-from .constants import DEFAULT_MAX_STEP_FRACTION
+from .constants import DEFAULT_MAX_STEP_FRACTION, REACTOR_TYPE_PFR
 
 
 def _clean_species_names(species_text: str) -> list[str]:
@@ -84,7 +84,7 @@ def _build_fit_comparison_long_table(
     output_species_indices = [
         species_name_to_index[name] for name in output_species_list
     ]
-    if reactor_type == "PFR":
+    if reactor_type == REACTOR_TYPE_PFR:
         inlet_column_names = (
             [f"C0_{name}_mol_m3" for name in species_names]
             if str(output_mode).startswith("C")

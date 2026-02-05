@@ -137,3 +137,33 @@ UI_ORDER_MATRIX_NUMBER_FORMAT = "%.3f"
 
 # rtol/atol 等“典型很小”的数值输入格式（固定科学计数）
 UI_TOLERANCE_FORMAT_STREAMLIT = "%.1e"
+
+# ========== 枚举/字符串常量（统一口径，避免硬编码分散） ==========
+# 说明：
+# - 这些字符串会出现在 UI 下拉框、配置导入导出、校验逻辑、结果展示等多个位置。
+# - 必须保持字符串值稳定，否则历史配置文件或旧数据模板可能无法兼容。
+
+# 反应器类型
+REACTOR_TYPE_PFR = "PFR"
+REACTOR_TYPE_CSTR = "CSTR"
+REACTOR_TYPE_BSTR = "BSTR"
+REACTOR_TYPES = [REACTOR_TYPE_PFR, REACTOR_TYPE_CSTR, REACTOR_TYPE_BSTR]
+
+# 动力学模型类型
+KINETIC_MODEL_POWER_LAW = "power_law"
+KINETIC_MODEL_LANGMUIR_HINSHELWOOD = "langmuir_hinshelwood"
+KINETIC_MODEL_REVERSIBLE = "reversible"
+KINETIC_MODELS = [
+    KINETIC_MODEL_POWER_LAW,
+    KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
+    KINETIC_MODEL_REVERSIBLE,
+]
+
+# 输出模式（拟合目标变量）
+OUTPUT_MODE_FOUT = "Fout (mol/s)"
+OUTPUT_MODE_COUT = "Cout (mol/m^3)"
+OUTPUT_MODE_XOUT = "xout (mole fraction)"
+
+# 根据反应器类型允许的输出模式（用于 UI 与配置校验）
+OUTPUT_MODES_FLOW = [OUTPUT_MODE_COUT, OUTPUT_MODE_FOUT, OUTPUT_MODE_XOUT]  # PFR/CSTR
+OUTPUT_MODES_BATCH = [OUTPUT_MODE_COUT]  # BSTR

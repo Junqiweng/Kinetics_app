@@ -26,3 +26,8 @@ Thumbs.db
 
 # 本地配置文件（自动恢复用）
 .last_config.json
+
+# 生成的示例/验证数据（test_data 脚本输出）
+test_data/orthogonal_design_data.csv
+test_data/validation_*.csv
+test_data/generation.log

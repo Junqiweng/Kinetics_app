@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import streamlit as st
 
-from .constants import DEFAULT_ATOL, DEFAULT_RTOL
+from .constants import (
+    DEFAULT_ATOL,
+    DEFAULT_RTOL,
+    KINETIC_MODELS,
+    OUTPUT_MODE_COUT,
+    OUTPUT_MODE_FOUT,
+    OUTPUT_MODES_BATCH,
+    OUTPUT_MODES_FLOW,
+    REACTOR_TYPES,
+    REACTOR_TYPE_BSTR,
+)
 
 
 def _apply_imported_config_to_widget_state(config: dict) -> None:
@@ -19,10 +29,10 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
     solver_method_cfg = str(config.get("solver_method", "")).strip()
 
     if reactor_type_cfg == "Batch":
-        reactor_type_cfg = "BSTR"
-    if reactor_type_cfg in ["PFR", "CSTR", "BSTR"]:
+        reactor_type_cfg = REACTOR_TYPE_BSTR
+    if reactor_type_cfg in REACTOR_TYPES:
         st.session_state["cfg_reactor_type"] = reactor_type_cfg
-    if kinetic_model_cfg in ["power_law", "langmuir_hinshelwood", "reversible"]:
+    if kinetic_model_cfg in KINETIC_MODELS:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
     if solver_method_cfg in ["RK45", "BDF", "Radau"]:
         st.session_state["cfg_solver_method"] = solver_method_cfg
@@ -40,18 +50,22 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_n_reactions"] = int(config.get("n_reactions", 1))
 
     output_mode_cfg = str(config.get("output_mode", "")).strip()
-    if reactor_type_cfg == "BSTR":
-        allowed_output_modes = ["Cout (mol/m^3)"]
-    else:
-        allowed_output_modes = [
-            "Fout (mol/s)",
-            "Cout (mol/m^3)",
-            "xout (mole fraction)",
-        ]
+    allowed_output_modes = (
+        OUTPUT_MODES_BATCH
+        if reactor_type_cfg == REACTOR_TYPE_BSTR
+        else OUTPUT_MODES_FLOW
+    )
     if output_mode_cfg in allowed_output_modes:
         st.session_state["cfg_output_mode"] = output_mode_cfg
     elif allowed_output_modes:
-        st.session_state["cfg_output_mode"] = allowed_output_modes[0]
+        # 兼容旧配置：若未提供 output_mode 或提供了非法值，则回退到历史默认值
+        # - 流动反应器（PFR/CSTR）：默认 Fout
+        # - 间歇釜（BSTR）：默认 Cout
+        st.session_state["cfg_output_mode"] = (
+            OUTPUT_MODE_COUT
+            if reactor_type_cfg == REACTOR_TYPE_BSTR
+            else OUTPUT_MODE_FOUT
+        )
 
     output_species_list_cfg = config.get("output_species_list", None)
     if isinstance(output_species_list_cfg, list):

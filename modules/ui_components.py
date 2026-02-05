@@ -86,7 +86,7 @@ def smart_number_input(
     """
     智能 number_input：
     - 当数值很小/很大时（阈值在 constants.py 统一配置），用科学计数显示（避免超长数字）。
-    - 其它情况不传 format，使用 Streamlit 默认显示（更像“常规数字”，不会强制补 0）。
+    - 其它情况使用“常规数字”固定小数位格式（小数位由 constants.py 控制），避免极小值显示为 0.00。
 
     说明：判断优先使用当前 session_state 中的值（用户正在编辑时更符合直觉）。
     """

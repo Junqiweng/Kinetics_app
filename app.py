@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import threading
+import time
 
 import numpy as np
 import pandas as pd
@@ -66,8 +67,21 @@ from modules.constants import (
     UI_PROFILE_POINTS_MIN,
     UI_PROFILE_POINTS_STEP,
     UI_TOLERANCE_FORMAT_STREAMLIT,
+    KINETIC_MODELS,
+    KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
+    KINETIC_MODEL_REVERSIBLE,
+    OUTPUT_MODE_COUT,
+    OUTPUT_MODE_FOUT,
+    OUTPUT_MODE_XOUT,
+    OUTPUT_MODES_BATCH,
+    OUTPUT_MODES_FLOW,
+    REACTOR_TYPES,
+    REACTOR_TYPE_BSTR,
+    REACTOR_TYPE_CSTR,
+    REACTOR_TYPE_PFR,
 )
 from modules.app_config_state import (
+    _apply_imported_config_to_widget_state,
     _clear_config_related_state,
     _warn_once,
 )
@@ -311,8 +325,6 @@ def main():
 
         # 等待一小会儿，让后台任务有机会退出
         # 这样下面的 fitting_future.done() 就能立即检测到，无需第二次 rerun
-        import time
-
         for _ in range(FITTING_STOP_WAIT_TRIES):
             if fitting_future and fitting_future.done():
                 break
@@ -389,6 +401,8 @@ def main():
         else:
             # 先清空旧的控件状态，防止与新导入的配置冲突导致 Streamlit 告警
             _clear_config_related_state()
+            # 将导入配置写入 cfg_*，确保 widgets 首次创建时就使用导入值
+            _apply_imported_config_to_widget_state(pending_cfg)
             st.session_state["imported_config"] = pending_cfg
             # 保存到本地文件系统
             ok, message = config_manager.auto_save_config(pending_cfg, session_id)
@@ -410,6 +424,7 @@ def main():
             if saved_config is not None:
                 is_valid, error_message = config_manager.validate_config(saved_config)
                 if is_valid:
+                    _apply_imported_config_to_widget_state(saved_config)
                     st.session_state["imported_config"] = saved_config
                 else:
                     st.warning(f"自动恢复配置无效，已忽略：{error_message}")
@@ -421,6 +436,7 @@ def main():
                         browser_config
                     )
                     if is_valid:
+                        _apply_imported_config_to_widget_state(browser_config)
                         st.session_state["imported_config"] = browser_config
                     else:
                         pass  # 静默忽略无效的浏览器缓存
@@ -441,13 +457,24 @@ def main():
         st.warning(browser_cfg_error + "（已停止自动恢复；如需重试可在侧边栏执行“重置为默认”或清除浏览器缓存配置。）")
 
     def get_cfg(key, default):
-        if "imported_config" in st.session_state:
-            return st.session_state["imported_config"].get(key, default)
+        """
+        读取当前配置的统一入口（优先读取当前 UI 的 cfg_* 状态，其次读取 imported_config）。
+
+        说明：
+        - Streamlit widgets 使用 key="cfg_xxx" 持久化当前值；
+        - imported_config 仅用于“初始默认值/导入后恢复”。
+        """
+        cfg_key = f"cfg_{str(key).strip()}"
+        if cfg_key in st.session_state:
+            return st.session_state.get(cfg_key, default)
+        imported_cfg = st.session_state.get("imported_config", None)
+        if isinstance(imported_cfg, dict):
+            return imported_cfg.get(key, default)
         return default
 
     # 初始化“停止拟合”标志与拟合状态
     if "fitting_stopped" not in st.session_state:
-        st.session_state.fitting_stopped = False
+        st.session_state["fitting_stopped"] = False
     if "fitting_running" not in st.session_state:
         st.session_state["fitting_running"] = False
     if "fitting_future" not in st.session_state:
@@ -530,12 +557,12 @@ def main():
                 '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
             st.markdown("#### 核心模型")
-            reactor_type_default = str(get_cfg("reactor_type", "PFR")).strip()
+            reactor_type_default = str(get_cfg("reactor_type", REACTOR_TYPE_PFR)).strip()
             if reactor_type_default == "Batch":
-                reactor_type_default = "BSTR"
-            reactor_type_options = ["PFR", "CSTR", "BSTR"]
+                reactor_type_default = REACTOR_TYPE_BSTR
+            reactor_type_options = list(REACTOR_TYPES)
             if reactor_type_default not in reactor_type_options:
-                reactor_type_default = "PFR"
+                reactor_type_default = REACTOR_TYPE_PFR
             reactor_type = st.selectbox(
                 "反应器",
                 reactor_type_options,
@@ -543,12 +570,13 @@ def main():
                 key="cfg_reactor_type",
                 disabled=global_disabled,
             )
+            kinetic_model_default = str(get_cfg("kinetic_model", KINETIC_MODELS[0]))
+            if kinetic_model_default not in KINETIC_MODELS:
+                kinetic_model_default = KINETIC_MODELS[0]
             kinetic_model = st.selectbox(
                 "动力学",
-                ["power_law", "langmuir_hinshelwood", "reversible"],
-                index=["power_law", "langmuir_hinshelwood", "reversible"].index(
-                    get_cfg("kinetic_model", "power_law")
-                ),
+                KINETIC_MODELS,
+                index=KINETIC_MODELS.index(kinetic_model_default),
                 key="cfg_kinetic_model",
                 disabled=global_disabled,
             )
@@ -617,9 +645,9 @@ def main():
 
     # ========= 主内容区 =========
     st.title(f"{reactor_type} 反应动力学参数拟合")
-    if reactor_type == "PFR":
+    if reactor_type == REACTOR_TYPE_PFR:
         st.caption(r"模型：$\frac{dF_i}{dV} = \sum_j \nu_{ij} r_j$")
-    elif reactor_type == "CSTR":
+    elif reactor_type == REACTOR_TYPE_CSTR:
         st.caption(r"模型：$F_{i,0} - F_i + V \sum_j \nu_{ij} r_j = 0$")
     else:
         st.caption(r"模型：$\frac{dC_i}{dt} = \sum_j \nu_{ij} r_j$")
@@ -655,7 +683,7 @@ def main():
         nu_default = _build_default_nu_table(species_names, n_reactions)
         # 若已导入配置，则优先应用其中的化学计量数
         imp_stoich = get_cfg("stoich_matrix", None)
-        if imp_stoich:
+        if imp_stoich is not None:
             try:
                 arr = np.asarray(imp_stoich, dtype=float)
                 if arr.ndim != 2:
@@ -693,26 +721,29 @@ def main():
         with col_p1:
             st.caption("速率常数 k0 & 活化能 Ea")
             # 获取默认值的逻辑
-            k0_def = (
-                np.array(get_cfg("k0_guess", [1e3] * n_reactions))
-                if get_cfg("k0_guess", None)
-                else np.full(n_reactions, 1e3)
-            )
-            ea_def = (
-                np.array(get_cfg("ea_guess_J_mol", [8e4] * n_reactions))
-                if get_cfg("ea_guess_J_mol", None)
-                else np.full(n_reactions, 8e4)
-            )
-            fit_k0_def = (
-                np.array(get_cfg("fit_k0_flags", [True] * n_reactions))
-                if get_cfg("fit_k0_flags", None)
-                else np.full(n_reactions, True)
-            )
-            fit_ea_def = (
-                np.array(get_cfg("fit_ea_flags", [True] * n_reactions))
-                if get_cfg("fit_ea_flags", None)
-                else np.full(n_reactions, True)
-            )
+            k0_guess_cfg = get_cfg("k0_guess", None)
+            if k0_guess_cfg is None:
+                k0_def = np.full(n_reactions, 1e3, dtype=float)
+            else:
+                k0_def = np.asarray(k0_guess_cfg, dtype=float)
+
+            ea_guess_cfg = get_cfg("ea_guess_J_mol", None)
+            if ea_guess_cfg is None:
+                ea_def = np.full(n_reactions, 8e4, dtype=float)
+            else:
+                ea_def = np.asarray(ea_guess_cfg, dtype=float)
+
+            fit_k0_cfg = get_cfg("fit_k0_flags", None)
+            if fit_k0_cfg is None:
+                fit_k0_def = np.full(n_reactions, True, dtype=bool)
+            else:
+                fit_k0_def = np.asarray(fit_k0_cfg, dtype=bool)
+
+            fit_ea_cfg = get_cfg("fit_ea_flags", None)
+            if fit_ea_cfg is None:
+                fit_ea_def = np.full(n_reactions, True, dtype=bool)
+            else:
+                fit_ea_def = np.asarray(fit_ea_cfg, dtype=bool)
 
             k0_guess, ea_guess_J_mol, fit_k0_flags, fit_ea_flags = (
                 ui_comp.render_param_table(
@@ -732,12 +763,9 @@ def main():
         with col_p2:
             st.caption("反应级数 n")
             # 反应级数默认值逻辑
+            order_guess_cfg = get_cfg("order_guess", None)
             order_data = (
-                np.array(
-                    get_cfg("order_guess", np.zeros((n_reactions, len(species_names))))
-                )
-                if get_cfg("order_guess", None)
-                else None
+                None if order_guess_cfg is None else np.asarray(order_guess_cfg, dtype=float)
             )
             if order_data is None:
                 # 简单默认规则
@@ -745,15 +773,9 @@ def main():
                 if len(species_names) > 0:
                     order_data[:, 0] = 1.0
 
+            fit_order_cfg = get_cfg("fit_order_flags_matrix", None)
             fit_order_def = (
-                np.array(
-                    get_cfg(
-                        "fit_order_flags_matrix",
-                        np.zeros((n_reactions, len(species_names)), dtype=bool),
-                    )
-                )
-                if get_cfg("fit_order_flags_matrix", None)
-                else None
+                None if fit_order_cfg is None else np.asarray(fit_order_cfg, dtype=bool)
             )
 
             order_guess, fit_order_flags_matrix = ui_comp.render_order_table(
@@ -768,36 +790,35 @@ def main():
         K0_ads, Ea_K_J_mol, fit_K0_ads_flags, fit_Ea_K_flags = None, None, None, None
         m_inhibition, fit_m_flags = None, None
 
-        if kinetic_model == "langmuir_hinshelwood":
+        if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             with st.expander("Langmuir-Hinshelwood (L-H) 参数", expanded=True):
                 col_lh1, col_lh2 = st.columns(2)
                 with col_lh1:
                     st.caption("吸附常数 K (每物种)")
                     # 默认值
-                    K0_def = (
-                        np.array(get_cfg("K0_ads", [1.0] * len(species_names)))
-                        if get_cfg("K0_ads", None)
-                        else np.ones(len(species_names))
-                    )
-                    EaK_def = (
-                        np.array(get_cfg("Ea_K_J_mol", [-2e4] * len(species_names)))
-                        if get_cfg("Ea_K_J_mol", None)
-                        else np.full(len(species_names), -2e4)
-                    )
-                    fit_K0_def = (
-                        np.array(
-                            get_cfg("fit_K0_ads_flags", [False] * len(species_names))
-                        )
-                        if get_cfg("fit_K0_ads_flags", None)
-                        else np.full(len(species_names), False)
-                    )
-                    fit_EaK_def = (
-                        np.array(
-                            get_cfg("fit_Ea_K_flags", [False] * len(species_names))
-                        )
-                        if get_cfg("fit_Ea_K_flags", None)
-                        else np.full(len(species_names), False)
-                    )
+                    K0_ads_cfg = get_cfg("K0_ads", None)
+                    if K0_ads_cfg is None:
+                        K0_def = np.ones(len(species_names), dtype=float)
+                    else:
+                        K0_def = np.asarray(K0_ads_cfg, dtype=float)
+
+                    Ea_K_cfg = get_cfg("Ea_K_J_mol", None)
+                    if Ea_K_cfg is None:
+                        EaK_def = np.full(len(species_names), -2e4, dtype=float)
+                    else:
+                        EaK_def = np.asarray(Ea_K_cfg, dtype=float)
+
+                    fit_K0_ads_cfg = get_cfg("fit_K0_ads_flags", None)
+                    if fit_K0_ads_cfg is None:
+                        fit_K0_def = np.full(len(species_names), False, dtype=bool)
+                    else:
+                        fit_K0_def = np.asarray(fit_K0_ads_cfg, dtype=bool)
+
+                    fit_Ea_K_cfg = get_cfg("fit_Ea_K_flags", None)
+                    if fit_Ea_K_cfg is None:
+                        fit_EaK_def = np.full(len(species_names), False, dtype=bool)
+                    else:
+                        fit_EaK_def = np.asarray(fit_Ea_K_cfg, dtype=bool)
 
                     K0_ads, Ea_K_J_mol, fit_K0_ads_flags, fit_Ea_K_flags = (
                         ui_comp.render_param_table(
@@ -815,16 +836,17 @@ def main():
                     )
                 with col_lh2:
                     st.caption("抑制指数 m (每反应)")
-                    m_def = (
-                        np.array(get_cfg("m_inhibition", [1.0] * n_reactions))
-                        if get_cfg("m_inhibition", None)
-                        else np.ones(n_reactions)
-                    )
-                    fit_m_def = (
-                        np.array(get_cfg("fit_m_flags", [False] * n_reactions))
-                        if get_cfg("fit_m_flags", None)
-                        else np.full(n_reactions, False)
-                    )
+                    m_cfg = get_cfg("m_inhibition", None)
+                    if m_cfg is None:
+                        m_def = np.ones(n_reactions, dtype=float)
+                    else:
+                        m_def = np.asarray(m_cfg, dtype=float)
+
+                    fit_m_cfg = get_cfg("fit_m_flags", None)
+                    if fit_m_cfg is None:
+                        fit_m_def = np.full(n_reactions, False, dtype=bool)
+                    else:
+                        fit_m_def = np.asarray(fit_m_cfg, dtype=bool)
 
                     m_df = pd.DataFrame(
                         {"m": m_def, "Fit_m": fit_m_def},
@@ -857,31 +879,34 @@ def main():
         )
         order_rev, fit_order_rev_flags_matrix = None, None
 
-        if kinetic_model == "reversible":
+        if kinetic_model == KINETIC_MODEL_REVERSIBLE:
             with st.expander("可逆反应 (逆反应) 参数", expanded=True):
                 col_rev1, col_rev2 = st.columns(2)
                 with col_rev1:
                     st.caption("逆反应 k0⁻ & Ea⁻")
-                    k0r_def = (
-                        np.array(get_cfg("k0_rev", [1e2] * n_reactions))
-                        if get_cfg("k0_rev", None)
-                        else np.full(n_reactions, 1e2)
-                    )
-                    ear_def = (
-                        np.array(get_cfg("ea_rev_J_mol", [9e4] * n_reactions))
-                        if get_cfg("ea_rev_J_mol", None)
-                        else np.full(n_reactions, 9e4)
-                    )
-                    fit_k0r_def = (
-                        np.array(get_cfg("fit_k0_rev_flags", [False] * n_reactions))
-                        if get_cfg("fit_k0_rev_flags", None)
-                        else np.full(n_reactions, False)
-                    )
-                    fit_ear_def = (
-                        np.array(get_cfg("fit_ea_rev_flags", [False] * n_reactions))
-                        if get_cfg("fit_ea_rev_flags", None)
-                        else np.full(n_reactions, False)
-                    )
+                    k0_rev_cfg = get_cfg("k0_rev", None)
+                    if k0_rev_cfg is None:
+                        k0r_def = np.full(n_reactions, 1e2, dtype=float)
+                    else:
+                        k0r_def = np.asarray(k0_rev_cfg, dtype=float)
+
+                    ea_rev_cfg = get_cfg("ea_rev_J_mol", None)
+                    if ea_rev_cfg is None:
+                        ear_def = np.full(n_reactions, 9e4, dtype=float)
+                    else:
+                        ear_def = np.asarray(ea_rev_cfg, dtype=float)
+
+                    fit_k0_rev_cfg = get_cfg("fit_k0_rev_flags", None)
+                    if fit_k0_rev_cfg is None:
+                        fit_k0r_def = np.full(n_reactions, False, dtype=bool)
+                    else:
+                        fit_k0r_def = np.asarray(fit_k0_rev_cfg, dtype=bool)
+
+                    fit_ea_rev_cfg = get_cfg("fit_ea_rev_flags", None)
+                    if fit_ea_rev_cfg is None:
+                        fit_ear_def = np.full(n_reactions, False, dtype=bool)
+                    else:
+                        fit_ear_def = np.asarray(fit_ea_rev_cfg, dtype=bool)
 
                     k0_rev, ea_rev_J_mol, fit_k0_rev_flags, fit_ea_rev_flags = (
                         ui_comp.render_param_table(
@@ -899,24 +924,18 @@ def main():
                     )
                 with col_rev2:
                     st.caption("逆反应级数 n⁻")
+                    order_rev_cfg = get_cfg("order_rev", None)
                     ordr_def = (
-                        np.array(
-                            get_cfg(
-                                "order_rev", np.zeros((n_reactions, len(species_names)))
-                            )
-                        )
-                        if get_cfg("order_rev", None)
-                        else None
+                        None
+                        if order_rev_cfg is None
+                        else np.asarray(order_rev_cfg, dtype=float)
                     )
+
+                    fit_order_rev_cfg = get_cfg("fit_order_rev_flags_matrix", None)
                     fit_ordr_def = (
-                        np.array(
-                            get_cfg(
-                                "fit_order_rev_flags_matrix",
-                                np.zeros((n_reactions, len(species_names)), dtype=bool),
-                            )
-                        )
-                        if get_cfg("fit_order_rev_flags_matrix", None)
-                        else None
+                        None
+                        if fit_order_rev_cfg is None
+                        else np.asarray(fit_order_rev_cfg, dtype=bool)
                     )
 
                     order_rev, fit_order_rev_flags_matrix = ui_comp.render_order_table(
@@ -938,7 +957,7 @@ def main():
 
     # ---------------- 选项卡 2：数据 ----------------
     data_df = st.session_state.get("data_df_cached", None)
-    output_mode = "Cout (mol/m^3)"
+    output_mode = OUTPUT_MODE_COUT
     output_species_list = []
 
     with tab_data:
@@ -946,9 +965,9 @@ def main():
         col_target1, col_target2 = st.columns(2)
         with col_target1:
             opts = (
-                ["Cout (mol/m^3)", "Fout (mol/s)", "xout (mole fraction)"]
-                if reactor_type in ("PFR", "CSTR")
-                else ["Cout (mol/m^3)"]
+                OUTPUT_MODES_FLOW
+                if reactor_type in (REACTOR_TYPE_PFR, REACTOR_TYPE_CSTR)
+                else OUTPUT_MODES_BATCH
             )
             if ("cfg_output_mode" in st.session_state) and (
                 str(st.session_state["cfg_output_mode"]) not in opts
@@ -1017,7 +1036,7 @@ def main():
                 meas_cols = [f"Cout_{s}_mol_m3" for s in species_names]
 
             # 根据反应器类型决定输入条件列
-            if reactor_type == "PFR":
+            if reactor_type == REACTOR_TYPE_PFR:
                 # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
                 inlet_cols = (
                     [f"C0_{s}_mol_m3" for s in species_names]
@@ -1029,7 +1048,7 @@ def main():
                     + inlet_cols
                     + meas_cols
                 )
-            elif reactor_type == "CSTR":
+            elif reactor_type == REACTOR_TYPE_CSTR:
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
                     + [f"C0_{s}_mol_m3" for s in species_names]
@@ -1313,7 +1332,7 @@ def main():
             K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
             Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
             Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
-            if kinetic_model == "langmuir_hinshelwood":
+            if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
                 st.markdown("**1.2 L-H 边界设置**")
                 col_lh_b1, col_lh_b2 = st.columns(2)
                 with col_lh_b1:
@@ -1350,7 +1369,7 @@ def main():
             )
             order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
             order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
-            if kinetic_model == "reversible":
+            if kinetic_model == KINETIC_MODEL_REVERSIBLE:
                 st.markdown("**1.3 可逆反应边界设置（逆反应）**")
                 col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
                 with col_rev_b1:
@@ -1965,7 +1984,7 @@ def main():
                     height=UI_PARAM_TABLE_HEIGHT_PX,
                 )
 
-            if kinetic_model_fit == "langmuir_hinshelwood":
+            if kinetic_model_fit == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
                 st.markdown("#### Langmuir-Hinshelwood 参数")
                 col_lh1, col_lh2 = st.columns([1, 1])
                 with col_lh1:
@@ -1997,7 +2016,7 @@ def main():
                             height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
 
-            if kinetic_model_fit == "reversible":
+            if kinetic_model_fit == KINETIC_MODEL_REVERSIBLE:
                 st.markdown("#### 可逆反应参数（逆反应）")
                 if (
                     fitted_params.get("k0_rev", None) is not None
@@ -2279,7 +2298,7 @@ def main():
                 )
 
                 row_sel = df_fit.loc[selected_row_index]
-                if reactor_type_fit == "PFR":
+                if reactor_type_fit == REACTOR_TYPE_PFR:
                     profile_kind = st.radio(
                         "剖面变量",
                         ["F (mol/s)", "C (mol/m^3)"],
@@ -2391,7 +2410,7 @@ def main():
                         )
                         plt.close(fig_pf)
 
-                elif reactor_type_fit == "CSTR":
+                elif reactor_type_fit == REACTOR_TYPE_CSTR:
                     profile_kind = "C (mol/m^3)"
                     reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
                     temperature_K = float(row_sel.get("T_K", np.nan))

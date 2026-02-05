@@ -3,19 +3,25 @@
 import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
-from scipy.optimize import fsolve
 import os
 import sys
 
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_LOG_PATH = os.path.join(_SCRIPT_DIR, "generation.log")
+
+
 def log(msg):
-    with open("generation.log", "a", encoding="utf-8") as f:
+    with open(_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(msg + "\n")
     print(msg)
 
 
 # 确保 stdout 及时刷新（便于在终端实时看到进度）
-sys.stdout.reconfigure(line_buffering=True)
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 log("Script started...")
 
 # ==========================================
@@ -136,7 +142,7 @@ def generate_pfr_data():
             data.append(row)
 
     df = pd.DataFrame(data)
-    df.to_csv("test_data/validation_PFR_Mixed.csv", index=False)
+    df.to_csv(os.path.join(_SCRIPT_DIR, "validation_PFR_Mixed.csv"), index=False)
     log("  -> 已保存 validation_PFR_Mixed.csv, 数据点数: " + str(len(df)))
 
 
@@ -220,7 +226,7 @@ def generate_pfr_lh_data():
             F_out = sol.y[:, -1]
 
             # 添加 1% 随机噪声
-            noise = 1 + 0.00000001 * np.random.randn(5)
+            noise = 1 + 0.01 * np.random.randn(5)
             F_out_noisy = F_out * noise
             F_out_noisy = np.maximum(F_out_noisy, 0)  # 物理约束
 
@@ -243,7 +249,7 @@ def generate_pfr_lh_data():
             data.append(row)
 
     df = pd.DataFrame(data)
-    df.to_csv("test_data/validation_PFR_LH.csv", index=False)
+    df.to_csv(os.path.join(_SCRIPT_DIR, "validation_PFR_LH.csv"), index=False)
     log("  -> 已保存 validation_PFR_LH.csv, 数据点数: " + str(len(df)))
 
 
@@ -330,7 +336,7 @@ def generate_batch_data():
             data.append(row)
 
     df = pd.DataFrame(data)
-    df.to_csv("test_data/validation_Batch_Series.csv", index=False)
+    df.to_csv(os.path.join(_SCRIPT_DIR, "validation_Batch_Series.csv"), index=False)
     log("  -> 已保存 validation_Batch_Series.csv, 数据点数: " + str(len(df)))
 
 

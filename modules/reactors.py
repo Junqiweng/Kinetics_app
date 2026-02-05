@@ -18,6 +18,9 @@ from .constants import (
     DEFAULT_PROFILE_N_POINTS,
     EPSILON_DENOMINATOR,
     EPSILON_FLOW_RATE,
+    KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
+    KINETIC_MODEL_POWER_LAW,
+    KINETIC_MODEL_REVERSIBLE,
 )
 from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
@@ -57,14 +60,14 @@ def integrate_pfr_molar_flows(
     solver_method: str,
     rtol: float,
     atol: float,
-    kinetic_model: str = "power_law",
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
@@ -119,7 +122,7 @@ def integrate_pfr_molar_flows(
             vdot_m3_s, EPSILON_FLOW_RATE
         )
 
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             rate_vector = calc_rate_vector_power_law(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -127,7 +130,7 @@ def integrate_pfr_molar_flows(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        elif kinetic_model == "langmuir_hinshelwood":
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             rate_vector = calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -142,7 +145,7 @@ def integrate_pfr_molar_flows(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        elif kinetic_model == "reversible":
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
             rate_vector = calc_rate_vector_reversible(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -204,14 +207,14 @@ def integrate_batch_reactor(
     solver_method: str,
     rtol: float,
     atol: float,
-    kinetic_model: str = "power_law",
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, bool, str]:
@@ -261,7 +264,7 @@ def integrate_batch_reactor(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             rate_vector = calc_rate_vector_power_law(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -269,7 +272,7 @@ def integrate_batch_reactor(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        elif kinetic_model == "langmuir_hinshelwood":
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             rate_vector = calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -284,7 +287,7 @@ def integrate_batch_reactor(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        elif kinetic_model == "reversible":
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
             rate_vector = calc_rate_vector_reversible(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -344,13 +347,13 @@ def solve_cstr_steady_state_concentrations(
     k0: np.ndarray,
     ea_J_mol: np.ndarray,
     reaction_order_matrix: np.ndarray,
-    kinetic_model: str = "power_law",
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     max_nfev: int = DEFAULT_CSTR_STEADY_MAX_NFEV,
     xtol: float = DEFAULT_CSTR_STEADY_XTOL,
     ftol: float = DEFAULT_CSTR_STEADY_FTOL,
@@ -422,7 +425,7 @@ def solve_cstr_steady_state_concentrations(
 
     def _rate_vector(conc_mol_m3: np.ndarray) -> np.ndarray:
         conc_safe = safe_nonnegative(conc_mol_m3)
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             return calc_rate_vector_power_law(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -430,7 +433,7 @@ def solve_cstr_steady_state_concentrations(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        if kinetic_model == "langmuir_hinshelwood":
+        if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             return calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -445,7 +448,7 @@ def solve_cstr_steady_state_concentrations(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        if kinetic_model == "reversible":
+        if kinetic_model == KINETIC_MODEL_REVERSIBLE:
             return calc_rate_vector_reversible(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -524,14 +527,14 @@ def integrate_cstr_profile(
     rtol: float,
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
-    kinetic_model: str = "power_law",
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, bool, str]:
@@ -646,7 +649,7 @@ def integrate_cstr_profile(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             rate_vector = calc_rate_vector_power_law(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -654,7 +657,7 @@ def integrate_cstr_profile(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        elif kinetic_model == "langmuir_hinshelwood":
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             rate_vector = calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -669,7 +672,7 @@ def integrate_cstr_profile(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        elif kinetic_model == "reversible":
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
             rate_vector = calc_rate_vector_reversible(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -748,14 +751,14 @@ def integrate_pfr_profile(
     rtol: float,
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
-    kinetic_model: str = "power_law",
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, bool, str]:
@@ -854,7 +857,7 @@ def integrate_pfr_profile(
             vdot_m3_s, EPSILON_FLOW_RATE
         )
 
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             rate_vector = calc_rate_vector_power_law(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -862,7 +865,7 @@ def integrate_pfr_profile(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        elif kinetic_model == "langmuir_hinshelwood":
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             rate_vector = calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -877,7 +880,7 @@ def integrate_pfr_profile(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        elif kinetic_model == "reversible":
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
             rate_vector = calc_rate_vector_reversible(
                 conc_mol_m3=conc_mol_m3,
                 temperature_K=temperature_K,
@@ -952,14 +955,14 @@ def integrate_batch_profile(
     rtol: float,
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
-    kinetic_model: str = "power_law",
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
-    K0_ads: np.ndarray = None,
-    Ea_K_J_mol: np.ndarray = None,
-    m_inhibition: np.ndarray = None,
-    k0_rev: np.ndarray = None,
-    ea_rev_J_mol: np.ndarray = None,
-    order_rev_matrix: np.ndarray = None,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
     stop_event: threading.Event | None = None,
     max_wall_time_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, bool, str]:
@@ -1039,7 +1042,7 @@ def integrate_batch_profile(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == "power_law":
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
             rate_vector = calc_rate_vector_power_law(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -1047,7 +1050,7 @@ def integrate_batch_profile(
                 ea_J_mol=ea_J_mol,
                 reaction_order_matrix=reaction_order_matrix,
             )
-        elif kinetic_model == "langmuir_hinshelwood":
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             rate_vector = calc_rate_vector_langmuir_hinshelwood(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
@@ -1062,7 +1065,7 @@ def integrate_batch_profile(
                     m_inhibition if m_inhibition is not None else np.ones(k0.size)
                 ),
             )
-        elif kinetic_model == "reversible":
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
             rate_vector = calc_rate_vector_reversible(
                 conc_mol_m3=conc_safe,
                 temperature_K=temperature_K,
