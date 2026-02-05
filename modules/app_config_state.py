@@ -12,8 +12,11 @@ from .constants import (
     OUTPUT_MODE_FOUT,
     OUTPUT_MODES_BATCH,
     OUTPUT_MODES_FLOW,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     REACTOR_TYPES,
     REACTOR_TYPE_BSTR,
+    REACTOR_TYPE_PFR,
 )
 
 
@@ -32,6 +35,17 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         reactor_type_cfg = REACTOR_TYPE_BSTR
     if reactor_type_cfg in REACTOR_TYPES:
         st.session_state["cfg_reactor_type"] = reactor_type_cfg
+
+    # PFR 流动模型（仅 PFR 时显示控件；但可以提前写入 session_state 以便用户切回 PFR）
+    pfr_flow_model_cfg = str(config.get("pfr_flow_model", "")).strip()
+    if pfr_flow_model_cfg in (
+        PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+        PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    ):
+        st.session_state["cfg_pfr_flow_model"] = pfr_flow_model_cfg
+    elif reactor_type_cfg == REACTOR_TYPE_PFR:
+        # 若导入配置未提供该键，则回退到默认（确保控件有稳定值）
+        st.session_state["cfg_pfr_flow_model"] = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
     if kinetic_model_cfg in KINETIC_MODELS:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
     if solver_method_cfg in ["RK45", "BDF", "Radau"]:

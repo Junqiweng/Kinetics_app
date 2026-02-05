@@ -42,6 +42,8 @@ from .constants import (
     DEFAULT_ORDER_REV_MIN,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     PERSIST_DIR_NAME,
     KINETIC_MODELS,
     KINETIC_MODEL_POWER_LAW,
@@ -122,6 +124,7 @@ def _convert_from_serializable(obj: Any) -> Any:
 def collect_config(
     # --- 基础设置 ---
     reactor_type: str,
+    pfr_flow_model: str,
     kinetic_model: str,
     solver_method: str,
     rtol: float,
@@ -200,6 +203,7 @@ def collect_config(
         "version": "1.0",
         # 基础设置
         "reactor_type": reactor_type,
+        "pfr_flow_model": str(pfr_flow_model).strip() or PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": kinetic_model,
         "solver_method": solver_method,
         "rtol": rtol,
@@ -348,6 +352,7 @@ def get_default_config() -> dict:
         "version": "1.0",
         # 基础设置
         "reactor_type": REACTOR_TYPE_PFR,
+        "pfr_flow_model": PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": KINETIC_MODEL_POWER_LAW,
         "solver_method": "RK45",
         "rtol": DEFAULT_RTOL,
@@ -450,6 +455,15 @@ def validate_config(config: dict) -> tuple[bool, str]:
 
     if reactor_type not in REACTOR_TYPES:
         return False, f"无效的反应器类型：{reactor_type}"
+
+    # 可选项：PFR 流动模型（仅对 PFR 生效；但为了配置一致性，允许在任意 reactor_type 下保存/校验）
+    if "pfr_flow_model" in config:
+        pfr_flow_model = str(config.get("pfr_flow_model", "")).strip()
+        if pfr_flow_model not in (
+            PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+            PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+        ):
+            return False, f"无效的 pfr_flow_model：{pfr_flow_model}"
 
     if config["kinetic_model"] not in KINETIC_MODELS:
         return False, f"无效的动力学模型：{config['kinetic_model']}"

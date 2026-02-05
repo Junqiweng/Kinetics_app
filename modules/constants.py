@@ -149,6 +149,13 @@ REACTOR_TYPE_CSTR = "CSTR"
 REACTOR_TYPE_BSTR = "BSTR"
 REACTOR_TYPES = [REACTOR_TYPE_PFR, REACTOR_TYPE_CSTR, REACTOR_TYPE_BSTR]
 
+# PFR 流动模型/相态（仅影响“由摩尔流量 -> 浓度”的换算方式）
+# - liquid_const_vdot: 液相近似（或体积流量可视作常数的场景），沿程 vdot 不变
+# - gas_ideal_const_p: 气相理想气体、等温、恒压（不考虑压降），沿程用 y_i·P/(R·T) 计算浓度
+PFR_FLOW_MODEL_LIQUID_CONST_VDOT = "liquid_const_vdot"
+PFR_FLOW_MODEL_GAS_IDEAL_CONST_P = "gas_ideal_const_p"
+PFR_FLOW_MODELS = [PFR_FLOW_MODEL_LIQUID_CONST_VDOT, PFR_FLOW_MODEL_GAS_IDEAL_CONST_P]
+
 # 动力学模型类型
 KINETIC_MODEL_POWER_LAW = "power_law"
 KINETIC_MODEL_LANGMUIR_HINSHELWOOD = "langmuir_hinshelwood"

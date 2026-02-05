@@ -21,6 +21,7 @@ from .constants import (
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
     KINETIC_MODEL_POWER_LAW,
     KINETIC_MODEL_REVERSIBLE,
+    R_GAS_J_MOL_K,
 )
 from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
@@ -186,6 +187,170 @@ def integrate_pfr_molar_flows(
             max_step=max_step_value,
         )
     except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+        return molar_flow_inlet_mol_s.copy(), False, f"solve_ivp异常: {exc}"
+
+    if not solution.success:
+        message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
+        return molar_flow_inlet_mol_s.copy(), False, str(message)
+
+    molar_flow_outlet = solution.y[:, -1]
+    return molar_flow_outlet, True, "OK"
+
+
+def integrate_pfr_molar_flows_gas_ideal_const_p(
+    reactor_volume_m3: float,
+    temperature_K: float,
+    pressure_Pa: float,
+    molar_flow_inlet_mol_s: np.ndarray,
+    stoich_matrix: np.ndarray,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    reaction_order_matrix: np.ndarray,
+    solver_method: str,
+    rtol: float,
+    atol: float,
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
+    stop_event: threading.Event | None = None,
+    max_wall_time_s: float | None = None,
+) -> tuple[np.ndarray, bool, str]:
+    """
+    气相 PFR 设计方程（理想气体、等温、恒压 P，不考虑压降）：
+
+      dF_i/dV = Σ_j ν_{i,j} r_j
+
+    动力学所需浓度由摩尔分率计算：
+
+      y_i = F_i / Σ_k F_k
+      C_tot = P / (R T)
+      C_i = y_i * C_tot
+
+    注意：
+    - 这里的 “恒压” 指每一条实验数据行内，沿程 P 不变（不建压降方程）。
+    - temperature_K 与 pressure_Pa 在积分过程中视为常数。
+    """
+    if not np.isfinite(reactor_volume_m3):
+        return molar_flow_inlet_mol_s.copy(), False, "V_m3 无效（NaN/Inf）"
+    if reactor_volume_m3 < 0.0:
+        return molar_flow_inlet_mol_s.copy(), False, "V_m3 不能为负"
+    if reactor_volume_m3 == 0.0:
+        return molar_flow_inlet_mol_s.copy(), True, "V=0"
+
+    if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
+        return molar_flow_inlet_mol_s.copy(), False, "温度 T_K 无效"
+    if (not np.isfinite(pressure_Pa)) or (pressure_Pa <= 0.0):
+        return molar_flow_inlet_mol_s.copy(), False, "压力 P_Pa 无效"
+
+    if not np.all(np.isfinite(molar_flow_inlet_mol_s)):
+        return molar_flow_inlet_mol_s.copy(), False, "入口摩尔流量包含 NaN/Inf"
+    if not np.all(np.isfinite(stoich_matrix)):
+        return molar_flow_inlet_mol_s.copy(), False, "化学计量数矩阵 ν 包含 NaN/Inf"
+    if not np.all(np.isfinite(k0)):
+        return molar_flow_inlet_mol_s.copy(), False, "k0 包含 NaN/Inf"
+    if not np.all(np.isfinite(ea_J_mol)):
+        return molar_flow_inlet_mol_s.copy(), False, "Ea 包含 NaN/Inf"
+    if not np.all(np.isfinite(reaction_order_matrix)):
+        return molar_flow_inlet_mol_s.copy(), False, "反应级数矩阵 n 包含 NaN/Inf"
+
+    # C_tot = P/(R*T) 在该模型内为常数（等温、恒压）
+    conc_total_mol_m3 = float(pressure_Pa) / max(
+        float(R_GAS_J_MOL_K) * float(temperature_K), EPSILON_DENOMINATOR
+    )
+
+    start_time_s = time.monotonic()
+    if max_wall_time_s is not None:
+        try:
+            max_wall_time_s = float(max_wall_time_s)
+        except (ValueError, TypeError):
+            max_wall_time_s = None
+        if (max_wall_time_s is not None) and (
+            not np.isfinite(max_wall_time_s) or max_wall_time_s <= 0.0
+        ):
+            max_wall_time_s = None
+
+    def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("用户终止（stop_event）")
+        if (max_wall_time_s is not None) and (
+            (time.monotonic() - start_time_s) > max_wall_time_s
+        ):
+            raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
+
+        flow_safe = safe_nonnegative(molar_flow_mol_s)
+        total_flow = float(np.sum(flow_safe))
+        y = flow_safe / max(total_flow, EPSILON_FLOW_RATE)
+        conc_mol_m3 = y * float(conc_total_mol_m3)
+
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
+            rate_vector = calc_rate_vector_langmuir_hinshelwood(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
+            )
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
+            rate_vector = calc_rate_vector_reversible(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0_fwd=k0,
+                ea_fwd_J_mol=ea_J_mol,
+                order_fwd_matrix=reaction_order_matrix,
+                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
+                order_rev_matrix=(
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
+                ),
+            )
+        else:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+
+        dF_dV = stoich_matrix @ rate_vector
+        return dF_dV
+
+    max_step_value = _compute_max_step(float(reactor_volume_m3), max_step_fraction)
+    try:
+        solution = solve_ivp(
+            fun=ode_fun,
+            t_span=(0.0, float(reactor_volume_m3)),
+            y0=molar_flow_inlet_mol_s.astype(float),
+            method=solver_method,
+            rtol=rtol,
+            atol=atol,
+            max_step=max_step_value,
+        )
+    except Exception as exc:
         return molar_flow_inlet_mol_s.copy(), False, f"solve_ivp异常: {exc}"
 
     if not solution.success:
@@ -924,6 +1089,221 @@ def integrate_pfr_profile(
             max_step=max_step_value,
         )
     except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            f"solve_ivp异常: {exc}",
+        )
+
+    if not solution.success:
+        message = solution.message if hasattr(solution, "message") else "solve_ivp失败"
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            str(message),
+        )
+
+    return solution.t.astype(float), solution.y.astype(float), True, "OK"
+
+
+def integrate_pfr_profile_gas_ideal_const_p(
+    reactor_volume_m3: float,
+    temperature_K: float,
+    pressure_Pa: float,
+    molar_flow_inlet_mol_s: np.ndarray,
+    stoich_matrix: np.ndarray,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    reaction_order_matrix: np.ndarray,
+    solver_method: str,
+    rtol: float,
+    atol: float,
+    n_points: int = DEFAULT_PROFILE_N_POINTS,
+    kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    m_inhibition: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+    order_rev_matrix: np.ndarray | None = None,
+    stop_event: threading.Event | None = None,
+    max_wall_time_s: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, bool, str]:
+    """
+    返回气相 PFR（理想气体、等温、恒压 P、无压降）沿程剖面：
+      volume_grid_m3: shape (n_points,)
+      molar_flow_profile_mol_s: shape (n_species, n_points)
+
+    其中动力学使用的浓度按：
+      y_i = F_i / ΣF
+      C_tot = P/(R T)
+      C_i = y_i · C_tot
+    """
+    n_points = int(n_points)
+    if n_points < 2:
+        n_points = 2
+
+    if not np.isfinite(reactor_volume_m3):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "V_m3 无效（NaN/Inf）",
+        )
+    if reactor_volume_m3 < 0.0:
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "V_m3 不能为负"
+    if reactor_volume_m3 == 0.0:
+        return (
+            np.array([0.0], dtype=float),
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            True,
+            "V=0",
+        )
+
+    if (not np.isfinite(temperature_K)) or (temperature_K <= 0.0):
+        return np.array([0.0]), molar_flow_inlet_mol_s[:, None], False, "温度 T_K 无效"
+    if (not np.isfinite(pressure_Pa)) or (pressure_Pa <= 0.0):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "压力 P_Pa 无效",
+        )
+
+    if not np.all(np.isfinite(molar_flow_inlet_mol_s)):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "入口摩尔流量包含 NaN/Inf",
+        )
+    if not np.all(np.isfinite(stoich_matrix)):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "化学计量数矩阵 ν 包含 NaN/Inf",
+        )
+    if not np.all(np.isfinite(k0)):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "k0 包含 NaN/Inf",
+        )
+    if not np.all(np.isfinite(ea_J_mol)):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "Ea 包含 NaN/Inf",
+        )
+    if not np.all(np.isfinite(reaction_order_matrix)):
+        return (
+            np.array([0.0]),
+            molar_flow_inlet_mol_s[:, None],
+            False,
+            "反应级数矩阵 n 包含 NaN/Inf",
+        )
+
+    conc_total_mol_m3 = float(pressure_Pa) / max(
+        float(R_GAS_J_MOL_K) * float(temperature_K), EPSILON_DENOMINATOR
+    )
+
+    start_time_s = time.monotonic()
+    if max_wall_time_s is not None:
+        try:
+            max_wall_time_s = float(max_wall_time_s)
+        except (ValueError, TypeError):
+            max_wall_time_s = None
+        if (max_wall_time_s is not None) and (
+            (not np.isfinite(max_wall_time_s)) or (max_wall_time_s <= 0.0)
+        ):
+            max_wall_time_s = None
+
+    def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("用户终止（stop_event）")
+        if (max_wall_time_s is not None) and (
+            (time.monotonic() - start_time_s) > max_wall_time_s
+        ):
+            raise RuntimeError(f"ODE 求解超时（>{max_wall_time_s:.1f} s）")
+
+        flow_safe = safe_nonnegative(molar_flow_mol_s)
+        total_flow = float(np.sum(flow_safe))
+        y = flow_safe / max(total_flow, EPSILON_FLOW_RATE)
+        conc_mol_m3 = y * float(conc_total_mol_m3)
+
+        if kinetic_model == KINETIC_MODEL_POWER_LAW:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
+            rate_vector = calc_rate_vector_langmuir_hinshelwood(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+                Ea_K_J_mol=(
+                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+                ),
+                m_inhibition=(
+                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
+                ),
+            )
+        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
+            rate_vector = calc_rate_vector_reversible(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0_fwd=k0,
+                ea_fwd_J_mol=ea_J_mol,
+                order_fwd_matrix=reaction_order_matrix,
+                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+                ea_rev_J_mol=(
+                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+                ),
+                order_rev_matrix=(
+                    order_rev_matrix
+                    if order_rev_matrix is not None
+                    else np.zeros_like(reaction_order_matrix)
+                ),
+            )
+        else:
+            rate_vector = calc_rate_vector_power_law(
+                conc_mol_m3=conc_mol_m3,
+                temperature_K=temperature_K,
+                k0=k0,
+                ea_J_mol=ea_J_mol,
+                reaction_order_matrix=reaction_order_matrix,
+            )
+
+        dF_dV = stoich_matrix @ rate_vector
+        return dF_dV
+
+    volume_grid_m3 = np.linspace(0.0, float(reactor_volume_m3), n_points, dtype=float)
+
+    max_step_value = _compute_max_step(float(reactor_volume_m3), max_step_fraction)
+    try:
+        solution = solve_ivp(
+            fun=ode_fun,
+            t_span=(0.0, float(reactor_volume_m3)),
+            y0=molar_flow_inlet_mol_s.astype(float),
+            method=solver_method,
+            t_eval=volume_grid_m3,
+            rtol=rtol,
+            atol=atol,
+            max_step=max_step_value,
+        )
+    except Exception as exc:
         return (
             volume_grid_m3,
             molar_flow_inlet_mol_s.astype(float)[:, None],

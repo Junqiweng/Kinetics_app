@@ -39,6 +39,8 @@ from .constants import (
     FITTING_EPSILON_PHI_RATIO,
     FITTING_UI_UPDATE_INTERVAL_S,
     PERCENTAGE_RESIDUAL_EPSILON_FACTOR,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     REACTOR_TYPE_CSTR,
     REACTOR_TYPE_PFR,
 )
@@ -294,6 +296,14 @@ def _run_fitting_job(
     atol = job_inputs["atol"]
     reactor_type = job_inputs["reactor_type"]
     kinetic_model = job_inputs["kinetic_model"]
+    pfr_flow_model = str(
+        job_inputs.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
+    ).strip()
+    if pfr_flow_model not in (
+        PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+        PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    ):
+        pfr_flow_model = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
 
     use_ms = job_inputs["use_ms"]
     n_starts = job_inputs["n_starts"]
@@ -428,13 +438,19 @@ def _run_fitting_job(
 
     # --- 必要输入列检查（避免所有行都“失败罚项”，看起来像卡住）---
     if reactor_type == REACTOR_TYPE_PFR:
-        # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
-        inlet_cols = (
-            [f"C0_{name}_mol_m3" for name in species_names]
-            if str(output_mode).startswith("C")
-            else [f"F0_{name}_mol_s" for name in species_names]
-        )
-        required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + inlet_cols
+        if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+            # 气相 PFR（理想气体、恒压 P、无压降）：入口强制使用 F0_*，并要求 P_Pa
+            inlet_cols = [f"F0_{name}_mol_s" for name in species_names]
+            required_input_columns = ["V_m3", "T_K", "P_Pa"] + inlet_cols
+        else:
+            # 液相 PFR（体积流量 vdot 近似恒定）：
+            # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
+            inlet_cols = (
+                [f"C0_{name}_mol_m3" for name in species_names]
+                if str(output_mode).startswith("C")
+                else [f"F0_{name}_mol_s" for name in species_names]
+            )
+            required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + inlet_cols
     elif reactor_type == REACTOR_TYPE_CSTR:
         required_input_columns = ["V_m3", "T_K", "vdot_m3_s"] + [
             f"C0_{name}_mol_m3" for name in species_names
@@ -503,6 +519,9 @@ def _run_fitting_job(
         elif column_name == "vdot_m3_s":
             bad_mask = numeric_values <= 0.0
             bad_desc = "必须 > 0"
+        elif column_name == "P_Pa":
+            bad_mask = numeric_values <= 0.0
+            bad_desc = "必须 > 0"
         elif column_name == "V_m3":
             bad_mask = numeric_values < 0.0
             bad_desc = "不能为负"
@@ -554,10 +573,20 @@ def _run_fitting_job(
         )
 
     if invalid_input_messages:
+        if reactor_type == REACTOR_TYPE_PFR:
+            pfr_hint = (
+                "PFR(气相): V_m3, T_K, P_Pa, F0_*"
+                if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+                else "PFR(液相): V_m3, T_K, vdot_m3_s, F0_* 或（Cout 模式）C0_*"
+            )
+        else:
+            pfr_hint = "PFR: V_m3, T_K, vdot_m3_s, F0_* 或（Cout 模式）C0_*"
         raise ValueError(
             "输入条件列存在 NaN/非数字/不合理值，拟合已停止。\n"
             + "\n".join(invalid_input_messages)
-            + "\n请先修正输入条件列（V_m3, T_K, vdot_m3_s, F0_* 或 t_s, T_K, C0_*），再开始拟合。"
+            + "\n请先修正输入条件列（"
+            + pfr_hint
+            + "；BSTR: t_s, T_K, C0_*；CSTR: V_m3, T_K, vdot_m3_s, C0_*），再开始拟合。"
         )
 
     typical_measured_scale = (
@@ -616,9 +645,13 @@ def _run_fitting_job(
 
     if reactor_type == REACTOR_TYPE_PFR:
         inlet_column_names = (
-            [f"C0_{name}_mol_m3" for name in species_names]
-            if str(output_mode).startswith("C")
-            else [f"F0_{name}_mol_s" for name in species_names]
+            [f"F0_{name}_mol_s" for name in species_names]
+            if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+            else (
+                [f"C0_{name}_mol_m3" for name in species_names]
+                if str(output_mode).startswith("C")
+                else [f"F0_{name}_mol_s" for name in species_names]
+            )
         )
     else:
         inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
@@ -684,6 +717,7 @@ def _run_fitting_job(
                 atol,
                 reactor_type,
                 kinetic_model,
+                pfr_flow_model,
                 p["K0_ads"],
                 p["Ea_K"],
                 p["m_inhibition"],
@@ -831,6 +865,7 @@ def _run_fitting_job(
             "max_step_fraction": float(max_step_fraction),
             "reactor_type": reactor_type,
             "kinetic_model": kinetic_model,
+            "pfr_flow_model": str(pfr_flow_model),
             # 向后兼容的键名
             "initial_cost": float(initial_cost),
             "cost": float(initial_cost),
@@ -1007,6 +1042,7 @@ def _run_fitting_job(
         "max_step_fraction": float(max_step_fraction),
         "reactor_type": reactor_type,
         "kinetic_model": kinetic_model,
+        "pfr_flow_model": str(pfr_flow_model),
         # 向后兼容的键名
         "initial_cost": float(initial_cost),
         "cost": float(final_res.cost),

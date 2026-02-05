@@ -52,6 +52,7 @@ from modules.constants import (
     DEFAULT_K0_REV_MIN,
     EPSILON_CONCENTRATION,
     EPSILON_FLOW_RATE,
+    R_GAS_J_MOL_K,
     FITTING_STOP_WAIT_SLEEP_S,
     FITTING_STOP_WAIT_TRIES,
     SESSION_CLEANUP_EVERY_N_PAGE_LOADS,
@@ -75,6 +76,8 @@ from modules.constants import (
     OUTPUT_MODE_XOUT,
     OUTPUT_MODES_BATCH,
     OUTPUT_MODES_FLOW,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     REACTOR_TYPES,
     REACTOR_TYPE_BSTR,
     REACTOR_TYPE_CSTR,
@@ -570,6 +573,38 @@ def main():
                 key="cfg_reactor_type",
                 disabled=global_disabled,
             )
+
+            # PFR 流动模型/相态（仅 PFR 需要）
+            pfr_flow_model_default = str(
+                get_cfg("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
+            ).strip()
+            if pfr_flow_model_default not in (
+                PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+                PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+            ):
+                pfr_flow_model_default = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
+            pfr_flow_model = pfr_flow_model_default
+            if reactor_type == REACTOR_TYPE_PFR:
+                pfr_flow_model_labels = {
+                    PFR_FLOW_MODEL_LIQUID_CONST_VDOT: "液相(恒定vdot)",
+                    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P: "气相(理想气体, 恒定P, 无压降)",
+                }
+                pfr_flow_model_options = [
+                    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+                    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+                ]
+                pfr_flow_model = st.selectbox(
+                    "PFR 流动模型",
+                    pfr_flow_model_options,
+                    index=pfr_flow_model_options.index(pfr_flow_model_default),
+                    format_func=lambda x: pfr_flow_model_labels.get(str(x), str(x)),
+                    key="cfg_pfr_flow_model",
+                    disabled=global_disabled,
+                    help=(
+                        "液相：vdot 近似恒定，C=F/vdot。\n"
+                        "气相：理想气体、等温、恒压 P（不考虑压降），C=y·P/(R·T)，入口强制 F0_*。"
+                    ),
+                )
             kinetic_model_default = str(get_cfg("kinetic_model", KINETIC_MODELS[0]))
             if kinetic_model_default not in KINETIC_MODELS:
                 kinetic_model_default = KINETIC_MODELS[0]
@@ -1037,17 +1072,20 @@ def main():
 
             # 根据反应器类型决定输入条件列
             if reactor_type == REACTOR_TYPE_PFR:
-                # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
-                inlet_cols = (
-                    [f"C0_{s}_mol_m3" for s in species_names]
-                    if output_mode.startswith("C")
-                    else [f"F0_{s}_mol_s" for s in species_names]
-                )
-                cols = (
-                    ["V_m3", "T_K", "vdot_m3_s"]
-                    + inlet_cols
-                    + meas_cols
-                )
+                if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+                    # 气相 PFR：理想气体、等温、恒压 P（不考虑压降）
+                    # 入口强制使用 F0_*，不再允许用 C0_* + vdot 换算。
+                    inlet_cols = [f"F0_{s}_mol_s" for s in species_names]
+                    cols = ["V_m3", "T_K", "P_Pa"] + inlet_cols + meas_cols
+                else:
+                    # 液相 PFR：体积流量 vdot 近似恒定
+                    # 约定：当拟合目标为 Cout 时，入口也允许使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
+                    inlet_cols = (
+                        [f"C0_{s}_mol_m3" for s in species_names]
+                        if output_mode.startswith("C")
+                        else [f"F0_{s}_mol_s" for s in species_names]
+                    )
+                    cols = ["V_m3", "T_K", "vdot_m3_s"] + inlet_cols + meas_cols
             elif reactor_type == REACTOR_TYPE_CSTR:
                 cols = (
                     ["V_m3", "T_K", "vdot_m3_s"]
@@ -1174,6 +1212,7 @@ def main():
 
         export_cfg = config_manager.collect_config(
             reactor_type=reactor_type,
+            pfr_flow_model=str(pfr_flow_model),
             kinetic_model=kinetic_model,
             solver_method=solver_method,
             rtol=float(rtol),
@@ -1548,6 +1587,7 @@ def main():
             export_config_placeholder.empty()
             export_cfg = config_manager.collect_config(
                 reactor_type=reactor_type,
+                pfr_flow_model=str(pfr_flow_model),
                 kinetic_model=kinetic_model,
                 solver_method=solver_method,
                 rtol=float(rtol),
@@ -1853,6 +1893,7 @@ def main():
                     "atol": atol,
                     "reactor_type": reactor_type,
                     "kinetic_model": kinetic_model,
+                    "pfr_flow_model": str(pfr_flow_model),
                     "use_ms": use_ms,
                     "n_starts": n_starts,
                     "random_seed": random_seed,
@@ -2057,6 +2098,9 @@ def main():
                         + "，".join(parity_species_unavailable)
                     )
 
+            pfr_flow_model_fit = str(
+                res.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
+            ).strip()
             cache_key = (
                 float(res.get("phi_final", res.get("cost", 0.0))),
                 str(output_mode_fit),
@@ -2065,6 +2109,7 @@ def main():
                 float(atol_fit),
                 str(solver_method_fit),
                 str(reactor_type_fit),
+                str(pfr_flow_model_fit),
                 str(kinetic_model_fit),
                 float(max_step_fraction_fit),
             )
@@ -2087,6 +2132,7 @@ def main():
                             atol=float(atol_fit),
                             reactor_type=reactor_type_fit,
                             kinetic_model=kinetic_model_fit,
+                            pfr_flow_model=str(pfr_flow_model_fit),
                             max_step_fraction=float(max_step_fraction_fit),
                         )
                     )
@@ -2307,45 +2353,84 @@ def main():
                     )
                     reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
                     temperature_K = float(row_sel.get("T_K", np.nan))
-                    vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
+                    pfr_flow_model_fit = str(
+                        res.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
+                    ).strip()
 
                     molar_flow_inlet = np.zeros(len(species_names_fit), dtype=float)
-                    use_conc_inlet = str(output_mode_fit).strip().startswith("C")
-                    for i, sp_name in enumerate(species_names_fit):
-                        if use_conc_inlet:
-                            c0 = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
-                            molar_flow_inlet[i] = c0 * float(vdot_m3_s)
-                        else:
+                    if pfr_flow_model_fit == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+                        # 气相：入口强制用 F0_*
+                        pressure_Pa = float(row_sel.get("P_Pa", np.nan))
+                        for i, sp_name in enumerate(species_names_fit):
                             molar_flow_inlet[i] = float(
                                 row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
                             )
 
-                    volume_grid_m3, molar_flow_profile, ok, message = (
-                        reactors.integrate_pfr_profile(
-                            reactor_volume_m3=reactor_volume_m3,
-                            temperature_K=temperature_K,
-                            vdot_m3_s=vdot_m3_s,
-                            molar_flow_inlet_mol_s=molar_flow_inlet,
-                            stoich_matrix=stoich_matrix_fit,
-                            k0=fitted_params["k0"],
-                            ea_J_mol=fitted_params["ea_J_mol"],
-                            reaction_order_matrix=fitted_params[
-                                "reaction_order_matrix"
-                            ],
-                            solver_method=solver_method_fit,
-                            rtol=rtol_fit,
-                            atol=atol_fit,
-                            n_points=profile_points,
-                            kinetic_model=kinetic_model_fit,
-                            max_step_fraction=max_step_fraction_fit,
-                            K0_ads=fitted_params.get("K0_ads", None),
-                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                            m_inhibition=fitted_params.get("m_inhibition", None),
-                            k0_rev=fitted_params.get("k0_rev", None),
-                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                            order_rev_matrix=fitted_params.get("order_rev", None),
+                        volume_grid_m3, molar_flow_profile, ok, message = (
+                            reactors.integrate_pfr_profile_gas_ideal_const_p(
+                                reactor_volume_m3=reactor_volume_m3,
+                                temperature_K=temperature_K,
+                                pressure_Pa=pressure_Pa,
+                                molar_flow_inlet_mol_s=molar_flow_inlet,
+                                stoich_matrix=stoich_matrix_fit,
+                                k0=fitted_params["k0"],
+                                ea_J_mol=fitted_params["ea_J_mol"],
+                                reaction_order_matrix=fitted_params[
+                                    "reaction_order_matrix"
+                                ],
+                                solver_method=solver_method_fit,
+                                rtol=rtol_fit,
+                                atol=atol_fit,
+                                n_points=profile_points,
+                                kinetic_model=kinetic_model_fit,
+                                max_step_fraction=max_step_fraction_fit,
+                                K0_ads=fitted_params.get("K0_ads", None),
+                                Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                                m_inhibition=fitted_params.get("m_inhibition", None),
+                                k0_rev=fitted_params.get("k0_rev", None),
+                                ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                                order_rev_matrix=fitted_params.get("order_rev", None),
+                            )
                         )
-                    )
+                    else:
+                        # 液相：vdot 恒定（C=F/vdot）；Cout 拟合时允许入口用 C0_* 并由 vdot 换算
+                        vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
+                        use_conc_inlet = str(output_mode_fit).strip().startswith("C")
+                        for i, sp_name in enumerate(species_names_fit):
+                            if use_conc_inlet:
+                                c0 = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
+                                molar_flow_inlet[i] = c0 * float(vdot_m3_s)
+                            else:
+                                molar_flow_inlet[i] = float(
+                                    row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
+                                )
+
+                        volume_grid_m3, molar_flow_profile, ok, message = (
+                            reactors.integrate_pfr_profile(
+                                reactor_volume_m3=reactor_volume_m3,
+                                temperature_K=temperature_K,
+                                vdot_m3_s=vdot_m3_s,
+                                molar_flow_inlet_mol_s=molar_flow_inlet,
+                                stoich_matrix=stoich_matrix_fit,
+                                k0=fitted_params["k0"],
+                                ea_J_mol=fitted_params["ea_J_mol"],
+                                reaction_order_matrix=fitted_params[
+                                    "reaction_order_matrix"
+                                ],
+                                solver_method=solver_method_fit,
+                                rtol=rtol_fit,
+                                atol=atol_fit,
+                                n_points=profile_points,
+                                kinetic_model=kinetic_model_fit,
+                                max_step_fraction=max_step_fraction_fit,
+                                K0_ads=fitted_params.get("K0_ads", None),
+                                Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                                m_inhibition=fitted_params.get("m_inhibition", None),
+                                k0_rev=fitted_params.get("k0_rev", None),
+                                ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                                order_rev_matrix=fitted_params.get("order_rev", None),
+                            )
+                        )
                     if not ok:
                         st.error(
                             f"PFR 剖面计算失败: {message}\n"
@@ -2367,9 +2452,23 @@ def main():
                                 )
                                 profile_df[f"F_{species_name}_mol_s"] = y
                             else:
-                                conc = molar_flow_profile[idx, :] / max(
-                                    vdot_m3_s, EPSILON_FLOW_RATE
-                                )
+                                if pfr_flow_model_fit == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+                                    # C_i = y_i · P/(R·T)
+                                    pressure_Pa = float(row_sel.get("P_Pa", np.nan))
+                                    conc_total = float(pressure_Pa) / max(
+                                        float(R_GAS_J_MOL_K) * float(temperature_K),
+                                        EPSILON_CONCENTRATION,
+                                    )
+                                    total_flow = np.sum(molar_flow_profile, axis=0)
+                                    conc = (
+                                        molar_flow_profile[idx, :]
+                                        / np.maximum(total_flow, EPSILON_FLOW_RATE)
+                                        * float(conc_total)
+                                    )
+                                else:
+                                    conc = molar_flow_profile[idx, :] / max(
+                                        vdot_m3_s, EPSILON_FLOW_RATE
+                                    )
                                 ax_pf.plot(
                                     volume_grid_m3,
                                     conc,

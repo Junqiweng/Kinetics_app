@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 
 from . import fitting
-from .constants import DEFAULT_MAX_STEP_FRACTION, REACTOR_TYPE_PFR
+from .constants import (
+    DEFAULT_MAX_STEP_FRACTION,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+    REACTOR_TYPE_PFR,
+)
 
 
 def _clean_species_names(species_text: str) -> list[str]:
@@ -67,6 +72,7 @@ def _build_fit_comparison_long_table(
     atol: float,
     reactor_type: str,
     kinetic_model: str,
+    pfr_flow_model: str = PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     max_step_fraction: float = DEFAULT_MAX_STEP_FRACTION,
 ) -> pd.DataFrame:
     rows = []
@@ -86,9 +92,13 @@ def _build_fit_comparison_long_table(
     ]
     if reactor_type == REACTOR_TYPE_PFR:
         inlet_column_names = (
-            [f"C0_{name}_mol_m3" for name in species_names]
-            if str(output_mode).startswith("C")
-            else [f"F0_{name}_mol_s" for name in species_names]
+            [f"F0_{name}_mol_s" for name in species_names]
+            if str(pfr_flow_model).strip() == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+            else (
+                [f"C0_{name}_mol_m3" for name in species_names]
+                if str(output_mode).startswith("C")
+                else [f"F0_{name}_mol_s" for name in species_names]
+            )
         )
     else:
         inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
@@ -111,6 +121,7 @@ def _build_fit_comparison_long_table(
             atol,
             reactor_type,
             kinetic_model,
+            pfr_flow_model,
             fitted_params.get("K0_ads", None),
             fitted_params.get("Ea_K", None),
             fitted_params.get("m_inhibition", None),

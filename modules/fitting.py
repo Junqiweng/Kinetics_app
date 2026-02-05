@@ -26,13 +26,17 @@ from .constants import (
     OUTPUT_MODE_COUT,
     OUTPUT_MODE_FOUT,
     OUTPUT_MODE_XOUT,
+    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
+    PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     REACTOR_TYPE_BSTR,
     REACTOR_TYPE_CSTR,
     REACTOR_TYPE_PFR,
+    R_GAS_J_MOL_K,
 )
 from .reactors import (
     integrate_batch_reactor,
     integrate_pfr_molar_flows,
+    integrate_pfr_molar_flows_gas_ideal_const_p,
     solve_cstr_steady_state_concentrations,
 )
 
@@ -379,6 +383,7 @@ def _predict_outputs_for_row(
     atol: float,
     reactor_type: str = REACTOR_TYPE_PFR,
     kinetic_model: str = "power_law",
+    pfr_flow_model: str = PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
     m_inhibition: np.ndarray | None = None,
@@ -420,7 +425,9 @@ def _predict_outputs_for_row(
             )
 
     if reactor_type == REACTOR_TYPE_PFR:
-        # 流动反应器（PFR）需要 V_m3, vdot_m3_s, F0_*
+        # 流动反应器（PFR）：
+        # - liquid_const_vdot: 需要 V_m3, vdot_m3_s, F0_*（或 Cout 模式下允许 C0_* 并由 vdot 换算）
+        # - gas_ideal_const_p: 需要 V_m3, P_Pa, F0_*（入口强制用 F0，不使用 vdot）
         reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
         if not np.isfinite(reactor_volume_m3):
             return np.zeros(len(output_species_list), dtype=float), False, "缺少 V_m3"
@@ -431,114 +438,227 @@ def _predict_outputs_for_row(
                 "V_m3 不能为负",
             )
 
-        vdot_m3_s = _to_float_or_nan(_row_get_value(row, "vdot_m3_s", np.nan))
-        if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
-            return (
-                np.zeros(len(output_species_list), dtype=float),
-                False,
-                "体积流量 vdot_m3_s 无效（请检查 CSV 的 vdot_m3_s 列）",
-            )
+        pfr_flow_model = str(pfr_flow_model).strip() or PFR_FLOW_MODEL_LIQUID_CONST_VDOT
 
-        # 约定：当拟合目标为 Cout 时，入口也使用浓度 C0_*（并由 vdot 自动换算为 F0 参与计算）
-        use_conc_inlet = str(output_mode).startswith("C")
-        if inlet_column_names is None:
-            inlet_column_names = (
-                [f"C0_{name}_mol_m3" for name in species_names]
-                if use_conc_inlet
-                else [f"F0_{name}_mol_s" for name in species_names]
-            )
-
-        molar_flow_inlet = np.zeros(len(species_names), dtype=float)
-        for i, col in enumerate(inlet_column_names):
-            value = _to_float_or_nan(_row_get_value(row, col, np.nan))
-            if not np.isfinite(value):
+        if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+            # --- 气相：理想气体、等温、恒压 P（不考虑压降）---
+            pressure_Pa = _to_float_or_nan(_row_get_value(row, "P_Pa", np.nan))
+            if (not np.isfinite(pressure_Pa)) or (pressure_Pa <= 0.0):
                 return (
                     np.zeros(len(output_species_list), dtype=float),
                     False,
-                    f"缺少 {col}",
+                    "压力 P_Pa 无效（请检查 CSV 的 P_Pa 列）",
                 )
-            if value < 0.0:
-                return (
-                    np.zeros(len(output_species_list), dtype=float),
-                    False,
-                    f"{col} 不能为负",
-                )
-            if use_conc_inlet:
-                # C0 [mol/m^3] -> F0 [mol/s] = C0 * vdot
-                molar_flow_inlet[i] = float(value) * float(vdot_m3_s)
-            else:
+
+            # 入口强制使用 F0_*_mol_s（不再随 output_mode 切换到 C0_*）
+            inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
+
+            molar_flow_inlet = np.zeros(len(species_names), dtype=float)
+            for i, col in enumerate(inlet_column_names):
+                value = _to_float_or_nan(_row_get_value(row, col, np.nan))
+                if not np.isfinite(value):
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        f"缺少 {col}",
+                    )
+                if value < 0.0:
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        f"{col} 不能为负",
+                    )
                 molar_flow_inlet[i] = float(value)
 
-        molar_flow_outlet = None
-        ok = True
-        message = "OK"
-        if model_eval_cache is not None:
-            cache_key = (
-                "PFR",
-                float(reactor_volume_m3),
-                float(temperature_K),
-                float(vdot_m3_s),
-                tuple(molar_flow_inlet),
-            )
-            if cache_key in model_eval_cache:
-                cached = model_eval_cache[cache_key]
-                molar_flow_outlet, ok, message = cached
-
-        if molar_flow_outlet is None:
-            molar_flow_outlet, ok, message = integrate_pfr_molar_flows(
-                reactor_volume_m3=reactor_volume_m3,
-                temperature_K=temperature_K,
-                vdot_m3_s=vdot_m3_s,
-                molar_flow_inlet_mol_s=molar_flow_inlet,
-                stoich_matrix=stoich_matrix,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                solver_method=solver_method,
-                rtol=rtol,
-                atol=atol,
-                kinetic_model=kinetic_model,
-                max_step_fraction=max_step_fraction,
-                K0_ads=K0_ads,
-                Ea_K_J_mol=Ea_K_J_mol,
-                m_inhibition=m_inhibition,
-                k0_rev=k0_rev,
-                ea_rev_J_mol=ea_rev_J_mol,
-                order_rev_matrix=order_rev_matrix,
-                stop_event=stop_event,
-                max_wall_time_s=max_wall_time_s,
-            )
+            molar_flow_outlet = None
+            ok = True
+            message = "OK"
             if model_eval_cache is not None:
-                model_eval_cache[cache_key] = (
-                    molar_flow_outlet,
-                    bool(ok),
-                    str(message),
+                cache_key = (
+                    "PFR",
+                    str(pfr_flow_model),
+                    float(reactor_volume_m3),
+                    float(temperature_K),
+                    float(pressure_Pa),
+                    tuple(molar_flow_inlet),
                 )
-        if not ok:
-            return np.zeros(len(output_species_list), dtype=float), False, message
+                if cache_key in model_eval_cache:
+                    cached = model_eval_cache[cache_key]
+                    molar_flow_outlet, ok, message = cached
 
-        # 计算输出值
-        output_values = np.zeros(len(output_species_list), dtype=float)
-        for out_i, idx in enumerate(output_species_indices):
-            if output_mode == OUTPUT_MODE_FOUT:
-                output_values[out_i] = molar_flow_outlet[idx]
-            elif output_mode == OUTPUT_MODE_COUT:
-                output_values[out_i] = molar_flow_outlet[idx] / max(
-                    vdot_m3_s, EPSILON_FLOW_RATE
+            if molar_flow_outlet is None:
+                molar_flow_outlet, ok, message = integrate_pfr_molar_flows_gas_ideal_const_p(
+                    reactor_volume_m3=reactor_volume_m3,
+                    temperature_K=temperature_K,
+                    pressure_Pa=pressure_Pa,
+                    molar_flow_inlet_mol_s=molar_flow_inlet,
+                    stoich_matrix=stoich_matrix,
+                    k0=k0,
+                    ea_J_mol=ea_J_mol,
+                    reaction_order_matrix=reaction_order_matrix,
+                    solver_method=solver_method,
+                    rtol=rtol,
+                    atol=atol,
+                    kinetic_model=kinetic_model,
+                    max_step_fraction=max_step_fraction,
+                    K0_ads=K0_ads,
+                    Ea_K_J_mol=Ea_K_J_mol,
+                    m_inhibition=m_inhibition,
+                    k0_rev=k0_rev,
+                    ea_rev_J_mol=ea_rev_J_mol,
+                    order_rev_matrix=order_rev_matrix,
+                    stop_event=stop_event,
+                    max_wall_time_s=max_wall_time_s,
                 )
-            elif output_mode == OUTPUT_MODE_XOUT:
-                # 摩尔组成 y_i = F_i / Σ F_j
-                total_flow = np.sum(molar_flow_outlet)
-                if total_flow < EPSILON_FLOW_RATE:
-                    output_values[out_i] = np.nan
+                if model_eval_cache is not None:
+                    model_eval_cache[cache_key] = (
+                        molar_flow_outlet,
+                        bool(ok),
+                        str(message),
+                    )
+            if not ok:
+                return np.zeros(len(output_species_list), dtype=float), False, message
+
+            # 计算输出值
+            conc_total_mol_m3 = float(pressure_Pa) / max(
+                float(R_GAS_J_MOL_K) * float(temperature_K), EPSILON_CONCENTRATION
+            )
+            total_flow = float(np.sum(molar_flow_outlet))
+
+            output_values = np.zeros(len(output_species_list), dtype=float)
+            for out_i, idx in enumerate(output_species_indices):
+                if output_mode == OUTPUT_MODE_FOUT:
+                    output_values[out_i] = molar_flow_outlet[idx]
+                elif output_mode == OUTPUT_MODE_XOUT:
+                    if total_flow < EPSILON_FLOW_RATE:
+                        output_values[out_i] = np.nan
+                    else:
+                        output_values[out_i] = molar_flow_outlet[idx] / total_flow
+                elif output_mode == OUTPUT_MODE_COUT:
+                    if total_flow < EPSILON_FLOW_RATE:
+                        output_values[out_i] = np.nan
+                    else:
+                        y_i = molar_flow_outlet[idx] / total_flow
+                        output_values[out_i] = float(y_i) * float(conc_total_mol_m3)
                 else:
-                    output_values[out_i] = molar_flow_outlet[idx] / total_flow
-            else:
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        "未知输出模式",
+                    )
+
+        else:
+            # --- 液相：体积流量 vdot 近似恒定 ---
+            vdot_m3_s = _to_float_or_nan(_row_get_value(row, "vdot_m3_s", np.nan))
+            if (not np.isfinite(vdot_m3_s)) or (vdot_m3_s <= 0.0):
                 return (
                     np.zeros(len(output_species_list), dtype=float),
                     False,
-                    "未知输出模式",
+                    "体积流量 vdot_m3_s 无效（请检查 CSV 的 vdot_m3_s 列）",
                 )
+
+            # 约定（仅液相 PFR）：当拟合目标为 Cout 时，入口也允许使用浓度 C0_*，
+            # 并由 vdot 自动换算为 F0 参与计算。
+            use_conc_inlet = str(output_mode).startswith("C")
+            if inlet_column_names is None:
+                inlet_column_names = (
+                    [f"C0_{name}_mol_m3" for name in species_names]
+                    if use_conc_inlet
+                    else [f"F0_{name}_mol_s" for name in species_names]
+                )
+
+            molar_flow_inlet = np.zeros(len(species_names), dtype=float)
+            for i, col in enumerate(inlet_column_names):
+                value = _to_float_or_nan(_row_get_value(row, col, np.nan))
+                if not np.isfinite(value):
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        f"缺少 {col}",
+                    )
+                if value < 0.0:
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        f"{col} 不能为负",
+                    )
+                if use_conc_inlet:
+                    # C0 [mol/m^3] -> F0 [mol/s] = C0 * vdot
+                    molar_flow_inlet[i] = float(value) * float(vdot_m3_s)
+                else:
+                    molar_flow_inlet[i] = float(value)
+
+            molar_flow_outlet = None
+            ok = True
+            message = "OK"
+            if model_eval_cache is not None:
+                cache_key = (
+                    "PFR",
+                    str(PFR_FLOW_MODEL_LIQUID_CONST_VDOT),
+                    float(reactor_volume_m3),
+                    float(temperature_K),
+                    float(vdot_m3_s),
+                    tuple(molar_flow_inlet),
+                )
+                if cache_key in model_eval_cache:
+                    cached = model_eval_cache[cache_key]
+                    molar_flow_outlet, ok, message = cached
+
+            if molar_flow_outlet is None:
+                molar_flow_outlet, ok, message = integrate_pfr_molar_flows(
+                    reactor_volume_m3=reactor_volume_m3,
+                    temperature_K=temperature_K,
+                    vdot_m3_s=vdot_m3_s,
+                    molar_flow_inlet_mol_s=molar_flow_inlet,
+                    stoich_matrix=stoich_matrix,
+                    k0=k0,
+                    ea_J_mol=ea_J_mol,
+                    reaction_order_matrix=reaction_order_matrix,
+                    solver_method=solver_method,
+                    rtol=rtol,
+                    atol=atol,
+                    kinetic_model=kinetic_model,
+                    max_step_fraction=max_step_fraction,
+                    K0_ads=K0_ads,
+                    Ea_K_J_mol=Ea_K_J_mol,
+                    m_inhibition=m_inhibition,
+                    k0_rev=k0_rev,
+                    ea_rev_J_mol=ea_rev_J_mol,
+                    order_rev_matrix=order_rev_matrix,
+                    stop_event=stop_event,
+                    max_wall_time_s=max_wall_time_s,
+                )
+                if model_eval_cache is not None:
+                    model_eval_cache[cache_key] = (
+                        molar_flow_outlet,
+                        bool(ok),
+                        str(message),
+                    )
+            if not ok:
+                return np.zeros(len(output_species_list), dtype=float), False, message
+
+            # 计算输出值
+            output_values = np.zeros(len(output_species_list), dtype=float)
+            for out_i, idx in enumerate(output_species_indices):
+                if output_mode == OUTPUT_MODE_FOUT:
+                    output_values[out_i] = molar_flow_outlet[idx]
+                elif output_mode == OUTPUT_MODE_COUT:
+                    output_values[out_i] = molar_flow_outlet[idx] / max(
+                        vdot_m3_s, EPSILON_FLOW_RATE
+                    )
+                elif output_mode == OUTPUT_MODE_XOUT:
+                    # 摩尔组成 y_i = F_i / Σ F_j
+                    total_flow = np.sum(molar_flow_outlet)
+                    if total_flow < EPSILON_FLOW_RATE:
+                        output_values[out_i] = np.nan
+                    else:
+                        output_values[out_i] = molar_flow_outlet[idx] / total_flow
+                else:
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        "未知输出模式",
+                    )
 
     elif reactor_type == REACTOR_TYPE_CSTR:
         reactor_volume_m3 = _to_float_or_nan(_row_get_value(row, "V_m3", np.nan))
