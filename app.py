@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib import font_manager
 import streamlit.components.v1 as components
 
 import modules.fitting as fitting
@@ -23,6 +25,57 @@ import modules.ui_components as ui_comp  # UI 组件工具函数
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 import modules.session_cleanup as session_cleanup  # 会话清理
 import modules.app_style as app_style
+
+
+def _configure_matplotlib_chinese_font() -> None:
+    """
+    Matplotlib 中文字体配置（主要解决：图中中文显示为方框/乱码）。
+
+    说明：
+    - Streamlit 本身的中文显示通常没问题；常见问题出现在 Matplotlib 渲染的图像里。
+    - 这里优先选择系统常见中文字体（Windows/Linux/macOS 兼容候选）。
+    - 若系统缺少中文字体，则仍可能无法显示中文；此时需要在运行环境安装中文字体。
+    """
+
+    try:
+        candidates = [
+            # Windows 常见
+            "Microsoft YaHei",
+            "SimHei",
+            "SimSun",
+            # macOS 常见
+            "PingFang SC",
+            "Heiti SC",
+            # Linux 常见（取决于发行版/镜像）
+            "Noto Sans CJK SC",
+            "WenQuanYi Micro Hei",
+            "Source Han Sans SC",
+            "AR PL UMing CN",
+        ]
+
+        available = {f.name for f in font_manager.fontManager.ttflist}
+        chosen = None
+        for name in candidates:
+            if name in available:
+                chosen = name
+                break
+
+        # 关键：优先把可用中文字体放到 sans-serif 的最前面
+        base_list = list(mpl.rcParams.get("font.sans-serif", []))
+        if chosen is not None:
+            mpl.rcParams["font.sans-serif"] = [chosen] + [x for x in base_list if x != chosen]
+        else:
+            # 没找到则把候选列表追加到前面，让 Matplotlib 自行尝试匹配
+            mpl.rcParams["font.sans-serif"] = candidates + base_list
+
+        # 负号正常显示（否则可能显示为方块）
+        mpl.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        # 字体配置失败不应影响主功能
+        return
+
+
+_configure_matplotlib_chinese_font()
 
 from modules.constants import (
     DEFAULT_ATOL,
@@ -537,6 +590,8 @@ def main():
     # --- 样式 ---
     app_style.apply_app_css()
     app_style.apply_plot_style()
+    # Matplotlib 的 style 可能会覆盖字体设置，这里再强制一次以确保图中中文可显示
+    _configure_matplotlib_chinese_font()
 
     @st.dialog("教程/帮助")
     def _show_help_dialog() -> None:
@@ -1973,20 +2028,9 @@ def main():
         output_species_fit = res.get("output_species", [])
         unit_text = _get_output_unit_text(output_mode_fit)
 
-        parity_species_candidates = []
+        # 奇偶校验图的候选物种会在 tab_parity 中根据“验证量（浓度/转化率）”动态判定
+        parity_species_candidates = list(species_names_fit)
         parity_species_unavailable = []
-        for sp_name in species_names_fit:
-            meas_col = _get_measurement_column_name(output_mode_fit, sp_name)
-            if meas_col not in df_fit.columns:
-                parity_species_unavailable.append(f"{sp_name}（缺少列 {meas_col}）")
-                continue
-            numeric_series = pd.to_numeric(df_fit[meas_col], errors="coerce")
-            if bool(np.any(np.isfinite(numeric_series.to_numpy()))):
-                parity_species_candidates.append(sp_name)
-            else:
-                parity_species_unavailable.append(
-                    f"{sp_name}（列 {meas_col} 全为 NaN/非数字）"
-                )
 
         tab_param, tab_parity, tab_profile, tab_export = tab_fit_results_container.tabs(
             ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"]
@@ -2090,20 +2134,159 @@ def main():
 
         with tab_parity:
             st.markdown("#### 不同物种的奇偶校验图 (Measured vs Predicted)")
-            if parity_species_unavailable:
-                show_missing = st.checkbox("显示无法绘图的物种原因", value=False)
-                if show_missing:
-                    st.caption(
-                        "无法绘制奇偶校验图的物种： "
-                        + "，".join(parity_species_unavailable)
-                    )
+            output_mode_fit_str = str(output_mode_fit).strip()
+            output_label_map = {
+                OUTPUT_MODE_COUT: "出口浓度 (Cout)",
+                OUTPUT_MODE_FOUT: "出口摩尔流率 (Fout)",
+                OUTPUT_MODE_XOUT: "出口摩尔分率 (xout)",
+            }
+            default_output_label = output_label_map.get(
+                output_mode_fit_str, f"输出量（{output_mode_fit_str}）"
+            )
+
+            parity_validation_choice = st.radio(
+                "验证量",
+                [default_output_label, "转化率 (X)"],
+                index=0,
+                horizontal=True,
+                key="parity_validation_choice",
+                help="选择奇偶校验图的对比量：当前输出量（与拟合输出模式一致）或转化率。转化率优先按摩尔流率计算（BSTR 无摩尔流率则用浓度）。",
+            )
 
             pfr_flow_model_fit = str(
                 res.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
             ).strip()
+
+            # 根据验证量动态确定：对比方式、单位、以及可用物种
+            if parity_validation_choice == default_output_label:
+                compare_output_mode = output_mode_fit_str
+                compare_validation_mode = "output"
+                unit_text_parity = _get_output_unit_text(compare_output_mode)
+            else:
+                compare_output_mode = output_mode_fit_str  # 占位：conversion 模式下不会使用测量列名映射
+                compare_validation_mode = "conversion"
+                unit_text_parity = "-"
+
+            parity_species_candidates = []
+            parity_species_unavailable = []
+            df_cols = set(map(str, df_fit.columns))
+
+            for sp_name in species_names_fit:
+                if compare_validation_mode == "output":
+                    meas_col = _get_measurement_column_name(compare_output_mode, sp_name)
+                    if meas_col not in df_cols:
+                        parity_species_unavailable.append(f"{sp_name}（缺少列 {meas_col}）")
+                        continue
+                    numeric_series = pd.to_numeric(df_fit[meas_col], errors="coerce")
+                    if bool(np.any(np.isfinite(numeric_series.to_numpy()))):
+                        parity_species_candidates.append(sp_name)
+                    else:
+                        parity_species_unavailable.append(
+                            f"{sp_name}（列 {meas_col} 全为 NaN/非数字）"
+                        )
+                    continue
+
+                # --- conversion 模式：按反应器/流动模型检查必要列 ---
+                if reactor_type_fit == REACTOR_TYPE_BSTR:
+                    required_cols = [
+                        f"C0_{sp_name}_mol_m3",
+                        f"Cout_{sp_name}_mol_m3",
+                    ]
+                    missing = [c for c in required_cols if c not in df_cols]
+                    if missing:
+                        parity_species_unavailable.append(
+                            f"{sp_name}（缺少列: {', '.join(missing)}）"
+                        )
+                        continue
+                    series_list = [
+                        pd.to_numeric(df_fit[required_cols[0]], errors="coerce"),
+                        pd.to_numeric(df_fit[required_cols[1]], errors="coerce"),
+                    ]
+                    if any(bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list):
+                        parity_species_candidates.append(sp_name)
+                    else:
+                        parity_species_unavailable.append(
+                            f"{sp_name}（C0/Cout 全为 NaN/非数字）"
+                        )
+                    continue
+
+                if (
+                    reactor_type_fit == REACTOR_TYPE_PFR
+                    and str(pfr_flow_model_fit) == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+                ):
+                    required_cols = [
+                        f"F0_{sp_name}_mol_s",
+                        f"Fout_{sp_name}_mol_s",
+                    ]
+                    missing = [c for c in required_cols if c not in df_cols]
+                    if missing:
+                        parity_species_unavailable.append(
+                            f"{sp_name}（气相 PFR 转化率需要列: {', '.join(missing)}）"
+                        )
+                        continue
+                    series_list = [
+                        pd.to_numeric(df_fit[required_cols[0]], errors="coerce"),
+                        pd.to_numeric(df_fit[required_cols[1]], errors="coerce"),
+                    ]
+                    if any(bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list):
+                        parity_species_candidates.append(sp_name)
+                    else:
+                        parity_species_unavailable.append(
+                            f"{sp_name}（F0/Fout 全为 NaN/非数字）"
+                        )
+                    continue
+
+                # 其他（液相 PFR / CSTR）：允许 F0/Fout；若缺则用 C0/Cout + vdot 换算
+                need_vdot = "vdot_m3_s" in df_cols
+                has_inlet = (
+                    (f"F0_{sp_name}_mol_s" in df_cols)
+                    or (need_vdot and (f"C0_{sp_name}_mol_m3" in df_cols))
+                )
+                has_outlet = (
+                    (f"Fout_{sp_name}_mol_s" in df_cols)
+                    or (need_vdot and (f"Cout_{sp_name}_mol_m3" in df_cols))
+                )
+                if not has_inlet or not has_outlet:
+                    parts = []
+                    if not has_inlet:
+                        parts.append("入口缺少 F0 或 C0+vdot")
+                    if not has_outlet:
+                        parts.append("出口缺少 Fout 或 Cout+vdot")
+                    parity_species_unavailable.append(f"{sp_name}（{'；'.join(parts)}）")
+                    continue
+
+                inlet_col = (
+                    f"F0_{sp_name}_mol_s"
+                    if f"F0_{sp_name}_mol_s" in df_cols
+                    else f"C0_{sp_name}_mol_m3"
+                )
+                outlet_col = (
+                    f"Fout_{sp_name}_mol_s"
+                    if f"Fout_{sp_name}_mol_s" in df_cols
+                    else f"Cout_{sp_name}_mol_m3"
+                )
+                numeric_in = pd.to_numeric(df_fit[inlet_col], errors="coerce")
+                numeric_out = pd.to_numeric(df_fit[outlet_col], errors="coerce")
+                if bool(np.any(np.isfinite(numeric_in.to_numpy()))) and bool(
+                    np.any(np.isfinite(numeric_out.to_numpy()))
+                ):
+                    parity_species_candidates.append(sp_name)
+                else:
+                    parity_species_unavailable.append(
+                        f"{sp_name}（入口/出口列全为 NaN/非数字）"
+                    )
+
+            if parity_species_unavailable:
+                show_missing = st.checkbox("显示无法绘图的物种原因", value=False)
+                if show_missing:
+                    st.caption(
+                        "无法绘制奇偶校验图的物种： " + "，".join(parity_species_unavailable)
+                    )
+
             cache_key = (
                 float(res.get("phi_final", res.get("cost", 0.0))),
-                str(output_mode_fit),
+                str(compare_validation_mode),
+                str(compare_output_mode),
                 tuple(parity_species_candidates),
                 float(rtol_fit),
                 float(atol_fit),
@@ -2123,7 +2306,7 @@ def main():
                         _build_fit_comparison_long_table(
                             data_df=df_fit,
                             species_names=species_names_fit,
-                            output_mode=output_mode_fit,
+                            output_mode=str(compare_output_mode),
                             output_species_list=parity_species_candidates,
                             stoich_matrix=stoich_matrix_fit,
                             fitted_params=fitted_params,
@@ -2134,6 +2317,7 @@ def main():
                             kinetic_model=kinetic_model_fit,
                             pfr_flow_model=str(pfr_flow_model_fit),
                             max_step_fraction=float(max_step_fraction_fit),
+                            validation_mode=str(compare_validation_mode),
                         )
                     )
                 except Exception as exc:
@@ -2144,17 +2328,43 @@ def main():
             if df_long.empty:
                 st.warning("对比数据为空：无法生成奇偶校验图。")
             else:
-                species_selected = st.multiselect(
-                    "选择要显示的物种",
-                    list(parity_species_candidates),
-                    default=list(parity_species_candidates),
-                )
-                show_residual_plot = st.checkbox("显示残差图", value=True)
-                n_cols = int(
-                    st.number_input(
-                        "每行子图数", min_value=1, max_value=4, value=2, step=1
+                # --- 布局：左侧选择数据/子图布局，右侧绘图附加选项 ---
+                col_sel, col_opt = st.columns([1.35, 1.0])
+                with col_sel:
+                    species_selected = st.multiselect(
+                        "选择要显示的物种",
+                        list(parity_species_candidates),
+                        default=list(parity_species_candidates),
+                        help="仅对当前奇偶校验图与残差图生效。",
                     )
-                )
+                    n_cols = int(
+                        st.number_input(
+                            "每行子图数",
+                            min_value=1,
+                            max_value=4,
+                            value=2,
+                            step=1,
+                            help="仅影响子图排版；不改变拟合/预测结果。",
+                        )
+                    )
+
+                with col_opt:
+                    show_residual_plot = st.checkbox("显示残差图", value=True)
+                    show_error_lines = st.checkbox("显示±误差线", value=True)
+                    error_band_percent = float(
+                        st.slider(
+                            "相对误差带（%）",
+                            min_value=0.0,
+                            max_value=50.0,
+                            value=10.0,
+                            step=0.5,
+                            key="parity_error_band_percent",
+                            help="在 y=x 两侧绘制 y=(1±e)x 参考线，用于直观判断预测偏差范围。",
+                            disabled=(not show_error_lines),
+                        )
+                    )
+
+                st.divider()
 
                 df_ok = df_long[df_long["ok"]].copy()
                 df_ok = df_ok[
@@ -2170,11 +2380,167 @@ def main():
                     if df_ok.empty:
                         st.warning("所选物种没有可用数据点。")
                     else:
+                        vals_all = np.concatenate(
+                            [
+                                df_ok["measured"].to_numpy(dtype=float),
+                                df_ok["predicted"].to_numpy(dtype=float),
+                            ]
+                        )
+                        vmin_auto = float(np.nanmin(vals_all))
+                        vmax_auto = float(np.nanmax(vals_all))
+                        if (not np.isfinite(vmin_auto)) or (not np.isfinite(vmax_auto)):
+                            vmin_auto, vmax_auto = 0.0, 1.0
+                        if vmax_auto <= vmin_auto:
+                            vmax_auto = vmin_auto + 1.0
+                        pad = 0.05 * float(vmax_auto - vmin_auto)
+                        axis_min_auto = float(vmin_auto - pad)
+                        axis_max_auto = float(vmax_auto + pad)
+
                         species_list_plot = list(
                             dict.fromkeys(df_ok["species"].tolist())
                         )
                         n_plots = len(species_list_plot)
                         n_rows = int(np.ceil(n_plots / max(n_cols, 1)))
+
+                        axis_ranges_by_species = None
+                        with st.expander("坐标范围设置（横纵一致 + 等比例）", expanded=False):
+                            st.caption(
+                                "默认强制 x/y 等比例，以避免因为坐标拉伸导致对拟合优劣的误判。"
+                            )
+                            axis_scope = st.radio(
+                                "坐标范围作用域",
+                                ["所有子图一致（推荐）", "每个子图独立"],
+                                index=0,
+                                horizontal=True,
+                                key="parity_axis_scope",
+                                help="所有子图一致：便于不同物种之间直接比较拟合质量；每个子图独立：可单独放大细节，但不同子图的点云“紧密程度”不可直接横向比较。",
+                            )
+                            axis_range_mode = st.radio(
+                                "范围来源",
+                                ["自动（按数据）", "自定义"],
+                                index=0,
+                                horizontal=True,
+                                key="parity_axis_range_mode",
+                                help="自动：按数据最小/最大值（含 5% padding）确定坐标范围；自定义：手动输入 min/max。若选择“每个子图独立”，则可分别为每个子图设置 min/max。",
+                            )
+                            st.caption(
+                                f"全局自动范围（用于统一坐标时的默认值）：[{axis_min_auto:.6g}, {axis_max_auto:.6g}]"
+                            )
+
+                            if axis_scope == "所有子图一致（推荐）":
+                                if axis_range_mode == "自定义":
+                                    col_ax1, col_ax2 = st.columns([1, 1])
+                                    axis_min_user = float(
+                                        col_ax1.number_input(
+                                            "坐标最小值",
+                                            value=float(axis_min_auto),
+                                            key="parity_axis_min",
+                                        )
+                                    )
+                                    axis_max_user = float(
+                                        col_ax2.number_input(
+                                            "坐标最大值",
+                                            value=float(axis_max_auto),
+                                            key="parity_axis_max",
+                                        )
+                                    )
+                                    if axis_max_user <= axis_min_user:
+                                        st.warning(
+                                            "坐标范围无效：需要满足 max > min。将回退到自动范围。"
+                                        )
+                                        axis_min_plot, axis_max_plot = (
+                                            axis_min_auto,
+                                            axis_max_auto,
+                                        )
+                                    else:
+                                        axis_min_plot, axis_max_plot = (
+                                            axis_min_user,
+                                            axis_max_user,
+                                        )
+                                else:
+                                    axis_min_plot, axis_max_plot = (
+                                        axis_min_auto,
+                                        axis_max_auto,
+                                    )
+                            else:
+                                # 每个子图独立：先计算每个物种的自动范围；如选择自定义，则逐图覆盖
+                                auto_ranges = {}
+                                for species_name in species_list_plot:
+                                    df_sp = df_ok[df_ok["species"] == species_name]
+                                    vals_sp = np.concatenate(
+                                        [
+                                            df_sp["measured"].to_numpy(dtype=float),
+                                            df_sp["predicted"].to_numpy(dtype=float),
+                                        ]
+                                    )
+                                    vmin_sp = float(np.nanmin(vals_sp))
+                                    vmax_sp = float(np.nanmax(vals_sp))
+                                    if (not np.isfinite(vmin_sp)) or (
+                                        not np.isfinite(vmax_sp)
+                                    ):
+                                        vmin_sp, vmax_sp = 0.0, 1.0
+                                    if vmax_sp <= vmin_sp:
+                                        vmax_sp = vmin_sp + 1.0
+                                    pad_sp = 0.05 * float(vmax_sp - vmin_sp)
+                                    auto_ranges[species_name] = (
+                                        float(vmin_sp - pad_sp),
+                                        float(vmax_sp + pad_sp),
+                                    )
+
+                                axis_ranges_by_species = dict(auto_ranges)
+                                if axis_range_mode == "自定义":
+                                    st.markdown("**逐图自定义**")
+                                    st.caption(
+                                        "每个子图的 x/y 使用相同 min/max，并保持等比例；若输入无效（max ≤ min），该子图会回退到自动范围。"
+                                    )
+                                    h1, h2, h3 = st.columns([1.2, 1, 1])
+                                    h1.markdown("**物种**")
+                                    h2.markdown("**min**")
+                                    h3.markdown("**max**")
+                                    invalid_species = []
+                                    for idx, species_name in enumerate(species_list_plot):
+                                        c1, c2, c3 = st.columns([1.2, 1, 1])
+                                        c1.write(species_name)
+                                        auto_min, auto_max = auto_ranges[species_name]
+                                        key_hash = hashlib.md5(
+                                            str(species_name).encode("utf-8")
+                                        ).hexdigest()[:12]
+                                        axis_min_user = float(
+                                            c2.number_input(
+                                                "min",
+                                                value=float(auto_min),
+                                                key=f"parity_axis_min_{idx}_{key_hash}",
+                                                label_visibility="collapsed",
+                                            )
+                                        )
+                                        axis_max_user = float(
+                                            c3.number_input(
+                                                "max",
+                                                value=float(auto_max),
+                                                key=f"parity_axis_max_{idx}_{key_hash}",
+                                                label_visibility="collapsed",
+                                            )
+                                        )
+                                        if axis_max_user <= axis_min_user:
+                                            invalid_species.append(species_name)
+                                            axis_ranges_by_species[species_name] = (
+                                                float(auto_min),
+                                                float(auto_max),
+                                            )
+                                        else:
+                                            axis_ranges_by_species[species_name] = (
+                                                float(axis_min_user),
+                                                float(axis_max_user),
+                                            )
+                                    if invalid_species:
+                                        st.warning(
+                                            "以下物种的坐标范围无效（max ≤ min），已回退到自动范围："
+                                            + "，".join(map(str, invalid_species))
+                                        )
+                                else:
+                                    # 自动范围：axis_ranges_by_species 已包含逐物种自动范围
+                                    pass
+
                         fig, axes = plt.subplots(
                             n_rows,
                             n_cols,
@@ -2211,23 +2577,64 @@ def main():
                                     )
                                 )
                             )
+                            # x/y 坐标范围 + 等比例（可全局统一，也可逐图独立）
+                            if axis_ranges_by_species is None:
+                                axis_min_i, axis_max_i = axis_min_plot, axis_max_plot
+                            else:
+                                axis_min_i, axis_max_i = axis_ranges_by_species.get(
+                                    species_name,
+                                    (axis_min_auto, axis_max_auto),
+                                )
+                            ax.set_xlim(axis_min_i, axis_max_i)
+                            ax.set_ylim(axis_min_i, axis_max_i)
+                            ax.set_aspect("equal", adjustable="box")
+
                             if (
                                 np.isfinite(min_v)
                                 and np.isfinite(max_v)
                                 and max_v > min_v
                             ):
                                 ax.plot(
-                                    [min_v, max_v], [min_v, max_v], "k--", label="y=x"
+                                    [axis_min_i, axis_max_i],
+                                    [axis_min_i, axis_max_i],
+                                    "k--",
+                                    label="y=x",
                                 )
+                                if show_error_lines and (error_band_percent > 0.0):
+                                    e = float(error_band_percent) / 100.0
+                                    error_label = f"{error_band_percent:.1f}%误差线"
+                                    ax.plot(
+                                        [axis_min_i, axis_max_i],
+                                        [
+                                            (1.0 - e) * axis_min_i,
+                                            (1.0 - e) * axis_max_i,
+                                        ],
+                                        color="tab:gray",
+                                        linestyle="--",
+                                        linewidth=1.0,
+                                        label=error_label,
+                                    )
+                                    ax.plot(
+                                        [axis_min_i, axis_max_i],
+                                        [
+                                            (1.0 + e) * axis_min_i,
+                                            (1.0 + e) * axis_max_i,
+                                        ],
+                                        color="tab:gray",
+                                        linestyle="--",
+                                        linewidth=1.0,
+                                        label="_nolegend_",
+                                    )
                             ax.set_title(f"{species_name}")
-                            ax.set_xlabel(f"Measured [{unit_text}]")
-                            ax.set_ylabel(f"Predicted [{unit_text}]")
+                            ax.set_xlabel(f"Measured [{unit_text_parity}]")
+                            ax.set_ylabel(f"Predicted [{unit_text_parity}]")
                             ax.grid(True)
                             ax.legend()
 
                         for j in range(n_plots, n_rows * n_cols):
                             axes[j // n_cols][j % n_cols].axis("off")
 
+                        fig.tight_layout()
                         st.pyplot(fig)
 
                         image_format = st.selectbox(
@@ -2266,8 +2673,8 @@ def main():
                                 alpha=0.6,
                                 label=species_name,
                             )
-                    ax_r.set_xlabel(f"Measured [{unit_text}]")
-                    ax_r.set_ylabel(f"Residual (Pred - Meas) [{unit_text}]")
+                    ax_r.set_xlabel(f"Measured [{unit_text_parity}]")
+                    ax_r.set_ylabel(f"Residual (Pred - Meas) [{unit_text_parity}]")
                     ax_r.grid(True)
                     ax_r.legend()
                     fig_r.tight_layout()
@@ -2276,9 +2683,25 @@ def main():
 
                 show_compare_table = st.checkbox("显示预测 vs 实验对比表", value=False)
                 if show_compare_table:
-                    st.markdown("#### 预测 vs 实验对比表")
+                    st.markdown("#### 预测 vs 实验对比表（含相对残差）")
                     df_show = df_long.copy()
                     df_show = df_show[df_show["species"].isin(species_selected)]
+                    # 按用户需求：不显示 ok/message；新增 relative_residual（在构表阶段已计算）
+                    drop_cols = [c for c in ["ok", "message"] if c in df_show.columns]
+                    if drop_cols:
+                        df_show = df_show.drop(columns=drop_cols)
+
+                    preferred_order = [
+                        "row_index",
+                        "species",
+                        "measured",
+                        "predicted",
+                        "residual",
+                        "relative_residual",
+                    ]
+                    existing_preferred = [c for c in preferred_order if c in df_show.columns]
+                    remaining_cols = [c for c in df_show.columns if c not in existing_preferred]
+                    df_show = df_show[existing_preferred + remaining_cols]
                     st.dataframe(
                         df_show,
                         use_container_width=True,
@@ -2715,9 +3138,13 @@ def main():
 
             df_long = st.session_state.get("fit_compare_long_df", pd.DataFrame())
             if not df_long.empty:
+                df_export = df_long.copy()
+                drop_cols = [c for c in ["ok", "message"] if c in df_export.columns]
+                if drop_cols:
+                    df_export = df_export.drop(columns=drop_cols)
                 st.download_button(
                     "📥 导出预测 vs 实验对比（长表）CSV",
-                    df_long.to_csv(index=False).encode("utf-8"),
+                    df_export.to_csv(index=False).encode("utf-8"),
                     file_name="pred_vs_meas_long.csv",
                     mime="text/csv",
                 )
