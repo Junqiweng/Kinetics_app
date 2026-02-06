@@ -627,8 +627,11 @@ def _run_fitting_job(
     residual_type_names = {
         "绝对残差": "Absolute: r = y_pred - y_meas",
         "相对残差": "Relative: r = (y_pred - y_meas) / y_meas",
-        "百分比残差": f"Percentage: r = (y_pred - y_meas) / (|y_meas| + ε), ε≈{residual_epsilon:.2e}",
+        "百分比残差": f"Percentage: r = 100 * (y_pred - y_meas) / (|y_meas| + ε), ε≈{residual_epsilon:.2e}",
     }
+    residual_formula_for_summary = residual_type_names.get(
+        residual_type, residual_type_names["绝对残差"]
+    )
     timeline_add(
         "ℹ️",
         f"残差类型：{residual_type} — {residual_type_names.get(residual_type, '')}",
@@ -754,10 +757,10 @@ def _run_fitting_job(
                         rel_residual[invalid_mask] = residual_penalty_value
                     residual_array[base : base + n_outputs] = rel_residual
                 elif residual_type == "百分比残差":
-                    # 百分比残差: r = (y_pred - y_meas) / (|y_meas| + epsilon)
+                    # 百分比残差: r = 100 * (y_pred - y_meas) / (|y_meas| + epsilon)
                     denominator = np.abs(measured_row) + residual_epsilon
                     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                        pct_residual = diff / denominator
+                        pct_residual = 100.0 * (diff / denominator)
                     invalid_mask = ~np.isfinite(pct_residual)
                     if np.any(invalid_mask):
                         pct_residual[invalid_mask] = residual_penalty_value
@@ -824,7 +827,7 @@ def _run_fitting_job(
         set_status("跳过拟合（直接使用初值计算）。")
         set_progress(1.0)
         set_final_summary(
-            "目标函数：Φ(θ)=1/2·∑ r_i(θ)^2。\n"
+            f"目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，{residual_formula_for_summary}。\n"
             f"本次未执行 least_squares，直接使用初值；Φ={initial_cost:.3e}\n"
             f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"
             f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
@@ -994,7 +997,7 @@ def _run_fitting_job(
     set_metric("phi_ratio", phi_ratio)
     set_metric("param_relative_change", param_relative_change)
     set_final_summary(
-        "目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，r_i=y_i^pred−y_i^meas。\n"
+        f"目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，{residual_formula_for_summary}。\n"
         f"Φ：初始 {initial_cost:.3e} -> 拟合 {final_phi:.3e} (比例 {phi_ratio:.3e}); "
         f"参数相对变化 {param_relative_change:.3e}\n"
         f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"

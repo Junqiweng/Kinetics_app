@@ -1620,9 +1620,9 @@ def main():
                 ),
                 "百分比残差": (
                     "**百分比残差** (Percentage Residual with offset)\n\n"
-                    r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{|y_i^{meas}| + \epsilon}$"
+                    r"$r_i = 100 \times \frac{y_i^{pred} - y_i^{meas}}{|y_i^{meas}| + \epsilon}$"
                     "\n\n"
-                    r"其中 $\epsilon$ 为小正数（典型值的 1%），避免除零。"
+                    r"其中 $\epsilon$ 为小正数（典型值的 1%），避免除零；$r_i$ 的单位为 %。"
                     "\n\n适用于：测量值可能接近零的数据。兼顾相对误差与数值稳定性。"
                 ),
             }
@@ -2657,29 +2657,67 @@ def main():
 
                 if show_residual_plot:
                     st.markdown("#### 残差图 (Predicted - Measured)")
-                    fig_r, ax_r = plt.subplots(figsize=(7.5, 4.8))
-                    ax_r.axhline(0.0, color="k", linestyle="--", linewidth=1.0)
-                    for species_name in species_selected:
-                        df_sp = df_long[df_long["species"] == species_name]
-                        df_sp = df_sp[df_sp["ok"]]
-                        df_sp = df_sp[
-                            np.isfinite(df_sp["residual"])
-                            & np.isfinite(df_sp["measured"])
+                    df_res = df_long[df_long["ok"]].copy()
+                    df_res = df_res[df_res["species"].isin(species_selected)]
+                    df_res = df_res[
+                        np.isfinite(df_res["residual"]) & np.isfinite(df_res["measured"])
+                    ]
+                    if df_res.empty:
+                        st.warning("所选物种没有可用残差数据。")
+                    else:
+                        species_list_residual = [
+                            sp for sp in species_selected if sp in set(df_res["species"])
                         ]
-                        if not df_sp.empty:
+                        n_residual_plots = len(species_list_residual)
+                        n_residual_rows = int(
+                            np.ceil(n_residual_plots / max(int(n_cols), 1))
+                        )
+
+                        fig_r, axes_r = plt.subplots(
+                            n_residual_rows,
+                            n_cols,
+                            figsize=(5.2 * n_cols, 4.0 * n_residual_rows),
+                            squeeze=False,
+                        )
+
+                        for i, species_name in enumerate(species_list_residual):
+                            ax_r = axes_r[i // n_cols][i % n_cols]
+                            df_sp = df_res[df_res["species"] == species_name]
                             ax_r.scatter(
                                 df_sp["measured"].to_numpy(dtype=float),
                                 df_sp["residual"].to_numpy(dtype=float),
-                                alpha=0.6,
+                                alpha=0.65,
                                 label=species_name,
                             )
-                    ax_r.set_xlabel(f"Measured [{unit_text_parity}]")
-                    ax_r.set_ylabel(f"Residual (Pred - Meas) [{unit_text_parity}]")
-                    ax_r.grid(True)
-                    ax_r.legend()
-                    fig_r.tight_layout()
-                    st.pyplot(fig_r, use_container_width=True)
-                    plt.close(fig_r)
+                            ax_r.axhline(0.0, color="k", linestyle="--", linewidth=1.0)
+                            ax_r.set_title(f"{species_name}")
+                            ax_r.set_xlabel(f"Measured [{unit_text_parity}]")
+                            ax_r.set_ylabel(f"Residual (Pred - Meas) [{unit_text_parity}]")
+                            ax_r.grid(True)
+                            ax_r.legend()
+
+                        for j in range(n_residual_plots, n_residual_rows * n_cols):
+                            axes_r[j // n_cols][j % n_cols].axis("off")
+
+                        fig_r.tight_layout()
+                        st.pyplot(fig_r)
+                        residual_image_format = st.selectbox(
+                            "残差图像格式",
+                            ["png", "svg"],
+                            index=0,
+                            key="residual_image_format",
+                        )
+                        st.download_button(
+                            "📥 下载残差图",
+                            ui_comp.figure_to_image_bytes(fig_r, residual_image_format),
+                            file_name=f"residual_plot.{residual_image_format}",
+                            mime=(
+                                "image/png"
+                                if residual_image_format == "png"
+                                else "image/svg+xml"
+                            ),
+                        )
+                        plt.close(fig_r)
 
                 show_compare_table = st.checkbox("显示预测 vs 实验对比表", value=False)
                 if show_compare_table:
