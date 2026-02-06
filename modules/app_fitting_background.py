@@ -144,12 +144,12 @@ def _render_fitting_overview_box(job_summary: dict) -> None:
     bullet_html = "\n".join([f"<li>{html_lib.escape(str(x))}</li>" for x in lines])
     st.markdown(
         f"""
-        <div style="background:var(--card-bg,#fff); border:1px solid var(--border,rgba(0,0,0,.10)); border-radius:var(--radius,16px); box-shadow:var(--shadow-soft,0 1px 1px rgba(0,0,0,.04)); padding:14px 16px;">
-          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-            <div style="width:8px; height:8px; border-radius:999px; background:var(--accent,#007AFF);"></div>
-            <div style="font-weight:650; color:var(--text,#1D1D1F);">{title}</div>
+        <div class="kinetics-overview-box">
+          <div class="kinetics-overview-head">
+            <div class="kinetics-overview-dot"></div>
+            <div class="kinetics-overview-title">{title}</div>
           </div>
-          <ul style="margin:0 0 0 18px; color:var(--text,#1D1D1F); line-height:1.65;">
+          <ul class="kinetics-overview-list">
             {bullet_html}
           </ul>
         </div>

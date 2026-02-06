@@ -1793,7 +1793,7 @@ def main():
                 [1.1, 1.4], vertical_alignment="center"
             )
             col_interval_label.markdown(
-                '<div style="font-size:0.8rem; color:var(--muted,#6E6E73); white-space:nowrap;">间隔(s)</div>',
+                '<div class="kinetics-inline-label">间隔(s)</div>',
                 unsafe_allow_html=True,
             )
             refresh_interval_s = float(

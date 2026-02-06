@@ -12,15 +12,22 @@ APP_CSS = """
 <style>
 :root {
   --app-bg: #F5F5F7;
+  --app-bg-grad-top: #FAFAFB;
+  --app-bg-grad-bottom: #F3F3F5;
   --card-bg: #FFFFFF;
+  --card-bg-elevated: #FCFCFD;
   --text: #1D1D1F;
   --muted: #6E6E73;
   --border: rgba(0, 0, 0, 0.10);
-  --border-strong: rgba(0, 0, 0, 0.14);
+  --border-strong: rgba(0, 0, 0, 0.16);
   --accent: #007AFF;
+  --accent-strong: #0066D6;
+  --accent-soft: rgba(0, 122, 255, 0.14);
   --radius: 16px;
+  --radius-input: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 10px 30px rgba(0, 0, 0, 0.04);
   --shadow-soft: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --focus-ring: 0 0 0 3px var(--accent-soft);
 }
 
 /* Apple 式极简：留白、弱边框、轻阴影、系统字体 */
@@ -37,9 +44,16 @@ html, body, [class*="css"] {
 
 .kinetics-card-marker { display: none; }
 
+::selection {
+  background: rgba(0, 122, 255, 0.18);
+  color: var(--text);
+}
+
 /* App 背景 */
 [data-testid="stAppViewContainer"] {
-  background: var(--app-bg);
+  background:
+    radial-gradient(1200px 540px at 0% -12%, rgba(255, 255, 255, 0.64), transparent 70%),
+    linear-gradient(180deg, var(--app-bg-grad-top) 0%, var(--app-bg-grad-bottom) 100%);
 }
 
 /* 主容器：控制最大宽度，让排版更“工整” */
@@ -47,19 +61,23 @@ html, body, [class*="css"] {
   max-width: 1280px;
   padding-top: 1.25rem;
   padding-bottom: 3.5rem;
+  padding-left: clamp(0.95rem, 1.4vw, 1.65rem);
+  padding-right: clamp(0.95rem, 1.4vw, 1.65rem);
 }
 
 /* 顶部 Header：轻薄半透明 */
 [data-testid="stHeader"] {
-  background: rgba(245, 245, 247, 0.85);
+  background: rgba(245, 245, 247, 0.82);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.52);
 }
 
 /* 侧边栏：干净白底 + 细分割线 */
 [data-testid="stSidebar"] {
-  background: var(--card-bg);
+  background: linear-gradient(180deg, #FFFFFF 0%, var(--card-bg-elevated) 100%);
   border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.03);
 }
 
 [data-testid="stSidebar"] .block-container {
@@ -73,6 +91,7 @@ h1 {
   font-weight: 650 !important;
   color: var(--text) !important;
   letter-spacing: -0.02em;
+  line-height: 1.18;
   margin-bottom: 0.35rem !important;
 }
 
@@ -84,6 +103,7 @@ h2 {
   font-size: 1.25rem !important;
   font-weight: 650 !important;
   color: var(--text);
+  line-height: 1.3;
   margin-top: 1.25rem !important;
   margin-bottom: 0.6rem !important;
 }
@@ -92,6 +112,7 @@ h3 {
   font-size: 1.08rem !important;
   font-weight: 650 !important;
   color: var(--text);
+  line-height: 1.35;
   margin-top: 1.0rem !important;
   margin-bottom: 0.5rem !important;
 }
@@ -100,12 +121,23 @@ h4 {
   font-size: 1.0rem !important;
   font-weight: 650 !important;
   color: var(--muted);
+  line-height: 1.4;
 }
 
 /* 说明文字 */
 .stMarkdown p, .stMarkdown li {
   line-height: 1.65;
   color: var(--text);
+}
+
+.stMarkdown a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.stMarkdown a:hover {
+  color: var(--accent-strong);
 }
 
 .stCaption {
@@ -125,6 +157,24 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker) {
   border: 1px solid var(--border);
   box-shadow: var(--shadow-soft);
   padding: 0.9rem 0.95rem;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.88), rgba(0, 0, 0, 0.03), rgba(255, 255, 255, 0.88));
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker):hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
 }
 
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker) > div {
@@ -133,7 +183,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker) > div
 
 /* Tabs：做成接近 iOS 的 segmented control */
 .stTabs [data-baseweb="tab-list"] {
-  background: var(--card-bg);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F9F9FB 100%);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 4px;
@@ -147,7 +197,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker) > div
   padding: 0.55rem 0.95rem;
   font-weight: 650;
   color: var(--muted);
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .stTabs [data-baseweb="tab"]:hover {
@@ -158,18 +208,33 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.kinetics-card-marker) > div
 .stTabs [aria-selected="true"] {
   background: var(--accent) !important;
   color: #ffffff !important;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
 }
 
 /* 按钮：统一圆角与主色，减少夸张位移效果 */
 button[data-testid^="baseButton-"] {
-  border-radius: 12px !important;
+  border-radius: var(--radius-input) !important;
   font-weight: 600 !important;
-  transition: background 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  min-height: 2.4rem;
+  transition: background 120ms ease, box-shadow 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+button[data-testid^="baseButton-"]:hover {
+  transform: translateY(-1px);
+}
+
+button[data-testid^="baseButton-"]:active {
+  transform: translateY(0);
+}
+
+button[data-testid^="baseButton-"]:focus-visible {
+  outline: none !important;
+  box-shadow: var(--focus-ring) !important;
 }
 
 button[data-testid="baseButton-secondary"],
 button[data-testid="baseButton-tertiary"] {
-  background: var(--card-bg) !important;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F9F9FB 100%) !important;
   border: 1px solid var(--border) !important;
   color: var(--text) !important;
   box-shadow: none !important;
@@ -188,7 +253,7 @@ button[data-testid="baseButton-primary"] {
 }
 
 button[data-testid="baseButton-primary"]:hover {
-  background: #0066D6 !important;
+  background: var(--accent-strong) !important;
   box-shadow: var(--shadow-soft) !important;
 }
 
@@ -220,9 +285,10 @@ div[data-testid="stTextArea"] [class*="emotion-cache"] {
 div[data-testid="stTextInput"] [data-baseweb="input"] {
   background: var(--card-bg) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-input) !important;
   box-shadow: none !important;
   overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 div[data-testid="stTextInput"] input {
@@ -234,7 +300,7 @@ div[data-testid="stTextInput"] input {
 
 div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
   border-color: rgba(0, 122, 255, 0.55) !important;
-  box-shadow: none !important;
+  box-shadow: var(--focus-ring) !important;
   outline: none !important;
 }
 
@@ -242,9 +308,10 @@ div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
 div[data-testid="stTextArea"] [data-baseweb="textarea"] {
   background: var(--card-bg) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-input) !important;
   box-shadow: none !important;
   overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 div[data-testid="stTextArea"] textarea {
@@ -256,7 +323,7 @@ div[data-testid="stTextArea"] textarea {
 
 div[data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within {
   border-color: rgba(0, 122, 255, 0.55) !important;
-  box-shadow: none !important;
+  box-shadow: var(--focus-ring) !important;
   outline: none !important;
 }
 
@@ -264,9 +331,10 @@ div[data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within {
 div[data-testid="stNumberInput"] [data-baseweb="input"] {
   background: var(--card-bg) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-input) !important;
   box-shadow: none !important;
   overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 div[data-testid="stNumberInput"] input {
@@ -278,8 +346,7 @@ div[data-testid="stNumberInput"] input {
 
 div[data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {
   border-color: rgba(0, 122, 255, 0.55) !important;
-  /* 避免“边框 + 外圈描边”叠加造成双边框观感，这里只保留单层边框高亮 */
-  box-shadow: none !important;
+  box-shadow: var(--focus-ring) !important;
   outline: none !important;
 }
 
@@ -314,7 +381,18 @@ div[data-testid="stNumberInput"] input[type="number"] {
 div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
   background: var(--card-bg) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-input) !important;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+  border-color: rgba(0, 122, 255, 0.55) !important;
+  box-shadow: var(--focus-ring) !important;
+}
+
+div[data-testid="stTextInput"] input::placeholder,
+div[data-testid="stTextArea"] textarea::placeholder {
+  color: rgba(110, 110, 115, 0.78) !important;
 }
 
 /* 表格/数据编辑器：圆角 + 细边框 */
@@ -324,6 +402,24 @@ div[data-testid="stDataEditor"] {
   overflow: hidden;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-soft);
+  background: var(--card-bg);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+div[data-testid="stDataFrame"]:hover,
+div[data-testid="stDataEditor"]:hover {
+  border-color: var(--border-strong);
+}
+
+div[data-testid="stDataFrame"] [role="columnheader"],
+div[data-testid="stDataEditor"] [role="columnheader"] {
+  background: #F7F7F9 !important;
+  color: var(--text) !important;
+  font-weight: 600 !important;
+}
+
+div[data-testid="stDataEditor"] [role="row"]:hover [role="gridcell"] {
+  background: rgba(0, 122, 255, 0.03) !important;
 }
 
 /* Expander：同卡片风格 */
@@ -333,6 +429,7 @@ div[data-testid="stDataEditor"] {
   background: var(--card-bg) !important;
   box-shadow: var(--shadow-soft) !important;
   overflow: hidden; /* 避免内部元素的边框/描边“叠加”到外框上，看起来像两层边框 */
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 :where(div, details)[data-testid="stExpander"]:hover {
@@ -350,6 +447,13 @@ div[data-testid="stDataEditor"] {
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFB 100%);
+  padding: 0.7rem 0.9rem;
+}
+
+:where(div, details)[data-testid="stExpander"][open] > summary,
+:where(div, details)[data-testid="stExpander"] details[open] > summary {
+  border-bottom: 1px solid var(--border) !important;
 }
 
 :where(div, details)[data-testid="stExpander"] summary:focus-visible {
@@ -382,12 +486,120 @@ hr {
 /* 信息框：统一圆角 */
 .stInfo, .stSuccess, .stWarning, .stError {
   border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
 }
 
 /* 代码块：更紧凑 */
 code {
   font-size: 0.9rem !important;
   border-radius: 8px !important;
+  background: #F2F2F7 !important;
+  padding: 0.11rem 0.36rem;
+}
+
+pre code {
+  padding: 0 !important;
+}
+
+/* 交互细节增强 */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+div[data-testid="stProgressBar"] > div > div > div > div {
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-strong) 100%) !important;
+}
+
+/* 复用样式：拟合面板的小标签与概览卡片 */
+.kinetics-inline-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.kinetics-overview-box {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FBFBFC 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: 14px 16px;
+}
+
+.kinetics-overview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.kinetics-overview-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.kinetics-overview-title {
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.kinetics-overview-list {
+  margin: 0 0 0 18px;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+/* 滚动条细节 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.26);
+}
+
+/* 移动端与窄屏：保持同风格但更紧凑 */
+@media (max-width: 1024px) {
+  .block-container {
+    padding-top: 1rem;
+    padding-bottom: 2.8rem;
+  }
+
+  h1 {
+    font-size: 1.8rem !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .block-container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-bottom: 2.25rem;
+  }
+
+  h1 {
+    font-size: 1.6rem !important;
+  }
+
+  .stTabs [data-baseweb="tab"] {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.92rem;
+  }
 }
 </style>
 """
