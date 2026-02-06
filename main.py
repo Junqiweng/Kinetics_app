@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import streamlit as st
 
-from modules.app_bootstrap import bootstrap_app_state
-from modules.app_plot_helpers import apply_runtime_patches
-from modules.app_sidebar import render_sidebar
-from modules.app_tab_data import render_data_tab
-from modules.app_tab_fit import render_fit_tab
-from modules.app_tab_model import render_model_tab
+from modules.bootstrap import bootstrap_app_state
+from modules.contexts import (
+    build_base_context,
+    build_data_context,
+    build_fit_context,
+    build_sidebar_context,
+)
+from modules.plot_helpers import apply_runtime_patches
+from modules.sidebar import render_sidebar
+from modules.tab_data import render_data_tab
+from modules.tab_fit import render_fit_tab
+from modules.tab_model import render_model_tab
 from modules.constants import REACTOR_TYPE_CSTR, REACTOR_TYPE_PFR
 
 
@@ -20,12 +26,8 @@ def main() -> None:
     apply_runtime_patches()
 
     bootstrap_state = bootstrap_app_state()
-    sidebar_state = render_sidebar(
-        {
-            "get_cfg": bootstrap_state["get_cfg"],
-            "show_help_dialog": bootstrap_state["show_help_dialog"],
-        }
-    )
+    sidebar_ctx = build_sidebar_context(bootstrap_state)
+    sidebar_state = render_sidebar(sidebar_ctx)
 
     reactor_type = sidebar_state["reactor_type"]
     st.title(f"{reactor_type} 反应动力学参数拟合")
@@ -39,11 +41,14 @@ def main() -> None:
     tab_model, tab_data, tab_fit = st.tabs(bootstrap_state["main_tab_labels"])
     bootstrap_state["restore_active_main_tab"]()
 
-    base_ctx = {**bootstrap_state, **sidebar_state}
+    base_ctx = build_base_context(bootstrap_state, sidebar_state)
     model_state = render_model_tab(tab_model, base_ctx)
-    data_state = render_data_tab(tab_data, {**base_ctx, **model_state})
-    render_fit_tab(tab_fit, {**base_ctx, **model_state, **data_state})
+    data_ctx = build_data_context(base_ctx, model_state)
+    data_state = render_data_tab(tab_data, data_ctx)
+    fit_ctx = build_fit_context(base_ctx, model_state, data_state)
+    render_fit_tab(tab_fit, fit_ctx)
 
 
 if __name__ == "__main__":
     main()
+

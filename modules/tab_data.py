@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
-import modules.browser_storage as browser_storage
-import modules.config_manager as config_manager
 import modules.ui_text as ui_text
+from modules.export_config import (
+    build_export_config_from_ctx,
+    persist_export_config,
+    render_export_config_button,
+)
 from modules.constants import (
-    DEFAULT_DIFF_STEP_REL,
-    DEFAULT_EA_K_MAX_J_MOL,
-    DEFAULT_EA_K_MIN_J_MOL,
-    DEFAULT_EA_MAX_J_MOL,
-    DEFAULT_EA_MIN_J_MOL,
-    DEFAULT_K0_ADS_MAX,
-    DEFAULT_K0_ADS_MIN,
-    DEFAULT_K0_MAX,
-    DEFAULT_K0_MIN,
-    DEFAULT_MAX_NFEV,
-    DEFAULT_MAX_NFEV_COARSE,
-    DEFAULT_MAX_STEP_FRACTION,
-    DEFAULT_N_STARTS,
-    DEFAULT_ORDER_MAX,
-    DEFAULT_ORDER_MIN,
-    DEFAULT_RANDOM_SEED,
     OUTPUT_MODE_COUT,
     OUTPUT_MODES_BATCH,
     OUTPUT_MODES_FLOW,
@@ -271,128 +257,22 @@ def render_data_tab(tab_data, ctx: dict) -> dict:
 
     # --- 构建导出配置（基础版；若拟合页启用高级设置，会在拟合页再次更新）---
     if export_config_placeholder is not None:
-        export_k0_min = float(get_cfg("k0_min", DEFAULT_K0_MIN))
-        export_k0_max = float(get_cfg("k0_max", DEFAULT_K0_MAX))
-        export_ea_min = float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL))
-        export_ea_max = float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL))
-        export_ord_min = float(get_cfg("order_min", DEFAULT_ORDER_MIN))
-        export_ord_max = float(get_cfg("order_max", DEFAULT_ORDER_MAX))
-        export_K0_ads_min = float(get_cfg("K0_ads_min", DEFAULT_K0_ADS_MIN))
-        export_K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
-        export_Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
-        export_Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
-
-        export_diff_step_rel = float(get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL))
-        export_max_nfev = int(get_cfg("max_nfev", DEFAULT_MAX_NFEV))
-        export_use_x_scale_jac = bool(get_cfg("use_x_scale_jac", True))
-        export_use_ms = bool(get_cfg("use_multi_start", True))
-        export_n_starts = int(get_cfg("n_starts", DEFAULT_N_STARTS))
-        export_max_nfev_coarse = int(
-            get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE)
-        )
-        export_random_seed = int(get_cfg("random_seed", DEFAULT_RANDOM_SEED))
-        export_max_step_fraction = float(
-            get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
-        )
-
-        export_cfg = config_manager.collect_config(
-            reactor_type=reactor_type,
-            pfr_flow_model=str(pfr_flow_model),
-            kinetic_model=kinetic_model,
-            solver_method=solver_method,
-            rtol=float(rtol),
-            atol=float(atol),
-            max_step_fraction=export_max_step_fraction,
-            species_text=str(species_text),
-            n_reactions=int(n_reactions),
-            stoich_matrix=np.asarray(stoich_matrix, dtype=float),
-            order_guess=np.asarray(order_guess, dtype=float),
-            fit_order_flags_matrix=np.asarray(fit_order_flags_matrix, dtype=bool),
-            k0_guess=np.asarray(k0_guess, dtype=float),
-            ea_guess_J_mol=np.asarray(ea_guess_J_mol, dtype=float),
-            fit_k0_flags=np.asarray(fit_k0_flags, dtype=bool),
-            fit_ea_flags=np.asarray(fit_ea_flags, dtype=bool),
-            K0_ads=None if K0_ads is None else np.asarray(K0_ads, dtype=float),
-            Ea_K_J_mol=(
-                None if Ea_K_J_mol is None else np.asarray(Ea_K_J_mol, dtype=float)
-            ),
-            fit_K0_ads_flags=(
-                None
-                if fit_K0_ads_flags is None
-                else np.asarray(fit_K0_ads_flags, dtype=bool)
-            ),
-            fit_Ea_K_flags=(
-                None
-                if fit_Ea_K_flags is None
-                else np.asarray(fit_Ea_K_flags, dtype=bool)
-            ),
-            m_inhibition=(
-                None if m_inhibition is None else np.asarray(m_inhibition, dtype=float)
-            ),
-            fit_m_flags=(
-                None if fit_m_flags is None else np.asarray(fit_m_flags, dtype=bool)
-            ),
-            k0_rev=None if k0_rev is None else np.asarray(k0_rev, dtype=float),
-            ea_rev_J_mol=(
-                None if ea_rev_J_mol is None else np.asarray(ea_rev_J_mol, dtype=float)
-            ),
-            fit_k0_rev_flags=(
-                None
-                if fit_k0_rev_flags is None
-                else np.asarray(fit_k0_rev_flags, dtype=bool)
-            ),
-            fit_ea_rev_flags=(
-                None
-                if fit_ea_rev_flags is None
-                else np.asarray(fit_ea_rev_flags, dtype=bool)
-            ),
-            order_rev=None if order_rev is None else np.asarray(order_rev, dtype=float),
-            fit_order_rev_flags_matrix=(
-                None
-                if fit_order_rev_flags_matrix is None
-                else np.asarray(fit_order_rev_flags_matrix, dtype=bool)
-            ),
+        export_cfg = build_export_config_from_ctx(
+            ctx,
             output_mode=str(output_mode),
             output_species_list=list(output_species_list),
-            k0_min=export_k0_min,
-            k0_max=export_k0_max,
-            ea_min_J_mol=export_ea_min,
-            ea_max_J_mol=export_ea_max,
-            order_min=export_ord_min,
-            order_max=export_ord_max,
-            K0_ads_min=export_K0_ads_min,
-            K0_ads_max=export_K0_ads_max,
-            Ea_K_min=export_Ea_K_min,
-            Ea_K_max=export_Ea_K_max,
-            diff_step_rel=export_diff_step_rel,
-            max_nfev=export_max_nfev,
-            use_x_scale_jac=export_use_x_scale_jac,
-            use_multi_start=export_use_ms,
-            n_starts=export_n_starts,
-            max_nfev_coarse=export_max_nfev_coarse,
-            random_seed=export_random_seed,
         )
-        is_valid_cfg, _ = config_manager.validate_config(export_cfg)
-        if is_valid_cfg:
-            # 本地文件系统保存（用于本地运行）
-            ok, message = config_manager.auto_save_config(export_cfg, session_id)
-            if not ok:
-                st.warning(message)
-            # 浏览器 LocalStorage 保存（用于 Streamlit Cloud 等云环境）
-            browser_storage.save_config_to_browser(export_cfg)
-        export_config_bytes = config_manager.export_config_to_json(export_cfg).encode(
-            "utf-8"
-        )
-        export_config_placeholder.download_button(
-            "📥 导出当前配置 (JSON)",
-            export_config_bytes,
-            file_name="kinetics_config.json",
-            mime="application/json",
-            use_container_width=True,
-            key="export_config_download_basic",
+        ok, message = persist_export_config(export_cfg, session_id)
+        if not ok and message:
+            st.warning(message)
+        render_export_config_button(
+            export_config_placeholder,
+            export_cfg,
+            button_key="export_config_download_basic",
         )
     return {
         "data_df": data_df,
         "output_mode": output_mode,
         "output_species_list": output_species_list,
     }
+

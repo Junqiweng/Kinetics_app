@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import queue
+import threading
+import time
+
+import numpy as np
+import streamlit as st
+
+import modules.ui_components as ui_comp
+import modules.ui_text as ui_text
+from modules.config_state import _warn_once
+from modules.fitting_background import (
+    _count_fitted_parameters,
+    _drain_fitting_progress_queue,
+    _get_fitting_executor,
+    _render_fitting_live_progress,
+    _render_fitting_progress_panel,
+    _reset_fitting_progress_ui_state,
+    _run_fitting_job,
+)
+
+
+def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
+    data_df = ctx["data_df"]
+    output_mode = ctx["output_mode"]
+    output_species_list = ctx["output_species_list"]
+    species_names = ctx["species_names"]
+    stoich_matrix = ctx["stoich_matrix"]
+    k0_guess = ctx["k0_guess"]
+    ea_guess_J_mol = ctx["ea_guess_J_mol"]
+    order_guess = ctx["order_guess"]
+    fit_k0_flags = ctx["fit_k0_flags"]
+    fit_ea_flags = ctx["fit_ea_flags"]
+    fit_order_flags_matrix = ctx["fit_order_flags_matrix"]
+    K0_ads = ctx["K0_ads"]
+    Ea_K_J_mol = ctx["Ea_K_J_mol"]
+    m_inhibition = ctx["m_inhibition"]
+    fit_K0_ads_flags = ctx["fit_K0_ads_flags"]
+    fit_Ea_K_flags = ctx["fit_Ea_K_flags"]
+    fit_m_flags = ctx["fit_m_flags"]
+    k0_rev = ctx["k0_rev"]
+    ea_rev_J_mol = ctx["ea_rev_J_mol"]
+    order_rev = ctx["order_rev"]
+    fit_k0_rev_flags = ctx["fit_k0_rev_flags"]
+    fit_ea_rev_flags = ctx["fit_ea_rev_flags"]
+    fit_order_rev_flags_matrix = ctx["fit_order_rev_flags_matrix"]
+    solver_method = ctx["solver_method"]
+    rtol = ctx["rtol"]
+    atol = ctx["atol"]
+    reactor_type = ctx["reactor_type"]
+    kinetic_model = ctx["kinetic_model"]
+    pfr_flow_model = ctx["pfr_flow_model"]
+    _request_start_fitting = ctx["request_start_fitting"]
+    _request_stop_fitting = ctx["request_stop_fitting"]
+
+    k0_min = float(fit_advanced_state["k0_min"])
+    k0_max = float(fit_advanced_state["k0_max"])
+    ea_min = float(fit_advanced_state["ea_min"])
+    ea_max = float(fit_advanced_state["ea_max"])
+    ord_min = float(fit_advanced_state["ord_min"])
+    ord_max = float(fit_advanced_state["ord_max"])
+    K0_ads_min = float(fit_advanced_state["K0_ads_min"])
+    K0_ads_max = float(fit_advanced_state["K0_ads_max"])
+    Ea_K_min = float(fit_advanced_state["Ea_K_min"])
+    Ea_K_max = float(fit_advanced_state["Ea_K_max"])
+    k0_rev_min = float(fit_advanced_state["k0_rev_min"])
+    k0_rev_max = float(fit_advanced_state["k0_rev_max"])
+    ea_rev_min_J_mol = float(fit_advanced_state["ea_rev_min_J_mol"])
+    ea_rev_max_J_mol = float(fit_advanced_state["ea_rev_max_J_mol"])
+    order_rev_min = float(fit_advanced_state["order_rev_min"])
+    order_rev_max = float(fit_advanced_state["order_rev_max"])
+    max_nfev = int(fit_advanced_state["max_nfev"])
+    diff_step_rel = float(fit_advanced_state["diff_step_rel"])
+    max_step_fraction = float(fit_advanced_state["max_step_fraction"])
+    use_ms = bool(fit_advanced_state["use_ms"])
+    n_starts = int(fit_advanced_state["n_starts"])
+    max_nfev_coarse = int(fit_advanced_state["max_nfev_coarse"])
+    use_x_scale_jac = bool(fit_advanced_state["use_x_scale_jac"])
+    random_seed = int(fit_advanced_state["random_seed"])
+    residual_type = str(fit_advanced_state["residual_type"])
+    _drain_fitting_progress_queue()
+
+    fitting_stop_event = st.session_state.get("fitting_stop_event", None)
+    if fitting_stop_event is None:
+        fitting_stop_event = threading.Event()
+        st.session_state["fitting_stop_event"] = fitting_stop_event
+
+    fitting_future = st.session_state.get("fitting_future", None)
+    fitting_running = bool(st.session_state.get("fitting_running", False))
+
+    with st.container(border=True):
+        st.markdown(
+            '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+        )
+        col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(
+            [3, 1, 1, 1, 1], vertical_alignment="center"
+        )
+        col_act1.button(
+            "🚀 开始拟合",
+            type="primary",
+            disabled=fitting_running,
+            use_container_width=True,
+            on_click=_request_start_fitting,
+        )
+        col_act2.button(
+            "⏹️ 终止",
+            type="secondary",
+            disabled=not fitting_running,
+            use_container_width=True,
+            on_click=_request_stop_fitting,
+        )
+        auto_refresh = col_act3.checkbox(
+            "自动刷新",
+            value=bool(st.session_state.get("fitting_auto_refresh", True)),
+            disabled=not fitting_running,
+            help="开启后，页面会按设定间隔自动刷新，以持续更新拟合进度与阶段信息；关闭可降低页面刷新负载与 CPU 占用。",
+        )
+        col_interval_label, col_interval_input = col_act5.columns(
+            [1.1, 1.4], vertical_alignment="center"
+        )
+        col_interval_label.markdown(
+            '<div class="kinetics-inline-label">间隔(s)</div>',
+            unsafe_allow_html=True,
+        )
+        refresh_interval_s = float(
+            ui_comp.smart_number_input(
+                "间隔(s)",
+                value=float(
+                    st.session_state.get("fitting_refresh_interval_s", 2.0)
+                ),
+                min_value=0.5,
+                max_value=10.0,
+                step=0.5,
+                key="cfg_refresh_interval_s_ui",
+                disabled=(not fitting_running) or (not auto_refresh),
+                help="自动刷新间隔 [s]",
+                label_visibility="collapsed",
+                container=col_interval_input,
+            )
+        )
+        clear_btn = col_act4.button(
+            "🧹 清除结果",
+            type="secondary",
+            disabled=fitting_running,
+            use_container_width=True,
+            help="清除上一次拟合的结果、对比表缓存与时间线（不影响当前输入配置）。",
+        )
+    st.session_state["fitting_auto_refresh"] = bool(auto_refresh)
+    st.session_state["fitting_refresh_interval_s"] = float(refresh_interval_s)
+
+    # --- 显示拟合相关的通知（在 tab 内部显示，避免 tabs 状态重置）---
+    fit_notice = st.session_state.pop("fit_notice", None)
+    if isinstance(fit_notice, dict):
+        notice_kind = str(fit_notice.get("kind", "")).strip().lower()
+        notice_text = str(fit_notice.get("text", "")).strip()
+        if notice_text:
+            if notice_kind == "success":
+                st.success(notice_text)
+            elif notice_kind == "warning":
+                st.warning(notice_text)
+            elif notice_kind == "error":
+                st.error(notice_text)
+
+    if clear_btn and (not fitting_running):
+        for key in [
+            "fit_results",
+            "fit_compare_cache_key",
+            "fit_compare_long_df",
+            "fit_compare_long_df_all",
+            "fitting_timeline",
+            "fitting_metrics",
+            "fitting_ms_summary",
+            "fitting_final_summary",
+        ]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
+    # --- 处理“开始拟合”请求（回调触发）---
+    if bool(st.session_state.pop("start_fit_requested", False)) and (
+        not fitting_future
+    ):
+        if data_df is None:
+            st.session_state["fitting_running"] = False
+            st.session_state["fit_notice"] = {
+                "kind": "error",
+                "text": "当前没有可用的 CSV 数据，请先在「实验数据」页面上传或恢复已缓存的文件。",
+            }
+        elif not output_species_list:
+            st.session_state["fitting_running"] = False
+            st.session_state["fit_notice"] = {
+                "kind": "error",
+                "text": "请选择至少一个目标物种。",
+            }
+        else:
+            # 每次拟合都使用新的线程池（避免上次任务残留导致排队/卡住）
+            old_executor = st.session_state.get("fitting_executor", None)
+            if old_executor is not None:
+                try:
+                    old_executor.shutdown(wait=False, cancel_futures=True)
+                except Exception as exc:
+                    _warn_once(
+                        "warn_executor_shutdown",
+                        f"关闭旧的拟合线程池失败（可忽略）：{exc}",
+                    )
+                st.session_state["fitting_executor"] = None
+
+            st.session_state["fitting_stopped"] = False
+            st.session_state["fitting_progress"] = 0.0
+            st.session_state["fitting_status"] = "准备启动..."
+
+            stop_event = threading.Event()
+            st.session_state["fitting_stop_event"] = stop_event
+
+            progress_queue = queue.Queue()
+            st.session_state["fitting_progress_queue"] = progress_queue
+
+            _reset_fitting_progress_ui_state()
+            n_fit_params = _count_fitted_parameters(
+                fit_k0_flags,
+                fit_ea_flags,
+                fit_order_flags_matrix,
+                fit_K0_ads_flags,
+                fit_Ea_K_flags,
+                fit_m_flags,
+                fit_k0_rev_flags,
+                fit_ea_rev_flags,
+                fit_order_rev_flags_matrix,
+            )
+            st.session_state["fitting_job_summary"] = {
+                "title": "拟合任务概览",
+                "lines": [
+                    f"数据点数量: {int(len(data_df))} 行",
+                    f"待拟合参数: {int(n_fit_params)} 个",
+                    f"反应器类型: {ui_text.map_label(ui_text.REACTOR_TYPE_LABELS, str(reactor_type))}",
+                    f"动力学模型: {ui_text.map_label(ui_text.KINETIC_MODEL_LABELS, str(kinetic_model))}",
+                    f"残差类型: {residual_type}",
+                    "优化算法: Trust Region Reflective (trf)",
+                    f"最大函数评估次数: {int(max_nfev)}",
+                    (
+                        f"多起点拟合: {int(n_starts)} 个起点"
+                        if (use_ms and int(n_starts) > 1)
+                        else "多起点拟合: 关闭"
+                    ),
+                ],
+            }
+
+            job_inputs = {
+                "data_df": data_df,
+                "species_names": species_names,
+                "output_mode": output_mode,
+                "output_species_list": output_species_list,
+                "stoich_matrix": stoich_matrix,
+                "k0_guess": k0_guess,
+                "ea_guess_J_mol": ea_guess_J_mol,
+                "order_guess": order_guess,
+                "fit_k0_flags": fit_k0_flags,
+                "fit_ea_flags": fit_ea_flags,
+                "fit_order_flags_matrix": fit_order_flags_matrix,
+                "K0_ads": K0_ads,
+                "Ea_K_J_mol": Ea_K_J_mol,
+                "m_inhibition": m_inhibition,
+                "fit_K0_ads_flags": fit_K0_ads_flags,
+                "fit_Ea_K_flags": fit_Ea_K_flags,
+                "fit_m_flags": fit_m_flags,
+                "k0_rev": k0_rev,
+                "ea_rev_J_mol": ea_rev_J_mol,
+                "order_rev": order_rev,
+                "fit_k0_rev_flags": fit_k0_rev_flags,
+                "fit_ea_rev_flags": fit_ea_rev_flags,
+                "fit_order_rev_flags_matrix": fit_order_rev_flags_matrix,
+                "solver_method": solver_method,
+                "rtol": rtol,
+                "atol": atol,
+                "reactor_type": reactor_type,
+                "kinetic_model": kinetic_model,
+                "pfr_flow_model": str(pfr_flow_model),
+                "use_ms": use_ms,
+                "n_starts": n_starts,
+                "random_seed": random_seed,
+                "max_nfev": max_nfev,
+                "max_nfev_coarse": max_nfev_coarse,
+                "diff_step_rel": diff_step_rel,
+                "use_x_scale_jac": use_x_scale_jac,
+                "k0_min": k0_min,
+                "k0_max": k0_max,
+                "ea_min": ea_min,
+                "ea_max": ea_max,
+                "ord_min": ord_min,
+                "ord_max": ord_max,
+                "k0_rev_min": float(k0_rev_min),
+                "k0_rev_max": float(k0_rev_max),
+                "ea_rev_min_J_mol": float(ea_rev_min_J_mol),
+                "ea_rev_max_J_mol": float(ea_rev_max_J_mol),
+                "order_rev_min": float(order_rev_min),
+                "order_rev_max": float(order_rev_max),
+                "K0_ads_min": float(K0_ads_min),
+                "K0_ads_max": float(K0_ads_max),
+                "Ea_K_min": float(Ea_K_min),
+                "Ea_K_max": float(Ea_K_max),
+                "max_step_fraction": float(max_step_fraction),
+                "residual_type": str(residual_type),
+            }
+
+            executor = _get_fitting_executor()
+            st.session_state["fitting_future"] = executor.submit(
+                _run_fitting_job, job_inputs, stop_event, progress_queue
+            )
+
+    if fitting_running:
+        st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；如需降低页面刷新负载可关闭。")
+        refresh_interval_s = float(
+            st.session_state.get("fitting_refresh_interval_s", 2.0)
+        )
+        _render_fitting_live_progress()
+        if bool(st.session_state.get("fitting_auto_refresh", True)):
+            # 稳定性优先：避免 st.fragment(run_every=...) 在连接关闭瞬间留下异步写任务。
+            # 这里改为常规轮询刷新（整页 rerun），代价是页面刷新频率更高。
+            refresh_interval_s = float(np.clip(refresh_interval_s, 0.2, 30.0))
+            time.sleep(refresh_interval_s)
+            st.rerun()
+    elif st.session_state.get("fitting_timeline", []):
+        _render_fitting_progress_panel()
+
+    # 在拟合页底部创建结果容器
+    tab_fit_results_container = st.container()
+
+    return {
+        "tab_fit_results_container": tab_fit_results_container,
+        "fitting_running": bool(st.session_state.get("fitting_running", False)),
+    }
+

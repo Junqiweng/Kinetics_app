@@ -74,7 +74,7 @@ $$C_i = \frac{F_i}{\dot{v}}$$
 
 ### 环境要求
 
-- Python 3.10+（`app.py` 使用了 `X | None` 类型标注语法）
+- Python 3.10+（`main.py` 使用了 `X | None` 类型标注语法）
 - 依赖库见 `requirements.txt`
 
 ### 安装步骤
@@ -87,7 +87,7 @@ cd Kinetics_app
 pip install -r requirements.txt
 
 # 运行应用
-streamlit run app.py
+streamlit run main.py
 ```
 
 运行后，浏览器会自动打开应用界面（默认地址：http://localhost:8501）。
@@ -100,7 +100,7 @@ streamlit run app.py
 python test_data/generate_orthogonal_design.py
 ```
 
-2) 打开 App：`streamlit run app.py`
+2) 打开 App：`streamlit run main.py`
 
 3) 在“教程/帮助”页按推荐流程操作（下载示例数据/模板 → 上传 → 选择目标 → 开始拟合）。
 
@@ -190,8 +190,18 @@ python test_data/generate_orthogonal_design.py
 
 ```
 Kinetics_app/
-├── app.py                  # Streamlit 主应用程序
+├── main.py                 # Streamlit 主应用程序
 ├── modules/                # 核心计算与 UI 辅助模块
+│   ├── contexts.py         # App 上下文类型与构建（bootstrap/sidebar/model/data/fit）
+│   ├── bootstrap.py        # 启动/会话恢复/全局状态初始化
+│   ├── sidebar.py          # 侧边栏渲染（全局模型、求解器、配置管理）
+│   ├── tab_model.py        # 模型页签（物种、反应、参数初值）
+│   ├── tab_data.py         # 数据页签（模板、上传、预览、配置导出）
+│   ├── tab_fit.py          # 拟合页签编排入口（advanced -> execution -> results）
+│   ├── fit_advanced.py     # 拟合高级设置与边界
+│   ├── fit_execution.py    # 拟合操作与后台任务触发
+│   ├── fit_results.py      # 拟合结果展示（参数/奇偶校验/剖面/导出）
+│   ├── export_config.py    # 配置导出构建与持久化公共逻辑
 │   ├── kinetics.py         # 动力学：幂律 / L-H / 可逆速率
 │   ├── reactors.py         # 反应器：PFR/CSTR/BSTR 数值积分/稳态求解 + 剖面
 │   ├── fitting.py          # 拟合工具：参数打包/解包、单行预测
@@ -209,6 +219,19 @@ Kinetics_app/
     ├── generate_complex_data.py       # 复杂验证数据生成
     ├── validation_*.csv               # 复杂验证数据（可直接上传）
     └── validation_*.json              # 对应的可导入配置（与 CSV 匹配）
+```
+
+## App 联动流程
+
+```text
+bootstrap_app_state
+  -> render_sidebar
+    -> render_model_tab
+      -> render_data_tab
+        -> render_fit_tab
+          -> render_fit_advanced
+          -> render_fit_actions
+          -> render_fit_results
 ```
 
 ## 测试数据

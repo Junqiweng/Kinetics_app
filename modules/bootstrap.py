@@ -8,18 +8,18 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 
-import modules.app_style as app_style
+import modules.style as app_style
 import modules.browser_storage as browser_storage
 import modules.config_manager as config_manager
 import modules.session_cleanup as session_cleanup
 import modules.ui_components as ui_comp
 import modules.ui_help as ui_help
-from modules.app_config_state import (
+from modules.config_state import (
     _apply_imported_config_to_widget_state,
     _clear_config_related_state,
 )
-from modules.app_fitting_background import FittingStoppedError, _drain_fitting_progress_queue
-from modules.app_plot_helpers import _configure_matplotlib_chinese_font
+from modules.fitting_background import FittingStoppedError, _drain_fitting_progress_queue
+from modules.plot_helpers import _configure_matplotlib_chinese_font
 from modules.constants import (
     DEFAULT_SESSION_MAX_AGE_HOURS,
     FITTING_STOP_WAIT_SLEEP_S,
@@ -474,3 +474,4 @@ def bootstrap_app_state() -> dict:
         "get_cfg": get_cfg,
         "show_help_dialog": _show_help_dialog,
     }
+

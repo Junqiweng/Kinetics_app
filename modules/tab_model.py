@@ -5,8 +5,8 @@ import pandas as pd
 import streamlit as st
 
 import modules.ui_components as ui_comp
-from modules.app_config_state import _warn_once
-from modules.app_data_utils import _build_default_nu_table, _clean_species_names
+from modules.config_state import _warn_once
+from modules.data_utils import _build_default_nu_table, _clean_species_names
 from modules.constants import (
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
     KINETIC_MODEL_REVERSIBLE,
@@ -339,3 +339,4 @@ def render_model_tab(tab_model, ctx: dict) -> dict:
         "order_rev": order_rev,
         "fit_order_rev_flags_matrix": fit_order_rev_flags_matrix,
     }
+
