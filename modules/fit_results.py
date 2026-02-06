@@ -46,6 +46,13 @@ from modules.constants import (
 )
 
 
+def _render_centered_pyplot(fig) -> None:
+    left_col, center_col, right_col = st.columns([1, 2, 1])
+    del left_col, right_col
+    with center_col:
+        st.pyplot(fig, use_container_width=False)
+
+
 def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state: dict, runtime_state: dict) -> dict:
     get_cfg = ctx["get_cfg"]
     species_names = ctx["species_names"]
@@ -993,7 +1000,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
                         )
                     else:
-                        fig_pf, ax_pf = plt.subplots(figsize=(7, 4.5))
+                        fig_pf, ax_pf = plt.subplots(figsize=(4.6, 3.0))
                         name_to_index = {
                             name: i for i, name in enumerate(species_names_fit)
                         }
@@ -1047,7 +1054,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         )
                         _style_fit_axis(ax_pf, show_grid=False)
                         _style_fit_legend(ax_pf)
-                        st.pyplot(fig_pf)
+                        _render_centered_pyplot(fig_pf)
 
                         st.download_button(
                             "📥 下载剖面数据 CSV",
@@ -1122,7 +1129,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
                         )
                     else:
-                        fig_cs, ax_cs = plt.subplots(figsize=(7, 4.5))
+                        fig_cs, ax_cs = plt.subplots(figsize=(4.6, 3.0))
                         name_to_index = {
                             name: i for i, name in enumerate(species_names_fit)
                         }
@@ -1143,7 +1150,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         ax_cs.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
                         _style_fit_axis(ax_cs, show_grid=False)
                         _style_fit_legend(ax_cs)
-                        st.pyplot(fig_cs)
+                        _render_centered_pyplot(fig_cs)
 
                         st.download_button(
                             "📥 下载剖面数据 CSV",
@@ -1210,7 +1217,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
                         )
                     else:
-                        fig_bt, ax_bt = plt.subplots(figsize=(7, 4.5))
+                        fig_bt, ax_bt = plt.subplots(figsize=(4.6, 3.0))
                         name_to_index = {
                             name: i for i, name in enumerate(species_names_fit)
                         }
@@ -1231,7 +1238,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         ax_bt.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
                         _style_fit_axis(ax_bt, show_grid=False)
                         _style_fit_legend(ax_bt)
-                        st.pyplot(fig_bt)
+                        _render_centered_pyplot(fig_bt)
 
                         st.download_button(
                             "📥 下载剖面数据 CSV",
