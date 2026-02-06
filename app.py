@@ -22,6 +22,7 @@ import modules.reactors as reactors
 import modules.ui_help as ui_help
 import modules.config_manager as config_manager
 import modules.ui_components as ui_comp  # UI 组件工具函数
+import modules.ui_text as ui_text  # UI 文案映射
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 import modules.session_cleanup as session_cleanup  # 会话清理
 import modules.app_style as app_style
@@ -593,7 +594,7 @@ def main():
     # Matplotlib 的 style 可能会覆盖字体设置，这里再强制一次以确保图中中文可显示
     _configure_matplotlib_chinese_font()
 
-    @st.dialog("教程/帮助")
+    @st.dialog("使用指南与帮助")
     def _show_help_dialog() -> None:
         ui_help.render_help_page()
 
@@ -606,7 +607,7 @@ def main():
             st.markdown(
                 '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
-            help_btn = st.button("教程/帮助", use_container_width=True)
+            help_btn = st.button("使用帮助", use_container_width=True)
             if help_btn:
                 _show_help_dialog()
 
@@ -625,6 +626,9 @@ def main():
                 "反应器",
                 reactor_type_options,
                 index=reactor_type_options.index(reactor_type_default),
+                format_func=lambda x: ui_text.map_label(
+                    ui_text.REACTOR_TYPE_LABELS, str(x)
+                ),
                 key="cfg_reactor_type",
                 disabled=global_disabled,
             )
@@ -640,10 +644,6 @@ def main():
                 pfr_flow_model_default = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
             pfr_flow_model = pfr_flow_model_default
             if reactor_type == REACTOR_TYPE_PFR:
-                pfr_flow_model_labels = {
-                    PFR_FLOW_MODEL_LIQUID_CONST_VDOT: "液相(恒定vdot)",
-                    PFR_FLOW_MODEL_GAS_IDEAL_CONST_P: "气相(理想气体, 恒定P, 无压降)",
-                }
                 pfr_flow_model_options = [
                     PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
                     PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
@@ -652,7 +652,9 @@ def main():
                     "PFR 流动模型",
                     pfr_flow_model_options,
                     index=pfr_flow_model_options.index(pfr_flow_model_default),
-                    format_func=lambda x: pfr_flow_model_labels.get(str(x), str(x)),
+                    format_func=lambda x: ui_text.map_label(
+                        ui_text.PFR_FLOW_MODEL_LABELS, str(x)
+                    ),
                     key="cfg_pfr_flow_model",
                     disabled=global_disabled,
                     help=(
@@ -667,15 +669,21 @@ def main():
                 "动力学",
                 KINETIC_MODELS,
                 index=KINETIC_MODELS.index(kinetic_model_default),
+                format_func=lambda x: ui_text.map_label(
+                    ui_text.KINETIC_MODEL_LABELS, str(x)
+                ),
                 key="cfg_kinetic_model",
                 disabled=global_disabled,
             )
 
             st.markdown("#### 求解器")
             solver_method = st.selectbox(
-                "Method",
+                "求解方法（Method）",
                 ["RK45", "BDF", "Radau"],
                 index=["RK45", "BDF", "Radau"].index(get_cfg("solver_method", "RK45")),
+                format_func=lambda x: ui_text.map_label(
+                    ui_text.SOLVER_METHOD_LABELS, str(x)
+                ),
                 key="cfg_solver_method",
                 disabled=global_disabled,
             )
@@ -696,7 +704,7 @@ def main():
             )
 
         # 配置管理
-        with st.expander("⚙️ 配置管理 (导入/导出/重置)"):
+        with st.expander("配置管理（导入、导出、重置）"):
             config_uploader_key = f"uploaded_config_json_{int(st.session_state.get('uploader_ver_config_json', 0))}"
             uploaded_config = st.file_uploader(
                 "导入配置",
@@ -806,10 +814,10 @@ def main():
         st.markdown("---")
         st.markdown("#### 动力学参数初值")
 
-        # --- 基础参数（k0, Ea, n）---
+        # --- 基础参数（k₀, Eₐ, n）---
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            st.caption("速率常数 k0 & 活化能 Ea")
+            st.caption("速率常数 k₀ 与活化能 Eₐ")
             # 获取默认值的逻辑
             k0_guess_cfg = get_cfg("k0_guess", None)
             if k0_guess_cfg is None:
@@ -973,7 +981,7 @@ def main():
             with st.expander("可逆反应 (逆反应) 参数", expanded=True):
                 col_rev1, col_rev2 = st.columns(2)
                 with col_rev1:
-                    st.caption("逆反应 k0⁻ & Ea⁻")
+                    st.caption("逆反应 k₀⁻ 与 Eₐ⁻")
                     k0_rev_cfg = get_cfg("k0_rev", None)
                     if k0_rev_cfg is None:
                         k0r_def = np.full(n_reactions, 1e2, dtype=float)
@@ -1071,8 +1079,11 @@ def main():
                     if get_cfg("output_mode", opts[0]) in opts
                     else 0
                 ),
+                format_func=lambda x: ui_text.map_label(
+                    ui_text.OUTPUT_MODE_LABELS, str(x)
+                ),
                 key="cfg_output_mode",
-                help="选择用于拟合的测量数据类型（Cout=出口浓度，Fout=出口摩尔流量，xout=出口摩尔组成）",
+                help="选择用于拟合的测量量类型：Cout（出口浓度）、Fout（出口摩尔流率）、xout（出口摩尔分率）。",
             )
 
         with col_target2:
@@ -1390,34 +1401,34 @@ def main():
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
                 k0_min = ui_comp.smart_number_input(
-                    "k0 Min",
+                    "k₀ 下限（k0_min）",
                     value=float(get_cfg("k0_min", DEFAULT_K0_MIN)),
                     key="cfg_k0_min",
                 )
                 k0_max = ui_comp.smart_number_input(
-                    "k0 Max",
+                    "k₀ 上限（k0_max）",
                     value=float(get_cfg("k0_max", DEFAULT_K0_MAX)),
                     key="cfg_k0_max",
                 )
             with col_b2:
                 ea_min = ui_comp.smart_number_input(
-                    "Ea Min",
+                    "Eₐ 下限（ea_min_J_mol）",
                     value=float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL)),
                     key="cfg_ea_min_J_mol",
                 )
                 ea_max = ui_comp.smart_number_input(
-                    "Ea Max",
+                    "Eₐ 上限（ea_max_J_mol）",
                     value=float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL)),
                     key="cfg_ea_max_J_mol",
                 )
             with col_b3:
                 ord_min = ui_comp.smart_number_input(
-                    "Order Min",
+                    "反应级数下限（order_min）",
                     value=float(get_cfg("order_min", DEFAULT_ORDER_MIN)),
                     key="cfg_order_min",
                 )
                 ord_max = ui_comp.smart_number_input(
-                    "Order Max",
+                    "反应级数上限（order_max）",
                     value=float(get_cfg("order_max", DEFAULT_ORDER_MAX)),
                     key="cfg_order_max",
                 )
@@ -1431,23 +1442,23 @@ def main():
                 col_lh_b1, col_lh_b2 = st.columns(2)
                 with col_lh_b1:
                     K0_ads_min = ui_comp.smart_number_input(
-                        "K0_ads Min",
+                        "K₀,ads 下限（K0_ads_min）",
                         value=K0_ads_min,
                         key="cfg_K0_ads_min",
                     )
                     K0_ads_max = ui_comp.smart_number_input(
-                        "K0_ads Max",
+                        "K₀,ads 上限（K0_ads_max）",
                         value=K0_ads_max,
                         key="cfg_K0_ads_max",
                     )
                 with col_lh_b2:
                     Ea_K_min = ui_comp.smart_number_input(
-                        "Ea_K Min",
+                        "Eₐ,K 下限（Ea_K_min）",
                         value=Ea_K_min,
                         key="cfg_Ea_K_min",
                     )
                     Ea_K_max = ui_comp.smart_number_input(
-                        "Ea_K Max",
+                        "Eₐ,K 上限（Ea_K_max）",
                         value=Ea_K_max,
                         key="cfg_Ea_K_max",
                     )
@@ -1468,34 +1479,34 @@ def main():
                 col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
                 with col_rev_b1:
                     k0_rev_min = ui_comp.smart_number_input(
-                        "k0_rev Min",
+                        "k₀,rev 下限（k0_rev_min）",
                         value=k0_rev_min,
                         key="cfg_k0_rev_min",
                     )
                     k0_rev_max = ui_comp.smart_number_input(
-                        "k0_rev Max",
+                        "k₀,rev 上限（k0_rev_max）",
                         value=k0_rev_max,
                         key="cfg_k0_rev_max",
                     )
                 with col_rev_b2:
                     ea_rev_min_J_mol = ui_comp.smart_number_input(
-                        "Ea_rev Min",
+                        "Eₐ,rev 下限（ea_rev_min_J_mol）",
                         value=ea_rev_min_J_mol,
                         key="cfg_ea_rev_min_J_mol",
                     )
                     ea_rev_max_J_mol = ui_comp.smart_number_input(
-                        "Ea_rev Max",
+                        "Eₐ,rev 上限（ea_rev_max_J_mol）",
                         value=ea_rev_max_J_mol,
                         key="cfg_ea_rev_max_J_mol",
                     )
                 with col_rev_b3:
                     order_rev_min = ui_comp.smart_number_input(
-                        "Order_rev Min",
+                        "逆反应级数下限（order_rev_min）",
                         value=order_rev_min,
                         key="cfg_order_rev_min",
                     )
                     order_rev_max = ui_comp.smart_number_input(
-                        "Order_rev Max",
+                        "逆反应级数上限（order_rev_max）",
                         value=order_rev_max,
                         key="cfg_order_rev_max",
                     )
@@ -1508,23 +1519,23 @@ def main():
             with col_iter1:
                 max_nfev = int(
                     st.number_input(
-                        "Max Iterations (外层迭代)",
+                        "最大迭代次数（max_nfev）",
                         value=int(get_cfg("max_nfev", DEFAULT_MAX_NFEV)),
                         step=UI_MAX_NFEV_STEP,
                         key="cfg_max_nfev",
-                        help="提示：每次迭代内部会为数值差分 Jacobian 额外调用模型多次，所以看到的'调用次数'通常会大于该值。",
+                        help="提示：每次外层迭代中，数值差分 Jacobian 需要多次模型调用，因此显示的总调用次数通常大于该值。",
                     )
                 )
             with col_iter2:
                 diff_step_rel = ui_comp.smart_number_input(
-                    "diff_step (Finite Diff)",
+                    "差分步长（diff_step）",
                     value=get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL),
                     key="cfg_diff_step_rel",
-                    help="提示：用于 least_squares 计算数值差分 Jacobian 的相对步长，找不到解时可尝试调大该值，误差较大时可尝试调小该值。",
+                    help="用于 least_squares 的数值差分 Jacobian 相对步长；拟合停滞时可适当调大，拟合过粗时可适当调小。",
                 )
             with col_iter3:
                 max_step_fraction = ui_comp.smart_number_input(
-                    "max_step_fraction (ODE)",
+                    "最大步长比例（max_step_fraction）",
                     value=float(
                         get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
                     ),
@@ -1532,36 +1543,36 @@ def main():
                     max_value=10.0,
                     step=UI_MAX_STEP_FRACTION_STEP,
                     key="cfg_max_step_fraction",
-                    help="用于 solve_ivp 的 max_step：max_step = fraction × 总时间/总体积；0 表示不限制。",
+                    help="用于 solve_ivp 的积分步长上限：max_step = fraction × 总时间/总体积；0 表示不限制。",
                 )
 
             # 第二行：Multi-start 相关选项
             col_ms1, col_ms2, col_ms3 = st.columns(3)
             with col_ms1:
                 use_ms = st.checkbox(
-                    "Multi-start (多起点)",
+                    "多起点搜索（Multi-start）",
                     value=bool(get_cfg("use_multi_start", True)),
                     key="cfg_use_multi_start",
                 )
             with col_ms2:
                 n_starts = int(
                     st.number_input(
-                        "Start Points (起点数)",
+                        "起点数量（n_starts）",
                         value=get_cfg("n_starts", DEFAULT_N_STARTS),
                         min_value=1,
                         step=1,
                         key="cfg_n_starts",
-                        help="仅当 Multi-start 勾选且 Start Points>1 时才生效。",
+                        help="仅在启用多起点搜索且 n_starts > 1 时生效。",
                     )
                 )
             with col_ms3:
                 max_nfev_coarse = int(
                     st.number_input(
-                        "Coarse Iters (粗拟合)",
+                        "粗拟合迭代上限（max_nfev_coarse）",
                         value=get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE),
                         step=50,
                         key="cfg_max_nfev_coarse",
-                        help="仅当 Multi-start 生效时用于粗拟合阶段。",
+                        help="仅在启用多起点搜索时，用于每个起点的粗拟合阶段。",
                     )
                 )
 
@@ -1569,14 +1580,14 @@ def main():
             col_opt1, col_opt2, col_opt3 = st.columns(3)
             with col_opt1:
                 use_x_scale_jac = st.checkbox(
-                    "Use x_scale='jac'",
+                    "启用雅可比尺度归一（x_scale='jac'）",
                     value=get_cfg("use_x_scale_jac", True),
                     key="cfg_use_x_scale_jac",
                 )
             with col_opt2:
                 random_seed = int(
                     st.number_input(
-                        "Random Seed (随机种子)",
+                        "随机种子（random_seed）",
                         value=get_cfg("random_seed", DEFAULT_RANDOM_SEED),
                         step=1,
                         key="cfg_random_seed",
@@ -1608,18 +1619,18 @@ def main():
             # 显示当前残差类型的公式说明
             residual_formula_info = {
                 "绝对残差": (
-                    "**绝对残差** (Absolute Residual)\n\n"
+                    "**绝对残差（Absolute Residual）**\n\n"
                     r"$r_i = y_i^{pred} - y_i^{meas}$"
                     "\n\n适用于：测量值数量级相近的数据。当测量值范围差异大时，大值主导拟合。"
                 ),
                 "相对残差": (
-                    "**相对残差** (Relative Residual)\n\n"
+                    "**相对残差（Relative Residual）**\n\n"
                     r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{y_i^{meas}}$"
                     "\n\n适用于：测量值跨越多个数量级的数据。对所有数据点给予相近权重。\n\n"
                     r"⚠️ 注意：若 $y_i^{meas}$ 接近零，残差会变得非常大，可能导致数值不稳定。"
                 ),
                 "百分比残差": (
-                    "**百分比残差** (Percentage Residual with offset)\n\n"
+                    "**百分比残差（Percentage Residual with offset）**\n\n"
                     r"$r_i = 100 \times \frac{y_i^{pred} - y_i^{meas}}{|y_i^{meas}| + \epsilon}$"
                     "\n\n"
                     r"其中 $\epsilon$ 为小正数（典型值的 1%），避免除零；$r_i$ 的单位为 %。"
@@ -1787,7 +1798,7 @@ def main():
                 "自动刷新",
                 value=bool(st.session_state.get("fitting_auto_refresh", True)),
                 disabled=not fitting_running,
-                help="开启后，页面会每隔约 2 秒自动刷新一次，用于持续更新拟合进度与阶段信息；关闭可减少卡顿/CPU 占用。",
+                help="开启后，页面会按设定间隔自动刷新，以持续更新拟合进度与阶段信息；关闭可降低页面刷新负载与 CPU 占用。",
             )
             col_interval_label, col_interval_input = col_act5.columns(
                 [1.1, 1.4], vertical_alignment="center"
@@ -1902,12 +1913,12 @@ def main():
                     fit_order_rev_flags_matrix,
                 )
                 st.session_state["fitting_job_summary"] = {
-                    "title": "📊 拟合任务概览",
+                    "title": "拟合任务概览",
                     "lines": [
                         f"数据点数量: {int(len(data_df))} 行",
                         f"待拟合参数: {int(n_fit_params)} 个",
-                        f"反应器类型: {reactor_type}",
-                        f"动力学模型: {kinetic_model}",
+                        f"反应器类型: {ui_text.map_label(ui_text.REACTOR_TYPE_LABELS, str(reactor_type))}",
+                        f"动力学模型: {ui_text.map_label(ui_text.KINETIC_MODEL_LABELS, str(kinetic_model))}",
                         f"残差类型: {residual_type}",
                         "优化算法: Trust Region Reflective (trf)",
                         f"最大函数评估次数: {int(max_nfev)}",
@@ -1982,7 +1993,7 @@ def main():
                 )
 
         if fitting_running:
-            st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；若觉得卡顿可关闭。")
+            st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；如需降低页面刷新负载可关闭。")
             refresh_interval_s = float(
                 st.session_state.get("fitting_refresh_interval_s", 2.0)
             )
@@ -2044,12 +2055,12 @@ def main():
                 reaction_names = [f"R{i+1}" for i in range(len(fitted_params["k0"]))]
                 df_k0_ea = pd.DataFrame(
                     {
-                        "k0 [SI]": fitted_params["k0"],
-                        "Ea [J/mol]": fitted_params["ea_J_mol"],
+                        "k₀ [SI]": fitted_params["k0"],
+                        "Eₐ [J/mol]": fitted_params["ea_J_mol"],
                     },
                     index=reaction_names,
                 )
-                st.markdown("**k0 与 Ea**")
+                st.markdown("**k₀ 与 Eₐ**")
                 st.dataframe(
                     ui_comp.format_dataframe_for_display(df_k0_ea),
                     use_container_width=True,
@@ -2079,8 +2090,8 @@ def main():
                     ):
                         df_ads = pd.DataFrame(
                             {
-                                "K0_ads [1/(mol/m^3)]": fitted_params["K0_ads"],
-                                "Ea_K [J/mol]": fitted_params["Ea_K"],
+                                "K₀,ads [1/(mol/m^3)]": fitted_params["K0_ads"],
+                                "Eₐ,K [J/mol]": fitted_params["Ea_K"],
                             },
                             index=species_names_fit,
                         )
@@ -2109,8 +2120,8 @@ def main():
                 ):
                     df_rev = pd.DataFrame(
                         {
-                            "k0_rev [SI]": fitted_params["k0_rev"],
-                            "Ea_rev [J/mol]": fitted_params["ea_rev"],
+                            "k₀,rev [SI]": fitted_params["k0_rev"],
+                            "Eₐ,rev [J/mol]": fitted_params["ea_rev"],
                         },
                         index=reaction_names,
                     )
@@ -2133,7 +2144,7 @@ def main():
                     )
 
         with tab_parity:
-            st.markdown("#### 不同物种的奇偶校验图 (Measured vs Predicted)")
+            st.markdown("#### 分物种奇偶校验图（实验值 vs 预测值）")
             output_mode_fit_str = str(output_mode_fit).strip()
             output_label_map = {
                 OUTPUT_MODE_COUT: "出口浓度 (Cout)",
@@ -2626,8 +2637,16 @@ def main():
                                         label="_nolegend_",
                                     )
                             ax.set_title(f"{species_name}")
-                            ax.set_xlabel(f"Measured [{unit_text_parity}]")
-                            ax.set_ylabel(f"Predicted [{unit_text_parity}]")
+                            ax.set_xlabel(
+                                ui_text.axis_label_with_unit(
+                                    ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                                )
+                            )
+                            ax.set_ylabel(
+                                ui_text.axis_label_with_unit(
+                                    ui_text.AXIS_LABEL_PREDICTED, unit_text_parity
+                                )
+                            )
                             ax.grid(True)
                             ax.legend()
 
@@ -2656,7 +2675,7 @@ def main():
                         plt.close(fig)
 
                 if show_residual_plot:
-                    st.markdown("#### 残差图 (Predicted - Measured)")
+                    st.markdown("#### 残差图（预测值 - 实验值）")
                     df_res = df_long[df_long["ok"]].copy()
                     df_res = df_res[df_res["species"].isin(species_selected)]
                     df_res = df_res[
@@ -2691,8 +2710,16 @@ def main():
                             )
                             ax_r.axhline(0.0, color="k", linestyle="--", linewidth=1.0)
                             ax_r.set_title(f"{species_name}")
-                            ax_r.set_xlabel(f"Measured [{unit_text_parity}]")
-                            ax_r.set_ylabel(f"Residual (Pred - Meas) [{unit_text_parity}]")
+                            ax_r.set_xlabel(
+                                ui_text.axis_label_with_unit(
+                                    ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                                )
+                            )
+                            ax_r.set_ylabel(
+                                ui_text.axis_label_with_unit(
+                                    ui_text.AXIS_LABEL_RESIDUAL, unit_text_parity
+                                )
+                            )
                             ax_r.grid(True)
                             ax_r.legend()
 
@@ -2806,11 +2833,15 @@ def main():
 
                 row_sel = df_fit.loc[selected_row_index]
                 if reactor_type_fit == REACTOR_TYPE_PFR:
+                    profile_kind_options = ["F (mol/s)", "C (mol/m^3)"]
                     profile_kind = st.radio(
                         "剖面变量",
-                        ["F (mol/s)", "C (mol/m^3)"],
+                        profile_kind_options,
                         index=0,
                         horizontal=True,
+                        format_func=lambda x: ui_text.map_label(
+                            ui_text.PROFILE_KIND_LABELS, str(x)
+                        ),
                     )
                     reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
                     temperature_K = float(row_sel.get("T_K", np.nan))
@@ -2938,9 +2969,11 @@ def main():
                                 )
                                 profile_df[f"C_{species_name}_mol_m3"] = conc
 
-                        ax_pf.set_xlabel("Reactor volume V [m^3]")
+                        ax_pf.set_xlabel(ui_text.AXIS_LABEL_REACTOR_VOLUME)
                         ax_pf.set_ylabel(
-                            f"{profile_kind} [{('mol/s' if profile_kind.startswith('F') else 'mol/m^3')}]"
+                            ui_text.AXIS_LABEL_FLOW_RATE
+                            if profile_kind.startswith("F")
+                            else ui_text.AXIS_LABEL_CONCENTRATION
                         )
                         ax_pf.grid(True)
                         ax_pf.legend()
@@ -3030,8 +3063,8 @@ def main():
                             ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
                             profile_df[f"C_{species_name}_mol_m3"] = y
 
-                        ax_cs.set_xlabel("Time t [s]")
-                        ax_cs.set_ylabel("C (mol/m^3) [mol/m^3]")
+                        ax_cs.set_xlabel(ui_text.AXIS_LABEL_TIME)
+                        ax_cs.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
                         ax_cs.grid(True)
                         ax_cs.legend()
                         st.pyplot(fig_cs)
@@ -3112,8 +3145,8 @@ def main():
                             ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
                             profile_df[f"C_{species_name}_mol_m3"] = y
 
-                        ax_bt.set_xlabel("Time t [s]")
-                        ax_bt.set_ylabel("C (mol/m^3) [mol/m^3]")
+                        ax_bt.set_xlabel(ui_text.AXIS_LABEL_TIME)
+                        ax_bt.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
                         ax_bt.grid(True)
                         ax_bt.legend()
                         st.pyplot(fig_bt)
@@ -3153,7 +3186,7 @@ def main():
                 }
             )
             st.download_button(
-                "📥 导出参数 (k0, Ea) CSV",
+                "📥 导出参数（k₀, Eₐ）CSV",
                 df_param_export.to_csv(index=False).encode("utf-8"),
                 file_name="fit_params_k0_ea.csv",
                 mime="text/csv",

@@ -6,7 +6,7 @@
 
 - 拟合能跑但不收敛/很慢/卡在边界/抖动
 - `solve_ivp 失败`、对 `Method` 与 `rtol/atol` 不知道怎么调
-- 想理解 `diff_step (Finite Diff)`、`Multi-start (多起点)`、`Use x_scale='jac'` 等高级设置的作用
+- 想理解 `差分步长（diff_step）`、`多起点搜索（Multi-start）`、`启用雅可比尺度归一（x_scale='jac'）` 等高级设置的作用
 
 本页所有字段名都与 App UI 完全一致，便于你**直接对照修改**。
 
@@ -61,20 +61,20 @@ UI 选项与公式：
 
 边界字段（UI 名称）：
 
-- `k0 Min`、`k0 Max`
-- `Ea Min`、`Ea Max`
+- `k₀ Min`、`k₀ Max`
+- `Eₐ Min`、`Eₐ Max`
 - `Order Min`、`Order Max`
 
 重要规则（必须理解）：
 
 1) 边界**只作用于“勾选拟合”的参数**。未勾选拟合的参数不会进入优化向量，也不会被边界约束。
-2) 任何被拟合的参数，**初值必须在边界内**，否则会出现 `x0 infeasible`（初值越界）。
+2) 任何被拟合的参数，**初值必须在边界内**，否则会出现 `x₀ infeasible`（初值越界）。
 3) 边界越宽，越容易跑到“物理不合理/数值崩溃”的区域；边界越窄，越容易卡边界或无法解释数据。推荐策略：**先稳健（合理但不离谱）→ 再逐步收紧/放宽**。
 
 默认边界（用于快速起步，建议按体系收紧）：
 
-- `k0 Min=1e-15`，`k0 Max=1e15`
-- `Ea Min=3e4`，`Ea Max=3e5`（J/mol）
+- `k₀ Min=1e-15`，`k₀ Max=1e15`
+- `Eₐ Min=3e4`，`Eₐ Max=3e5`（J/mol）
 - `Order Min=-2`，`Order Max=5`
 
 > 说明：若你启用了“配置自动恢复”或导入过配置 JSON，这些字段的初始值可能会被覆盖；**以你当前界面显示为准**。
@@ -92,13 +92,13 @@ UI 选项与公式：
 
 ### C1. `1. 基础边界设置`（必用）
 
-- `k0 Min/Max`：约束所有被勾选 `拟合 k₀` 的反应指前因子
-- `Ea Min/Max`：约束所有被勾选 `拟合 Eₐ` 的活化能
+- `k₀ Min/Max`：约束所有被勾选 `拟合 k₀` 的反应指前因子
+- `Eₐ Min/Max`：约束所有被勾选 `拟合 Eₐ` 的活化能
 - `Order Min/Max`：约束所有被勾选 `拟合 <物种>` 的级数项
 
 调参方向：
 
-- 若提示 `x0 infeasible`：放宽边界或把初值改到边界内（更推荐改初值）
+- 若提示 `x₀ infeasible`：放宽边界或把初值改到边界内（更推荐改初值）
 - 若拟合跑到极端值、`solve_ivp 失败` 频繁：收紧边界
 - 若明显拟合不了数据趋势：适度放宽边界，或先减少拟合参数数量
 
@@ -129,7 +129,7 @@ UI 字段：
 
 ### C4. `2. 算法与鲁棒性`（决定“稳不稳/快不快”）
 
-#### (1) `Max Iterations (外层迭代)`（UI：`Max Iterations (外层迭代)`）
+#### (1) `最大迭代次数（max_nfev）`（UI：`最大迭代次数（max_nfev）`）
 
 - 含义：`least_squares(max_nfev=...)` 的最大函数评估次数上限（外层迭代）
 - 现象：
@@ -140,16 +140,16 @@ UI 字段：
 
 - 先用默认（常为 `3000`）跑通，再根据“是否提前停止”决定是否增大
 
-#### (2) `diff_step (Finite Diff)`（数值差分步长）
+#### (2) `差分步长（diff_step）`（数值差分步长）
 
 - 含义：用于数值差分 Jacobian 的**相对步长**
 - 现象与对策：
-  - 拟合“不动/抖动/对噪声极敏感”：把 `diff_step (Finite Diff)` 调大（例如 `1e-3 → 1e-2`）
+  - 拟合“不动/抖动/对噪声极敏感”：把 `差分步长（diff_step）` 调大（例如 `1e-3 → 1e-2`）
   - 拟合能动但精度不够：在稳定前提下再逐步调小
 
 > 默认值常为 `1e-3`。新手遇到不稳时，优先尝试 `1e-2 ~ 1e-3`。
 
-#### (3) `max_step_fraction (ODE)`（限制 ODE 积分步长）
+#### (3) `最大步长比例（max_step_fraction）`（限制 ODE 积分步长）
 
 - 含义：用于 `solve_ivp(max_step=...)` 的步长限制
 - App 使用的换算形式（直观理解）：
@@ -162,28 +162,28 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 调参优先级：
 
-1) `solve_ivp 失败` 频繁 → 先尝试减小 `max_step_fraction (ODE)`
+1) `solve_ivp 失败` 频繁 → 先尝试减小 `最大步长比例（max_step_fraction）`
 2) 若仍失败 → 再考虑更换 `Method` 或放宽 `rtol/atol`
 
-#### (4) `Multi-start (多起点)`、`Start Points (起点数)`、`Coarse Iters (粗拟合)`
+#### (4) `多起点搜索（Multi-start）`、`起点数量（n_starts）`、`粗拟合迭代上限（max_nfev_coarse）`
 
 用途：当参数多、相关性强、容易陷入局部极小值时，提高找到更好解的概率。
 
-- `Multi-start (多起点)`：开/关
-- `Start Points (起点数)`：起点数量（推荐 `5~20`）
-- `Coarse Iters (粗拟合)`：每个起点的粗拟合迭代上限（常见默认 `300`）
+- `多起点搜索（Multi-start）`：开/关
+- `起点数量（n_starts）`：起点数量（推荐 `5~20`）
+- `粗拟合迭代上限（max_nfev_coarse）`：每个起点的粗拟合迭代上限（常见默认 `300`）
 
 工程理解：
 
 - 多起点 = 更慢但更稳（尤其在放开 `Eₐ`、级数、L-H、可逆时）
 - 如果多起点几乎不改善：优先检查边界是否过宽、初值是否离谱、模型是否缺项
 
-#### (5) `Use x_scale='jac'`
+#### (5) `启用雅可比尺度归一（x_scale='jac'）`
 
 - 含义：对不同量纲/尺度的参数做缩放，提高优化稳定性
 - 建议：多数情况下保持开启；若你确认缩放导致异常（少见），再尝试关闭作对照
 
-#### (6) `Random Seed (随机种子)`
+#### (6) `随机种子（random_seed）`
 
 - 作用：Multi-start 随机起点的可复现性
 - 典型用法：想复现实验/报告时固定；想更广泛探索时可换不同 seed
@@ -194,10 +194,10 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 | 症状（你看到什么） | 优先改的旋钮（UI 名称） | 推荐动作（从高到低） |
 |---|---|---|
-| `solve_ivp 失败` / 参数一改就崩 | `Method`、`rtol/atol`、`max_step_fraction (ODE)` | `Method→BDF`；放宽 `rtol/atol`；调小 `max_step_fraction (ODE)` 或设 `0` 对比 |
-| 拟合“不动”或抖动 | `diff_step (Finite Diff)`、拟合参数数量 | `diff_step (Finite Diff)` 调大到 `1e-2~1e-3`；减少拟合参数（先只拟合 `k₀`） |
-| 拟合很慢 | `Start Points (起点数)`、`Coarse Iters (粗拟合)`、数据量 | 先关 `Multi-start`；先用少量数据跑通；再逐步加回 |
-| 参数卡在边界 | `k0/Ea/Order Min/Max` | 放宽边界或改初值；更推荐先减少拟合参数、分阶段放开 |
+| `solve_ivp 失败` / 参数一改就崩 | `Method`、`rtol/atol`、`最大步长比例（max_step_fraction）` | `Method→BDF`；放宽 `rtol/atol`；调小 `最大步长比例（max_step_fraction）` 或设 `0` 对比 |
+| 拟合“不动”或抖动 | `差分步长（diff_step）`、拟合参数数量 | `差分步长（diff_step）` 调大到 `1e-2~1e-3`；减少拟合参数（先只拟合 `k₀`） |
+| 拟合很慢 | `起点数量（n_starts）`、`粗拟合迭代上限（max_nfev_coarse）`、数据量 | 先关 `Multi-start`；先用少量数据跑通；再逐步加回 |
+| 参数卡在边界 | `k₀/Eₐ/Order Min/Max` | 放宽边界或改初值；更推荐先减少拟合参数、分阶段放开 |
 | 相对残差“炸” | `残差类型` | 切回 `绝对残差` 或 `百分比残差`，再检查测量列是否接近 0 |
 | 多起点没改善 | 边界/初值/模型结构 | 收紧边界；改合理初值；分阶段拟合；必要时换模型（如加 L-H/可逆） |
 
@@ -207,9 +207,9 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 > 说明：每条处方都给出“第一优先级操作”（通常 1–3 步），先做这些再做更激进操作。
 
-1) **场景：`x0 infeasible`（初值越界）**
+1) **场景：`x₀ infeasible`（初值越界）**
 
-- 先做：把「①」的初值改到 `k0 Min/Max`、`Ea Min/Max`、`Order Min/Max` 内
+- 先做：把「①」的初值改到 `k₀ Min/Max`、`Eₐ Min/Max`、`Order Min/Max` 内
 - 再做：必要时放宽边界（但不建议无限放宽）
 
 2) **场景：拟合一开始就失败（提示 NaN/非有限）**
@@ -220,17 +220,17 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 3) **场景：`solve_ivp 失败`**
 
 - 先做：侧边栏 `Method→BDF`；放宽 `rtol/atol`
-- 再做：`max_step_fraction (ODE)` 调小；收紧边界避免极端参数
+- 再做：`最大步长比例（max_step_fraction）` 调小；收紧边界避免极端参数
 
 4) **场景：拟合“不动”**
 
 - 先做：只拟合 `k₀`（取消 `拟合 Eₐ` 与所有 `拟合 <物种>`）
-- 再做：`diff_step (Finite Diff)` 调大
+- 再做：`差分步长（diff_step）` 调大
 
 5) **场景：拟合抖动（参数/目标函数来回跳）**
 
-- 先做：`diff_step (Finite Diff)` 调大；收紧边界
-- 再做：开启 `Multi-start (多起点)`（`Start Points=10` 起步）
+- 先做：`差分步长（diff_step）` 调大；收紧边界
+- 再做：开启 `多起点搜索（Multi-start）`（`Start Points=10` 起步）
 
 6) **场景：参数卡边界**
 
@@ -244,8 +244,8 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 8) **场景：多起点非常慢**
 
-- 先做：减少 `Start Points (起点数)`（例如 20→10→5）
-- 再做：降低 `Coarse Iters (粗拟合)`；先用少量数据跑通
+- 先做：减少 `起点数量（n_starts）`（例如 20→10→5）
+- 再做：降低 `粗拟合迭代上限（max_nfev_coarse）`；先用少量数据跑通
 
 9) **场景：增加迭代次数无效**
 
@@ -264,11 +264,12 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 ### F1. 看到“达到最大迭代次数上限”
 
 1) 确认是否因为拟合参数太多：先减少（只拟合 `k₀`）
-2) 再增大 `Max Iterations (外层迭代)`
+2) 再增大 `最大迭代次数（max_nfev）`
 3) 若仍无效：检查边界/初值/模型结构，不要盲目加迭代
 
 ### F2. 看到“所有实验点都无法成功预测”
 
 1) 优先解决数值求解：`Method→BDF`、放宽 `rtol/atol`
-2) 调整 `max_step_fraction (ODE)`（减小或设 `0` 对比）
+2) 调整 `最大步长比例（max_step_fraction）`（减小或设 `0` 对比）
 3) 收紧边界，避免优化跑到极端参数区
+

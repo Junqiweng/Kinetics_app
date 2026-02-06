@@ -111,21 +111,21 @@ def read_text_if_exists(file_path: str) -> str | None:
 def _render_markdown_file(file_path: Path) -> None:
     text = read_text_if_exists(str(file_path))
     if text is None:
-        st.warning(f"未找到文档：`{file_path.as_posix()}`")
+        st.warning(f"未找到帮助文档：`{file_path.as_posix()}`。请检查文件路径或重新安装文档。")
         return
     st.markdown(text)
 
 
 def render_help_page() -> None:
-    st.title("教程 / 帮助")
-    st.caption("面向初学者：按步骤完成一次建模、拟合、诊断与导出。")
+    st.title("使用指南与帮助")
+    st.caption("按步骤完成建模、参数拟合、结果诊断与数据导出。")
 
     docs_dir = _docs_dir()
     user_guide_path = docs_dir / "user_guide.md"
     user_guide_bytes = read_file_bytes_if_exists(str(user_guide_path))
     if user_guide_bytes is not None:
         st.download_button(
-            "📥 下载《用户指南（详细版）》(Markdown)",
+            "📥 下载《用户指南（详细版）》Markdown",
             data=user_guide_bytes,
             file_name="Kinetics_app_user_guide.md",
             mime="text/markdown",
@@ -157,7 +157,7 @@ def render_help_page() -> None:
             )
             if pfr_example_bytes is None:
                 st.warning(
-                    "未找到 `test_data/orthogonal_design_data.csv`，请先运行 `test_data/generate_orthogonal_design.py` 生成。"
+                    "未找到 `test_data/orthogonal_design_data.csv`。请先运行 `test_data/generate_orthogonal_design.py` 生成示例数据。"
                 )
             else:
                 st.download_button(

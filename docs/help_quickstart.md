@@ -41,7 +41,7 @@
 
 3) **拟合：③ 拟合与结果**
 
-- 展开 `高级设置与边界 (点击展开)`，先设置边界（`k0 Min/Max`、`Ea Min/Max`、`Order Min/Max` …）
+- 展开 `高级设置与边界 (点击展开)`，先设置边界（`k₀ Min/Max`、`Eₐ Min/Max`、`Order Min/Max` …）
 - 点击 `🚀 开始拟合`
 
 做到以下任意一点，即算“跑通”：
@@ -79,15 +79,15 @@
 这是“拟合能否稳定、能否收敛”的关键区：
 
 - 参数边界（强烈建议先设）：
-  - `k0 Min / k0 Max`
-  - `Ea Min / Ea Max`
+  - `k₀ Min / k₀ Max`
+  - `Eₐ Min / Eₐ Max`
   - `Order Min / Order Max`
   - （仅 L-H）`K0_ads Min/Max`、`Ea_K Min/Max`
   - （仅可逆）`k0_rev Min/Max`、`Ea_rev Min/Max`、`Order_rev Min/Max`
 - 算法与鲁棒性：
-  - `Max Iterations (外层迭代)`、`diff_step (Finite Diff)`、`max_step_fraction (ODE)`
-  - `Multi-start (多起点)`、`Start Points (起点数)`、`Coarse Iters (粗拟合)`
-  - `Use x_scale='jac'`、`Random Seed (随机种子)`
+  - `最大迭代次数（max_nfev）`、`差分步长（diff_step）`、`最大步长比例（max_step_fraction）`
+  - `多起点搜索（Multi-start）`、`起点数量（n_starts）`、`粗拟合迭代上限（max_nfev_coarse）`
+  - `启用雅可比尺度归一（x_scale='jac'）`、`随机种子（random_seed）`
 
 ---
 
@@ -170,14 +170,14 @@
 - BSTR：`t_s`（s）
 - 浓度 `*_mol_m3`（mol/m³），流量 `*_mol_s`（mol/s）
 
-### 4.3 边界 ↔ 初值一致（避免 `x0 infeasible`）
+### 4.3 边界 ↔ 初值一致（避免 `x₀ infeasible`）
 
-在「③ 拟合与结果」→ `高级设置与边界` 中设置的 `k0 Min/Max`、`Ea Min/Max`、`Order Min/Max` 只对**勾选拟合**的参数生效。
+在「③ 拟合与结果」→ `高级设置与边界` 中设置的 `k₀ Min/Max`、`Eₐ Min/Max`、`Order Min/Max` 只对**勾选拟合**的参数生效。
 
 最稳的规则：
 
-- 若勾选了 `拟合 k₀`，则表格里的对应 `k₀` 初值必须满足：`k0 Min ≤ k₀ ≤ k0 Max`
-- 若勾选了 `拟合 Eₐ`，则 `Ea Min ≤ Eₐ ≤ Ea Max`
+- 若勾选了 `拟合 k₀`，则表格里的对应 `k₀` 初值必须满足：`k₀ Min ≤ k₀ ≤ k₀ Max`
+- 若勾选了 `拟合 Eₐ`，则 `Eₐ Min ≤ Eₐ ≤ Eₐ Max`
 - 若勾选了某物种的 `拟合 <物种>`（级数），则 `Order Min ≤ n ≤ Order Max`
 
 ---
@@ -192,10 +192,10 @@
 | ODE 容差 | `rtol`、`atol` | 侧边栏 | 越小越精细但可能更慢/更易失败 |
 | 正向 `k₀/Eₐ` 初值 + 拟合勾选 | `k₀`、`Eₐ [J/mol]`、`拟合 k₀`、`拟合 Eₐ` | 「① 反应与模型」 | `Eₐ` 单位 J/mol |
 | 级数矩阵 `n` + 拟合勾选 | `n_<物种>`、`拟合 <物种>` | 「① 反应与模型」 | 行=反应，列=物种 |
-| 参数边界 | `k0 Min/Max`、`Ea Min/Max`、`Order Min/Max` | 「③ 拟合与结果」→ `高级设置与边界` | 强烈建议先设 |
-| 数值差分步长 | `diff_step (Finite Diff)` | 「③ 拟合与结果」→ `高级设置与边界` | 相对步长；拟合抖动/不动常调它 |
-| ODE 步长限制 | `max_step_fraction (ODE)` | 「③ 拟合与结果」→ `高级设置与边界` | `0` 表示不限制 |
-| 多起点 | `Multi-start (多起点)`、`Start Points (起点数)` | 「③ 拟合与结果」→ `高级设置与边界` | 参数多/易局部极小值时开启 |
+| 参数边界 | `k₀ Min/Max`、`Eₐ Min/Max`、`Order Min/Max` | 「③ 拟合与结果」→ `高级设置与边界` | 强烈建议先设 |
+| 数值差分步长 | `差分步长（diff_step）` | 「③ 拟合与结果」→ `高级设置与边界` | 相对步长；拟合抖动/不动常调它 |
+| ODE 步长限制 | `最大步长比例（max_step_fraction）` | 「③ 拟合与结果」→ `高级设置与边界` | `0` 表示不限制 |
+| 多起点 | `多起点搜索（Multi-start）`、`起点数量（n_starts）` | 「③ 拟合与结果」→ `高级设置与边界` | 参数多/易局部极小值时开启 |
 
 ---
 
@@ -223,7 +223,7 @@
 
 1) 侧边栏把 `Method` 切到 `BDF`（或 `Radau`）
 2) 放宽 `rtol/atol`（例如 `rtol: 1e-6 → 1e-5`；`atol: 1e-9 → 1e-8`）
-3) 在「③」把 `max_step_fraction (ODE)` 调小（例如 `0.1 → 0.05 → 0.01`），或直接设 `0`（不限制）对比一下
+3) 在「③」把 `最大步长比例（max_step_fraction）` 调小（例如 `0.1 → 0.05 → 0.01`），或直接设 `0`（不限制）对比一下
 4) 收紧参数边界（避免优化跑到极端 `k₀/Eₐ/n`）
 
 ### 6.4 拟合“不动”/抖动/很慢
@@ -231,6 +231,7 @@
 优先级从高到低：
 
 1) 减少拟合参数：按[第 2 节](#2-分阶段放开参数新手最稳的拟合顺序)先只拟合 `k₀`
-2) 把 `diff_step (Finite Diff)` 调大到 `1e-2 ~ 1e-3`
-3) 开启 `Multi-start (多起点)`，`Start Points (起点数)` 设为 `5~20`
+2) 把 `差分步长（diff_step）` 调大到 `1e-2 ~ 1e-3`
+3) 开启 `多起点搜索（Multi-start）`，`起点数量（n_starts）` 设为 `5~20`
 4) 数据量很大：先用少量代表性行跑通，再逐步加回全部数据
+

@@ -140,7 +140,7 @@ def _render_fitting_overview_box(job_summary: dict) -> None:
     if not lines:
         return
 
-    title = html_lib.escape(str(job_summary.get("title", "📊 拟合任务概览")))
+    title = html_lib.escape(str(job_summary.get("title", "拟合任务概览")))
     bullet_html = "\n".join([f"<li>{html_lib.escape(str(x))}</li>" for x in lines])
     st.markdown(
         f"""
@@ -167,7 +167,7 @@ def _render_fitting_progress_panel() -> None:
     if not (job_summary or timeline or ms_summary or final_summary):
         return
 
-    with st.expander("拟合任务概览与摘要 (点击展开)", expanded=False):
+    with st.expander("拟合任务概览与摘要（点击展开）", expanded=False):
         if job_summary:
             _render_fitting_overview_box(job_summary)
 
@@ -189,7 +189,7 @@ def _render_fitting_progress_panel() -> None:
                 st.markdown(
                     '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
                 )
-                st.markdown("#### Multi-start 摘要")
+                st.markdown("#### 多起点（Multi-start）摘要")
                 st.code(ms_summary, language="text")
 
         if final_summary:
@@ -922,7 +922,7 @@ def _run_fitting_job(
                 best_start_index = int(start_index + 1)
 
         if best_res is None:
-            raise RuntimeError("Multi-start failed: no valid result.")
+            raise RuntimeError("多起点（Multi-start）执行失败：未获得有效结果。")
 
         if stop_event.is_set():
             raise FittingStoppedError("Stopped by user")
@@ -982,7 +982,7 @@ def _run_fitting_job(
 
     if int(getattr(final_res, "status", 0)) == 0:
         timeline_add(
-            "⚠️", "达到最大迭代次数上限，拟合提前停止（可增大 Max Iterations）。"
+            "⚠️", "达到最大迭代次数上限，拟合提前停止（可增大最大迭代次数 max_nfev）。"
         )
 
     final_phi = float(final_res.cost)
