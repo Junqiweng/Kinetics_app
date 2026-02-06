@@ -148,7 +148,7 @@ python test_data/generate_orthogonal_design.py
 | `T_K` | 反应温度 | K |
 | `C0_<物种名>_mol_m3` | 各物种初始浓度 | mol/m³ |
 
-测量值列（任选一种类型；允许缺测，但缺测会在拟合中被赋予较大惩罚残差）：
+测量值列（任选一种类型）：
 - `Fout_<物种名>_mol_s`：出口摩尔流量 [mol/s]（PFR / CSTR）
 - `Cout_<物种名>_mol_m3`：出口浓度 [mol/m³]
 - `xout_<物种名>`：出口摩尔分数 [-]（仅 PFR / CSTR）
@@ -169,7 +169,10 @@ python test_data/generate_orthogonal_design.py
 - 数值积分：`scipy.integrate.solve_ivp`（可选 `RK45 / BDF / Radau`）
 - 参数拟合：`scipy.optimize.least_squares`（`method="trf"`）
 - 鲁棒性选项：多起点（multi-start）、有限差分步长 `diff_step`、参数缩放 `x_scale="jac"`
-- 残差加权：支持“不加权”与“按测量值相对误差 $1/|y|$”
+- 残差定义：
+  - 绝对残差：$r = y_{pred} - y_{meas}$
+  - 相对残差：$r = \frac{y_{pred} - y_{meas}}{\mathrm{sign}(y_{meas})\cdot\max(|y_{meas}|,\epsilon)}$
+  - 百分比残差：$r = 100\cdot\frac{y_{pred} - y_{meas}}{|y_{meas}|+\epsilon}$（其中 $\epsilon$ 为小正数，避免除零）
 
 ## 重要假设与限制（建议使用前确认）
 

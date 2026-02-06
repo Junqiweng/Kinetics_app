@@ -686,7 +686,7 @@ def _run_fitting_job(
     # 残差类型信息
     residual_type_names = {
         "绝对残差": "Absolute: r = y_pred - y_meas",
-        "相对残差": "Relative: r = (y_pred - y_meas) / y_meas",
+        "相对残差": "Relative: r = (y_pred - y_meas) / sign(y_meas)·max(|y_meas|, ε)",
         "百分比残差": f"Percentage: r = 100 * (y_pred - y_meas) / (|y_meas| + ε), ε≈{residual_epsilon:.2e}",
     }
     residual_formula_for_summary = residual_type_names.get(
@@ -806,14 +806,16 @@ def _run_fitting_job(
 
                 # 根据残差类型计算残差
                 if residual_type == "相对残差":
-                    # 相对残差: r = (y_pred - y_meas) / y_meas
-                    # 当 y_meas 接近零时，设置罚值
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        rel_residual = diff / measured_row
-                    # 检查是否有无效值（除零导致）
+                    # 相对残差: r = (y_pred - y_meas) / sign(y_meas)·max(|y_meas|, ε)
+                    # 说明：自动使用 epsilon，避免 y_meas≈0 时的除零问题。
+                    sign_measured = np.where(measured_row < 0.0, -1.0, 1.0)
+                    denominator = sign_measured * np.maximum(
+                        np.abs(measured_row), residual_epsilon
+                    )
+                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                        rel_residual = diff / denominator
                     invalid_mask = ~np.isfinite(rel_residual)
                     if np.any(invalid_mask):
-                        # 对于无效位置，使用罚值
                         rel_residual[invalid_mask] = residual_penalty_value
                     residual_array[base : base + n_outputs] = rel_residual
                 elif residual_type == "百分比残差":

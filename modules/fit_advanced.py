@@ -274,9 +274,9 @@ def render_fit_advanced(ctx: dict) -> dict:
             ),
             "相对残差": (
                 "**相对残差（Relative Residual）**\n\n"
-                r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{y_i^{meas}}$"
+                r"$r_i = \frac{y_i^{pred} - y_i^{meas}}{\mathrm{sign}(y_i^{meas})\cdot\max(|y_i^{meas}|,\epsilon)}$"
                 "\n\n适用于：测量值跨越多个数量级的数据。对所有数据点给予相近权重。\n\n"
-                r"⚠️ 注意：若 $y_i^{meas}$ 接近零，残差会变得非常大，可能导致数值不稳定。"
+                r"其中 $\epsilon$ 为小正数（同百分比残差使用的数值尺度），用于避免 $y_i^{meas}\approx 0$ 时的除零问题。"
             ),
             "百分比残差": (
                 "**百分比残差（Percentage Residual with offset）**\n\n"

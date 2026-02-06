@@ -16,7 +16,8 @@ import modules.ui_components as ui_comp
 import modules.ui_help as ui_help
 from modules.config_state import (
     _apply_imported_config_to_widget_state,
-    _clear_config_related_state,
+    _clear_state_for_imported_config,
+    _clear_state_for_reset_default,
 )
 from modules.fitting_background import FittingStoppedError, _drain_fitting_progress_queue
 from modules.plot_helpers import _configure_matplotlib_chinese_font
@@ -309,7 +310,7 @@ def bootstrap_app_state() -> dict:
         ok, message = _delete_persisted_upload(session_id)
         if not ok:
             st.warning(message)
-        _clear_config_related_state()
+        _clear_state_for_reset_default()
         # 标记已重置，阻止本次 rerun 时从浏览器加载旧配置
         st.session_state["_reset_just_happened"] = True
         st.success("已重置为默认配置。")
@@ -322,7 +323,7 @@ def bootstrap_app_state() -> dict:
             st.error(f"导入配置失败（配置校验未通过）：{error_message}")
         else:
             # 先清空旧的控件状态，防止与新导入的配置冲突导致 Streamlit 告警
-            _clear_config_related_state()
+            _clear_state_for_imported_config()
             # 将导入配置写入 cfg_*，确保 widgets 首次创建时就使用导入值
             _apply_imported_config_to_widget_state(pending_cfg)
             st.session_state["imported_config"] = pending_cfg

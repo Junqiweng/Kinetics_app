@@ -217,9 +217,9 @@ def persist_export_config(
     export_cfg: dict,
     session_id: str | None,
 ) -> tuple[bool, str]:
-    is_valid_cfg, _ = config_manager.validate_config(export_cfg)
+    is_valid_cfg, validate_msg = config_manager.validate_config(export_cfg)
     if not is_valid_cfg:
-        return True, ""
+        return False, f"当前配置未通过校验，已跳过自动保存：{validate_msg}"
 
     ok, message = config_manager.auto_save_config(export_cfg, session_id)
     if not ok:

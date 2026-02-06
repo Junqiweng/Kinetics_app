@@ -120,21 +120,30 @@ def _warn_once(flag_key: str, message: str) -> None:
         st.warning(message)
 
 
-def _clear_config_related_state() -> None:
+def _clear_config_related_state(
+    *,
+    keep_csv_data: bool,
+    clear_csv_uploader_widget: bool,
+) -> None:
     """
-    清理“配置相关”的 session_state，使 UI 真正回到默认值。
+    清理“配置相关”的 session_state。
 
-    说明：必须在 widgets 创建之前调用，否则会触发 Streamlit 的
-    “cannot be modified after the widget ... is instantiated” 报错。
+    参数:
+        keep_csv_data:
+            - True: 保留当前 CSV 缓存（用于“导入配置”场景）
+            - False: 清空当前 CSV 缓存（用于“重置默认”场景）
+        clear_csv_uploader_widget:
+            - True: 切换 CSV uploader key，强制清空前端已选文件显示
+            - False: 保留当前 uploader 显示状态
     """
-    # 先“切换”上传控件的 key：Streamlit 的 file_uploader 在某些情况下即使删掉 session_state，
-    # 前端仍可能显示旧文件；通过更换 key 强制创建一个全新的 uploader，从而清空显示。
+    # 配置 JSON uploader 总是重建，避免导入后仍显示旧文件
     st.session_state["uploader_ver_config_json"] = (
         int(st.session_state.get("uploader_ver_config_json", 0)) + 1
     )
-    st.session_state["uploader_ver_csv"] = (
-        int(st.session_state.get("uploader_ver_csv", 0)) + 1
-    )
+    if clear_csv_uploader_widget:
+        st.session_state["uploader_ver_csv"] = (
+            int(st.session_state.get("uploader_ver_csv", 0)) + 1
+        )
 
     keys_to_delete: list[str] = []
 
@@ -159,16 +168,19 @@ def _clear_config_related_state() -> None:
         ]
     )
 
-    # 3.1) 上传控件 / 上传缓存（配置 JSON + 实验数据 CSV）
+    # 4) 配置上传控件状态
     for key in list(st.session_state.keys()):
         key_str = str(key)
-        if key_str.startswith("uploaded_config_json_") or key_str.startswith(
-            "uploaded_csv_"
-        ):
+        if key_str.startswith("uploaded_config_json_"):
             keys_to_delete.append(key_str)
-    keys_to_delete.extend(["data_df_cached"])
+        if clear_csv_uploader_widget and key_str.startswith("uploaded_csv_"):
+            keys_to_delete.append(key_str)
 
-    # 4) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
+    # 5) CSV 数据缓存（仅 reset 场景清空）
+    if not keep_csv_data:
+        keys_to_delete.extend(["uploaded_csv_bytes", "uploaded_csv_name", "data_df_cached"])
+
+    # 6) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
     keys_to_delete.extend(
         [
             "fit_results",
@@ -186,3 +198,27 @@ def _clear_config_related_state() -> None:
     for key in sorted(set(keys_to_delete)):
         if key in st.session_state:
             del st.session_state[key]
+
+
+def _clear_state_for_imported_config() -> None:
+    """
+    导入配置专用清理：
+    - 清理旧控件状态与拟合结果
+    - 保留当前 CSV 数据与 uploader 状态
+    """
+    _clear_config_related_state(
+        keep_csv_data=True,
+        clear_csv_uploader_widget=False,
+    )
+
+
+def _clear_state_for_reset_default() -> None:
+    """
+    重置默认专用清理：
+    - 清理旧控件状态与拟合结果
+    - 清空当前 CSV 数据与 uploader 状态
+    """
+    _clear_config_related_state(
+        keep_csv_data=False,
+        clear_csv_uploader_widget=True,
+    )

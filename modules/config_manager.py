@@ -443,6 +443,39 @@ def validate_config(config: dict) -> tuple[bool, str]:
 
         return True, ""
 
+    def _check_positive_int(key: str, min_value: int = 1) -> tuple[bool, str]:
+        if key not in config:
+            return True, ""
+        try:
+            value = int(config[key])
+        except (ValueError, TypeError):
+            return False, f"{key} 无法转换为整数"
+        if value < int(min_value):
+            return False, f"{key} 必须 >= {int(min_value)}"
+        return True, ""
+
+    def _check_nonnegative_int(key: str) -> tuple[bool, str]:
+        if key not in config:
+            return True, ""
+        try:
+            value = int(config[key])
+        except (ValueError, TypeError):
+            return False, f"{key} 无法转换为整数"
+        if value < 0:
+            return False, f"{key} 必须为非负整数"
+        return True, ""
+
+    def _check_positive_float(key: str) -> tuple[bool, str]:
+        if key not in config:
+            return True, ""
+        try:
+            value = float(config[key])
+        except (ValueError, TypeError):
+            return False, f"{key} 无法转换为数值"
+        if (not np.isfinite(value)) or (value <= 0.0):
+            return False, f"{key} 必须为正且有限"
+        return True, ""
+
     required_keys = ["reactor_type", "kinetic_model", "species_text", "n_reactions"]
     for key in required_keys:
         if key not in config:
@@ -497,6 +530,30 @@ def validate_config(config: dict) -> tuple[bool, str]:
             return False, "max_step_fraction 无法转换为数值"
         if (not np.isfinite(value)) or (value < 0.0):
             return False, "max_step_fraction 必须为非负且有限（0 表示不限制）"
+
+    ok, msg = _check_positive_float("diff_step_rel")
+    if not ok:
+        return ok, msg
+
+    ok, msg = _check_positive_int("max_nfev", min_value=1)
+    if not ok:
+        return ok, msg
+
+    ok, msg = _check_positive_int("max_nfev_coarse", min_value=1)
+    if not ok:
+        return ok, msg
+
+    ok, msg = _check_positive_int("n_starts", min_value=1)
+    if not ok:
+        return ok, msg
+
+    ok, msg = _check_nonnegative_int("random_seed")
+    if not ok:
+        return ok, msg
+
+    for bool_key in ["use_x_scale_jac", "use_multi_start"]:
+        if bool_key in config and not isinstance(config[bool_key], (bool, np.bool_)):
+            return False, f"{bool_key} 必须为布尔值（true/false）"
 
     # 说明：历史版本曾导出过 residual_penalty_* 字段；当前版本不再使用，导入时忽略即可。
 
