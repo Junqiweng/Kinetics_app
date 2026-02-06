@@ -47,18 +47,18 @@ OUTPUT_MODE_LABELS = {
 }
 
 PROFILE_KIND_LABELS = {
-    "F (mol/s)": "摩尔流率 $F_i$ [mol/s]",
-    "C (mol/m^3)": "浓度 C_i [mol/m^3]",
+    "F (mol/s)": "摩尔流率 $F_i$ (mol/s)",
+    "C (mol/m^3)": "浓度 $C_i$ (mol/m^3)",
 }
 
 # 说明：以下字符串用于 Matplotlib 轴标签，采用 mathtext 以保证上下标显示一致。
-AXIS_LABEL_MEASURED = r"实验值 $y_i^{meas}$"
-AXIS_LABEL_PREDICTED = r"预测值 $y_i^{pred}$"
-AXIS_LABEL_RESIDUAL = r"残差 $r_i$（预测值 - 实验值）"
-AXIS_LABEL_REACTOR_VOLUME = r"反应器体积 $V$ [m$^3$]"
-AXIS_LABEL_TIME = r"时间 $t$ [s]"
-AXIS_LABEL_CONCENTRATION = r"浓度 $C_i$ [mol/m$^3$]"
-AXIS_LABEL_FLOW_RATE = r"摩尔流率 $F_i$ [mol/s]"
+AXIS_LABEL_MEASURED = "Measured $y_i$"
+AXIS_LABEL_PREDICTED = "Predicted $y_i$"
+AXIS_LABEL_RESIDUAL = "Residual $r_i$"
+AXIS_LABEL_REACTOR_VOLUME = r"Reactor volume $V$ (m$^3$)"
+AXIS_LABEL_TIME = r"Time $t$ (s)"
+AXIS_LABEL_CONCENTRATION = r"Concentration $C_i$ (mol/m$^3$)"
+AXIS_LABEL_FLOW_RATE = r"Molar flow rate $F_i$ (mol/s)"
 
 
 def map_label(mapping: dict[str, str], value: str) -> str:

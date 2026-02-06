@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import queue
 import threading
@@ -15,6 +16,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib import font_manager
+from matplotlib.ticker import AutoMinorLocator
 import streamlit.components.v1 as components
 
 import modules.fitting as fitting
@@ -26,6 +28,60 @@ import modules.ui_text as ui_text  # UI 文案映射
 import modules.browser_storage as browser_storage  # 浏览器 LocalStorage 持久化
 import modules.session_cleanup as session_cleanup  # 会话清理
 import modules.app_style as app_style
+
+
+def _patch_tornado_websocket_noise() -> None:
+    """
+    兼容补丁：抑制 websocket 关闭时的“Task exception was never retrieved”噪声栈。
+
+    背景：
+    - Tornado 的 WebSocketProtocol13.write_message 返回一个可选 await 的 Future。
+    - 连接关闭（浏览器刷新/断开）后，该 Future 可能抛 WebSocketClosedError，
+      若没有被显式 await，会在控制台打印“Task exception was never retrieved”。
+    - 这里仅消费“连接已关闭”这两类异常，不改变其它异常的可见性。
+    """
+    try:
+        import tornado.iostream as tornado_iostream
+        import tornado.websocket as tornado_websocket
+    except Exception:
+        return
+
+    protocol_cls = getattr(tornado_websocket, "WebSocketProtocol13", None)
+    if protocol_cls is None:
+        return
+    if bool(getattr(protocol_cls, "_kinetics_write_message_patched", False)):
+        return
+
+    original_write_message = protocol_cls.write_message
+
+    def _patched_write_message(self, message, binary: bool = False):
+        fut = original_write_message(self, message, binary=binary)
+        try:
+            if hasattr(fut, "add_done_callback"):
+                def _consume_ws_close_error(task) -> None:
+                    try:
+                        task.result()
+                    except (
+                        tornado_websocket.WebSocketClosedError,
+                        tornado_iostream.StreamClosedError,
+                    ):
+                        # 连接关闭属于正常生命周期事件，不需要打印任务未取回异常。
+                        pass
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Unexpected websocket write task error."
+                        )
+
+                fut.add_done_callback(_consume_ws_close_error)
+        except Exception:
+            pass
+        return fut
+
+    protocol_cls.write_message = _patched_write_message
+    protocol_cls._kinetics_write_message_patched = True
+
+
+_patch_tornado_websocket_noise()
 
 
 def _configure_matplotlib_chinese_font() -> None:
@@ -77,6 +133,94 @@ def _configure_matplotlib_chinese_font() -> None:
 
 
 _configure_matplotlib_chinese_font()
+
+
+# 参考图风格：黑色坐标轴 + 空心圆标记 + 无边框图例。
+FIT_PLOT_COLOR_CYCLE = [
+    "#4d4d4d",  # 深灰
+    "#ff2d2d",  # 红
+    "#1f77ff",  # 蓝
+    "#2ca02c",  # 绿
+    "#ff7f0e",  # 橙
+    "#17becf",  # 青
+]
+
+
+def _fit_plot_color(index: int) -> str:
+    return FIT_PLOT_COLOR_CYCLE[int(index) % len(FIT_PLOT_COLOR_CYCLE)]
+
+
+def _style_fit_axis(ax: plt.Axes, show_grid: bool = False) -> None:
+    ax.set_facecolor("#ffffff")
+    for spine in ax.spines.values():
+        spine.set_color("#000000")
+        spine.set_linewidth(1.4)
+    ax.tick_params(
+        axis="both",
+        which="major",
+        direction="in",
+        length=6.0,
+        width=1.3,
+        colors="#000000",
+        labelsize=11,
+    )
+    ax.tick_params(
+        axis="both",
+        which="minor",
+        direction="in",
+        length=3.5,
+        width=1.0,
+        colors="#000000",
+    )
+    # 每两个主刻度之间仅保留 1 个副刻度
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.grid(
+        bool(show_grid),
+        linestyle="--",
+        linewidth=0.8,
+        color="#6e6e73",
+        alpha=0.25,
+    )
+
+
+def _style_fit_legend(ax: plt.Axes, loc: str = "upper left") -> None:
+    handles, labels = ax.get_legend_handles_labels()
+    if not labels:
+        return
+    ax.legend(
+        handles,
+        labels,
+        loc=loc,
+        frameon=False,
+        fontsize=11,
+        handlelength=2.2,
+        handletextpad=0.4,
+    )
+
+
+def _plot_reference_series(
+    ax: plt.Axes,
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    label: str,
+    color: str,
+) -> None:
+    n_points = int(np.size(x_values))
+    marker_step = max(n_points // 8, 1)
+    ax.plot(
+        x_values,
+        y_values,
+        color=color,
+        linewidth=2.2,
+        marker="o",
+        markersize=6.0,
+        markerfacecolor=color,
+        markeredgecolor="#ffffff",
+        markeredgewidth=0.9,
+        markevery=marker_step,
+        label=label,
+    )
 
 from modules.constants import (
     DEFAULT_ATOL,
@@ -347,6 +491,7 @@ def main():
         st.session_state["start_fit_requested"] = True
         st.session_state["fitting_running"] = True
         st.session_state["fitting_stopped"] = False
+        st.session_state["fitting_needs_app_rerun"] = False
 
     def _request_stop_fitting() -> None:
         """
@@ -399,6 +544,9 @@ def main():
     if fitting_future is not None and fitting_future.done():
         st.session_state["fitting_running"] = False
         st.session_state["fitting_future"] = None
+        st.session_state["fitting_needs_app_rerun"] = False
+        # 同步局部状态，避免本轮脚本误入“仍在运行”分支并触发额外 sleep/rerun。
+        fitting_running = False
 
         try:
             fit_results = fitting_future.result()
@@ -558,6 +706,8 @@ def main():
         st.session_state["fitting_auto_refresh"] = True
     if "fitting_executor" not in st.session_state:
         st.session_state["fitting_executor"] = None
+    if "fitting_needs_app_rerun" not in st.session_state:
+        st.session_state["fitting_needs_app_rerun"] = False
 
     # --- 恢复缓存的已上传 CSV（浏览器刷新后仍保留）---
     if "uploaded_csv_bytes" not in st.session_state:
@@ -1997,12 +2147,13 @@ def main():
             refresh_interval_s = float(
                 st.session_state.get("fitting_refresh_interval_s", 2.0)
             )
+            _render_fitting_live_progress()
             if bool(st.session_state.get("fitting_auto_refresh", True)):
-                st.fragment(
-                    _render_fitting_live_progress, run_every=refresh_interval_s
-                )()
-            else:
-                st.fragment(_render_fitting_live_progress)()
+                # 稳定性优先：避免 st.fragment(run_every=...) 在连接关闭瞬间留下异步写任务。
+                # 这里改为常规轮询刷新（整页 rerun），代价是页面刷新频率更高。
+                refresh_interval_s = float(np.clip(refresh_interval_s, 0.2, 30.0))
+                time.sleep(refresh_interval_s)
+                st.rerun()
         elif st.session_state.get("fitting_timeline", []):
             _render_fitting_progress_panel()
 
@@ -2562,11 +2713,17 @@ def main():
                         for i, species_name in enumerate(species_list_plot):
                             ax = axes[i // n_cols][i % n_cols]
                             df_sp = df_ok[df_ok["species"] == species_name]
+                            series_color = _fit_plot_color(i)
                             ax.scatter(
                                 df_sp["measured"].to_numpy(dtype=float),
                                 df_sp["predicted"].to_numpy(dtype=float),
-                                alpha=0.65,
+                                s=44,
+                                alpha=0.9,
+                                facecolors=series_color,
+                                edgecolors="#ffffff",
+                                linewidths=0.9,
                                 label=species_name,
+                                zorder=3,
                             )
                             min_v = float(
                                 np.nanmin(
@@ -2608,12 +2765,14 @@ def main():
                                 ax.plot(
                                     [axis_min_i, axis_max_i],
                                     [axis_min_i, axis_max_i],
-                                    "k--",
-                                    label="y=x",
+                                    color="#000000",
+                                    linestyle="--",
+                                    linewidth=1.2,
+                                    label="Ideal y = x",
                                 )
                                 if show_error_lines and (error_band_percent > 0.0):
                                     e = float(error_band_percent) / 100.0
-                                    error_label = f"{error_band_percent:.1f}%误差线"
+                                    error_label = f"± {error_band_percent:.1f}% band"
                                     ax.plot(
                                         [axis_min_i, axis_max_i],
                                         [
@@ -2636,7 +2795,7 @@ def main():
                                         linewidth=1.0,
                                         label="_nolegend_",
                                     )
-                            ax.set_title(f"{species_name}")
+                            ax.set_title(f"Species: {species_name}")
                             ax.set_xlabel(
                                 ui_text.axis_label_with_unit(
                                     ui_text.AXIS_LABEL_MEASURED, unit_text_parity
@@ -2647,8 +2806,8 @@ def main():
                                     ui_text.AXIS_LABEL_PREDICTED, unit_text_parity
                                 )
                             )
-                            ax.grid(True)
-                            ax.legend()
+                            _style_fit_axis(ax, show_grid=False)
+                            _style_fit_legend(ax)
 
                         for j in range(n_plots, n_rows * n_cols):
                             axes[j // n_cols][j % n_cols].axis("off")
@@ -2702,14 +2861,26 @@ def main():
                         for i, species_name in enumerate(species_list_residual):
                             ax_r = axes_r[i // n_cols][i % n_cols]
                             df_sp = df_res[df_res["species"] == species_name]
+                            series_color = _fit_plot_color(i)
                             ax_r.scatter(
                                 df_sp["measured"].to_numpy(dtype=float),
                                 df_sp["residual"].to_numpy(dtype=float),
-                                alpha=0.65,
+                                s=42,
+                                alpha=0.9,
+                                facecolors=series_color,
+                                edgecolors="#ffffff",
+                                linewidths=0.9,
                                 label=species_name,
+                                zorder=3,
                             )
-                            ax_r.axhline(0.0, color="k", linestyle="--", linewidth=1.0)
-                            ax_r.set_title(f"{species_name}")
+                            ax_r.axhline(
+                                0.0,
+                                color="#000000",
+                                linestyle="--",
+                                linewidth=1.2,
+                                label="Zero residual",
+                            )
+                            ax_r.set_title(f"Species: {species_name}")
                             ax_r.set_xlabel(
                                 ui_text.axis_label_with_unit(
                                     ui_text.AXIS_LABEL_MEASURED, unit_text_parity
@@ -2720,8 +2891,8 @@ def main():
                                     ui_text.AXIS_LABEL_RESIDUAL, unit_text_parity
                                 )
                             )
-                            ax_r.grid(True)
-                            ax_r.legend()
+                            _style_fit_axis(ax_r, show_grid=False)
+                            _style_fit_legend(ax_r)
 
                         for j in range(n_residual_plots, n_residual_rows * n_cols):
                             axes_r[j // n_cols][j % n_cols].axis("off")
@@ -2935,12 +3106,17 @@ def main():
                         }
 
                         profile_df = pd.DataFrame({"V_m3": volume_grid_m3})
-                        for species_name in profile_species:
+                        for i, species_name in enumerate(profile_species):
                             idx = name_to_index[species_name]
+                            series_color = _fit_plot_color(i)
                             if profile_kind.startswith("F"):
                                 y = molar_flow_profile[idx, :]
-                                ax_pf.plot(
-                                    volume_grid_m3, y, linewidth=2, label=species_name
+                                _plot_reference_series(
+                                    ax_pf,
+                                    volume_grid_m3,
+                                    y,
+                                    label=species_name,
+                                    color=series_color,
                                 )
                                 profile_df[f"F_{species_name}_mol_s"] = y
                             else:
@@ -2961,11 +3137,12 @@ def main():
                                     conc = molar_flow_profile[idx, :] / max(
                                         vdot_m3_s, EPSILON_FLOW_RATE
                                     )
-                                ax_pf.plot(
+                                _plot_reference_series(
+                                    ax_pf,
                                     volume_grid_m3,
                                     conc,
-                                    linewidth=2,
                                     label=species_name,
+                                    color=series_color,
                                 )
                                 profile_df[f"C_{species_name}_mol_m3"] = conc
 
@@ -2975,8 +3152,8 @@ def main():
                             if profile_kind.startswith("F")
                             else ui_text.AXIS_LABEL_CONCENTRATION
                         )
-                        ax_pf.grid(True)
-                        ax_pf.legend()
+                        _style_fit_axis(ax_pf, show_grid=False)
+                        _style_fit_legend(ax_pf)
                         st.pyplot(fig_pf)
 
                         st.download_button(
@@ -3057,16 +3234,22 @@ def main():
                             name: i for i, name in enumerate(species_names_fit)
                         }
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
-                        for species_name in profile_species:
+                        for i, species_name in enumerate(profile_species):
                             idx = name_to_index[species_name]
                             y = conc_profile[idx, :]
-                            ax_cs.plot(time_grid_s, y, linewidth=2, label=species_name)
+                            _plot_reference_series(
+                                ax_cs,
+                                time_grid_s,
+                                y,
+                                label=species_name,
+                                color=_fit_plot_color(i),
+                            )
                             profile_df[f"C_{species_name}_mol_m3"] = y
 
                         ax_cs.set_xlabel(ui_text.AXIS_LABEL_TIME)
                         ax_cs.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
-                        ax_cs.grid(True)
-                        ax_cs.legend()
+                        _style_fit_axis(ax_cs, show_grid=False)
+                        _style_fit_legend(ax_cs)
                         st.pyplot(fig_cs)
 
                         st.download_button(
@@ -3139,16 +3322,22 @@ def main():
                             name: i for i, name in enumerate(species_names_fit)
                         }
                         profile_df = pd.DataFrame({"t_s": time_grid_s})
-                        for species_name in profile_species:
+                        for i, species_name in enumerate(profile_species):
                             idx = name_to_index[species_name]
                             y = conc_profile[idx, :]
-                            ax_bt.plot(time_grid_s, y, linewidth=2, label=species_name)
+                            _plot_reference_series(
+                                ax_bt,
+                                time_grid_s,
+                                y,
+                                label=species_name,
+                                color=_fit_plot_color(i),
+                            )
                             profile_df[f"C_{species_name}_mol_m3"] = y
 
                         ax_bt.set_xlabel(ui_text.AXIS_LABEL_TIME)
                         ax_bt.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
-                        ax_bt.grid(True)
-                        ax_bt.legend()
+                        _style_fit_axis(ax_bt, show_grid=False)
+                        _style_fit_legend(ax_bt)
                         st.pyplot(fig_bt)
 
                         st.download_button(
