@@ -21,13 +21,25 @@ def render_fit_tab(tab_fit, ctx: dict) -> dict:
             output_species_list = list(fit_results_cached.get("output_species", []))
 
         if data_df is None:
+            if fit_results_cached is None:
+                with st.container(border=True):
+                    st.markdown(
+                        '<div class="kinetics-card-marker"></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.info("请先在「实验数据」页面上传 CSV 文件（或恢复已缓存的文件）。")
+                st.stop()
             st.info("请先在「实验数据」页面上传 CSV 文件（或恢复已缓存的文件）。")
-            if fit_results_cached is None:
-                st.stop()
         if not output_species_list:
-            st.error("请选择至少一个目标物种。")
             if fit_results_cached is None:
+                with st.container(border=True):
+                    st.markdown(
+                        '<div class="kinetics-card-marker"></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.error("请选择至少一个目标物种。")
                 st.stop()
+            st.error("请选择至少一个目标物种。")
 
         fit_ctx = dict(ctx)
         fit_ctx["data_df"] = data_df

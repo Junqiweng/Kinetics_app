@@ -7,7 +7,6 @@ import time
 import numpy as np
 import streamlit as st
 
-import modules.ui_components as ui_comp
 import modules.ui_text as ui_text
 from modules.config_state import _warn_once
 from modules.fitting_background import (
@@ -113,7 +112,6 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
         auto_refresh = col_act3.checkbox(
             "自动刷新",
             value=bool(st.session_state.get("fitting_auto_refresh", True)),
-            disabled=not fitting_running,
             help="开启后，页面会按设定间隔自动刷新，以持续更新拟合进度与阶段信息；关闭可降低页面刷新负载与 CPU 占用。",
         )
         col_interval_label, col_interval_input = col_act5.columns(
@@ -123,21 +121,24 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             '<div class="kinetics-inline-label">间隔(s)</div>',
             unsafe_allow_html=True,
         )
-        refresh_interval_s = float(
-            ui_comp.smart_number_input(
-                "间隔(s)",
-                value=float(
-                    st.session_state.get("fitting_refresh_interval_s", 2.0)
-                ),
-                min_value=0.5,
-                max_value=10.0,
-                step=0.5,
-                key="cfg_refresh_interval_s_ui",
-                disabled=(not fitting_running) or (not auto_refresh),
-                help="自动刷新间隔 [s]",
-                label_visibility="collapsed",
-                container=col_interval_input,
-            )
+        refresh_interval_s = round(
+            float(
+                col_interval_input.number_input(
+                    "间隔(s)",
+                    value=float(
+                        st.session_state.get("fitting_refresh_interval_s", 2.0)
+                    ),
+                    min_value=0.5,
+                    max_value=10.0,
+                    step=0.5,
+                    format="%.1f",
+                    key="cfg_refresh_interval_s_ui",
+                    disabled=(not auto_refresh),
+                    help="自动刷新间隔 [s]（可在拟合前预设）",
+                    label_visibility="collapsed",
+                )
+            ),
+            1,
         )
         clear_btn = col_act4.button(
             "🧹 清除结果",
@@ -147,7 +148,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             help="清除上一次拟合的结果、对比表缓存与时间线（不影响当前输入配置）。",
         )
     st.session_state["fitting_auto_refresh"] = bool(auto_refresh)
-    st.session_state["fitting_refresh_interval_s"] = float(refresh_interval_s)
+    st.session_state["fitting_refresh_interval_s"] = round(float(refresh_interval_s), 1)
 
     # --- 显示拟合相关的通知（在 tab 内部显示，避免 tabs 状态重置）---
     fit_notice = st.session_state.pop("fit_notice", None)
