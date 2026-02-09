@@ -184,9 +184,7 @@ def _clear_config_related_state(
     keys_to_delete.extend(
         [
             "fit_results",
-            "fit_compare_cache_key",
             "fit_compare_long_df",
-            "fit_compare_long_df_all",
             "fitting_timeline",
             "fitting_metrics",
             "fitting_ms_summary",

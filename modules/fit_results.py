@@ -13,6 +13,7 @@ import modules.ui_components as ui_comp
 import modules.ui_text as ui_text
 from modules.data_utils import (
     _build_fit_comparison_long_table,
+    _freeze_params,
     _get_measurement_column_name,
     _get_output_unit_text,
 )
@@ -47,6 +48,193 @@ from modules.constants import (
 )
 
 
+@st.cache_data(show_spinner="正在计算剖面…")
+def _compute_reactor_profile(
+    reactor_type: str,
+    kinetic_model: str,
+    pfr_flow_model: str,
+    output_mode: str,
+    row_data_dict: dict,
+    species_names: tuple,
+    fitted_params_frozen: tuple,
+    stoich_matrix_tuple: tuple,
+    solver_method: str,
+    rtol: float,
+    atol: float,
+    max_step_fraction: float,
+    n_points: int,
+) -> dict:
+    """
+    提取剖面计算为独立纯函数（可被 @st.cache_data 缓存）。
+
+    返回 dict 包含 x_grid, profiles(ndarray), ok, message, x_label_key, profile_kind 等。
+    """
+    # 还原参数
+    fitted_params = {}
+    for k, v in fitted_params_frozen:
+        if isinstance(v, (tuple, list)):
+            fitted_params[k] = np.array(v)
+        else:
+            fitted_params[k] = v
+    stoich_matrix = np.array(stoich_matrix_tuple)
+    species_names_list = list(species_names)
+
+    temperature_K = float(row_data_dict.get("T_K", float("nan")))
+
+    if reactor_type == REACTOR_TYPE_PFR:
+        reactor_volume_m3 = float(row_data_dict.get("V_m3", float("nan")))
+        molar_flow_inlet = np.zeros(len(species_names_list), dtype=float)
+
+        if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+            pressure_Pa = float(row_data_dict.get("P_Pa", float("nan")))
+            for i, sp_name in enumerate(species_names_list):
+                molar_flow_inlet[i] = float(row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan")))
+
+            x_grid, profiles, ok, message = (
+                reactors.integrate_pfr_profile_gas_ideal_const_p(
+                    reactor_volume_m3=reactor_volume_m3,
+                    temperature_K=temperature_K,
+                    pressure_Pa=pressure_Pa,
+                    molar_flow_inlet_mol_s=molar_flow_inlet,
+                    stoich_matrix=stoich_matrix,
+                    k0=fitted_params["k0"],
+                    ea_J_mol=fitted_params["ea_J_mol"],
+                    reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                    solver_method=solver_method,
+                    rtol=rtol,
+                    atol=atol,
+                    n_points=n_points,
+                    kinetic_model=kinetic_model,
+                    max_step_fraction=max_step_fraction,
+                    K0_ads=fitted_params.get("K0_ads", None),
+                    Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                    m_inhibition=fitted_params.get("m_inhibition", None),
+                    k0_rev=fitted_params.get("k0_rev", None),
+                    ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                    order_rev_matrix=fitted_params.get("order_rev", None),
+                )
+            )
+        else:
+            vdot_m3_s = float(row_data_dict.get("vdot_m3_s", float("nan")))
+            use_conc_inlet = str(output_mode).strip().startswith("C")
+            for i, sp_name in enumerate(species_names_list):
+                if use_conc_inlet:
+                    c0 = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
+                    molar_flow_inlet[i] = c0 * float(vdot_m3_s)
+                else:
+                    molar_flow_inlet[i] = float(row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan")))
+
+            x_grid, profiles, ok, message = (
+                reactors.integrate_pfr_profile(
+                    reactor_volume_m3=reactor_volume_m3,
+                    temperature_K=temperature_K,
+                    vdot_m3_s=vdot_m3_s,
+                    molar_flow_inlet_mol_s=molar_flow_inlet,
+                    stoich_matrix=stoich_matrix,
+                    k0=fitted_params["k0"],
+                    ea_J_mol=fitted_params["ea_J_mol"],
+                    reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                    solver_method=solver_method,
+                    rtol=rtol,
+                    atol=atol,
+                    n_points=n_points,
+                    kinetic_model=kinetic_model,
+                    max_step_fraction=max_step_fraction,
+                    K0_ads=fitted_params.get("K0_ads", None),
+                    Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                    m_inhibition=fitted_params.get("m_inhibition", None),
+                    k0_rev=fitted_params.get("k0_rev", None),
+                    ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                    order_rev_matrix=fitted_params.get("order_rev", None),
+                )
+            )
+
+        return {
+            "x_grid": x_grid.tolist() if ok else [],
+            "profiles": profiles.tolist() if ok else [],
+            "ok": ok,
+            "message": message,
+            "x_label": "V_m3",
+        }
+
+    elif reactor_type == REACTOR_TYPE_CSTR:
+        reactor_volume_m3 = float(row_data_dict.get("V_m3", float("nan")))
+        vdot_m3_s = float(row_data_dict.get("vdot_m3_s", float("nan")))
+        conc_inlet = np.zeros(len(species_names_list), dtype=float)
+        for i, sp_name in enumerate(species_names_list):
+            conc_inlet[i] = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
+
+        from modules.constants import EPSILON_FLOW_RATE
+        tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)
+        simulation_time_s = float(5.0 * tau_s)
+
+        x_grid, profiles, ok, message = reactors.integrate_cstr_profile(
+            simulation_time_s=simulation_time_s,
+            temperature_K=temperature_K,
+            reactor_volume_m3=reactor_volume_m3,
+            vdot_m3_s=vdot_m3_s,
+            conc_inlet_mol_m3=conc_inlet,
+            stoich_matrix=stoich_matrix,
+            k0=fitted_params["k0"],
+            ea_J_mol=fitted_params["ea_J_mol"],
+            reaction_order_matrix=fitted_params["reaction_order_matrix"],
+            solver_method=solver_method,
+            rtol=rtol,
+            atol=atol,
+            n_points=n_points,
+            kinetic_model=kinetic_model,
+            max_step_fraction=max_step_fraction,
+            K0_ads=fitted_params.get("K0_ads", None),
+            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+            m_inhibition=fitted_params.get("m_inhibition", None),
+            k0_rev=fitted_params.get("k0_rev", None),
+            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+            order_rev_matrix=fitted_params.get("order_rev", None),
+        )
+        return {
+            "x_grid": x_grid.tolist() if ok else [],
+            "profiles": profiles.tolist() if ok else [],
+            "ok": ok,
+            "message": message,
+            "x_label": "t_s",
+        }
+
+    else:  # BSTR
+        reaction_time_s = float(row_data_dict.get("t_s", float("nan")))
+        conc_initial = np.zeros(len(species_names_list), dtype=float)
+        for i, sp_name in enumerate(species_names_list):
+            conc_initial[i] = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
+
+        x_grid, profiles, ok, message = reactors.integrate_batch_profile(
+            reaction_time_s=reaction_time_s,
+            temperature_K=temperature_K,
+            conc_initial_mol_m3=conc_initial,
+            stoich_matrix=stoich_matrix,
+            k0=fitted_params["k0"],
+            ea_J_mol=fitted_params["ea_J_mol"],
+            reaction_order_matrix=fitted_params["reaction_order_matrix"],
+            solver_method=solver_method,
+            rtol=rtol,
+            atol=atol,
+            n_points=n_points,
+            kinetic_model=kinetic_model,
+            max_step_fraction=max_step_fraction,
+            K0_ads=fitted_params.get("K0_ads", None),
+            Ea_K_J_mol=fitted_params.get("Ea_K", None),
+            m_inhibition=fitted_params.get("m_inhibition", None),
+            k0_rev=fitted_params.get("k0_rev", None),
+            ea_rev_J_mol=fitted_params.get("ea_rev", None),
+            order_rev_matrix=fitted_params.get("order_rev", None),
+        )
+        return {
+            "x_grid": x_grid.tolist() if ok else [],
+            "profiles": profiles.tolist() if ok else [],
+            "ok": ok,
+            "message": message,
+            "x_label": "t_s",
+        }
+
+
 def _render_centered_pyplot(fig) -> None:
     left_col, center_col, right_col = st.columns([1, 2, 1])
     del left_col, right_col
@@ -76,7 +264,20 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
         )
 
         fitted_params = res["params"]
-        df_fit = res["data"]
+        # 优先使用拟合时的数据快照，避免上传/删除新 CSV 后结果页基于错误数据重算
+        if "data" in res and isinstance(res["data"], pd.DataFrame):
+            df_fit = res["data"]
+        else:
+            df_fit = st.session_state.get("data_df_cached", pd.DataFrame())
+
+        # 若当前缓存数据与拟合时数据不一致，提示用户“当前上传数据已变化”
+        current_df = st.session_state.get("data_df_cached", pd.DataFrame())
+        if not current_df.empty and "data_hash" in res:
+            current_hash = hashlib.md5(current_df.to_csv(index=False).encode()).hexdigest()
+            if current_hash != res["data_hash"]:
+                tab_fit_results_container.warning(
+                    "⚠️ 当前数据与拟合时使用的数据不一致（已上传新数据），结果可能不匹配。"
+                )
         species_names_fit = res.get("species_names", species_names)
         stoich_matrix_fit = res.get("stoich_matrix", stoich_matrix)
         solver_method_fit = res.get("solver_method", solver_method)
@@ -380,48 +581,29 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         "无法绘制奇偶校验图的物种： " + "，".join(parity_species_unavailable)
                     )
 
-            cache_key = (
-                float(res.get("phi_final", res.get("cost", 0.0))),
-                str(compare_validation_mode),
-                str(compare_output_mode),
-                tuple(parity_species_candidates),
-                float(rtol_fit),
-                float(atol_fit),
-                str(solver_method_fit),
-                str(reactor_type_fit),
-                str(pfr_flow_model_fit),
-                str(kinetic_model_fit),
-                float(max_step_fraction_fit),
-            )
-            if (
-                st.session_state.get("fit_compare_cache_key", None) != cache_key
-                or "fit_compare_long_df" not in st.session_state
-            ):
-                try:
-                    st.session_state["fit_compare_cache_key"] = cache_key
-                    st.session_state["fit_compare_long_df"] = (
-                        _build_fit_comparison_long_table(
-                            data_df=df_fit,
-                            species_names=species_names_fit,
-                            output_mode=str(compare_output_mode),
-                            output_species_list=parity_species_candidates,
-                            stoich_matrix=stoich_matrix_fit,
-                            fitted_params=fitted_params,
-                            solver_method=solver_method_fit,
-                            rtol=float(rtol_fit),
-                            atol=float(atol_fit),
-                            reactor_type=reactor_type_fit,
-                            kinetic_model=kinetic_model_fit,
-                            pfr_flow_model=str(pfr_flow_model_fit),
-                            max_step_fraction=float(max_step_fraction_fit),
-                            validation_mode=str(compare_validation_mode),
-                        )
-                    )
-                except Exception as exc:
-                    st.error(f"生成对比数据失败: {exc}")
-                    st.session_state["fit_compare_long_df"] = pd.DataFrame()
+            try:
+                df_long = _build_fit_comparison_long_table(
+                    data_df=df_fit,
+                    species_names=species_names_fit,
+                    output_mode=str(compare_output_mode),
+                    output_species_list=parity_species_candidates,
+                    stoich_matrix=stoich_matrix_fit,
+                    fitted_params=fitted_params,
+                    solver_method=solver_method_fit,
+                    rtol=float(rtol_fit),
+                    atol=float(atol_fit),
+                    reactor_type=reactor_type_fit,
+                    kinetic_model=kinetic_model_fit,
+                    pfr_flow_model=str(pfr_flow_model_fit),
+                    max_step_fraction=float(max_step_fraction_fit),
+                    validation_mode=str(compare_validation_mode),
+                )
+            except Exception as exc:
+                st.error(f"生成对比数据失败: {exc}")
+                df_long = pd.DataFrame()
 
-            df_long = st.session_state["fit_compare_long_df"]
+            # 保存到 session_state 供导出 tab 使用
+            st.session_state["fit_compare_long_df"] = df_long
             if df_long.empty:
                 st.warning("对比数据为空：无法生成奇偶校验图。")
             else:
@@ -645,128 +827,130 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             squeeze=False,
                         )
 
-                        for i, species_name in enumerate(species_list_plot):
-                            ax = axes[i // n_cols][i % n_cols]
-                            df_sp = df_ok[df_ok["species"] == species_name]
-                            series_color = _fit_plot_color(i)
-                            ax.scatter(
-                                df_sp["measured"].to_numpy(dtype=float),
-                                df_sp["predicted"].to_numpy(dtype=float),
-                                s=44,
-                                alpha=0.9,
-                                facecolors=series_color,
-                                edgecolors="#ffffff",
-                                linewidths=0.9,
-                                label=species_name,
-                                zorder=3,
-                            )
-                            min_v = float(
-                                np.nanmin(
-                                    np.concatenate(
-                                        [
-                                            df_sp["measured"].to_numpy(),
-                                            df_sp["predicted"].to_numpy(),
-                                        ]
+                        try:
+                            for i, species_name in enumerate(species_list_plot):
+                                ax = axes[i // n_cols][i % n_cols]
+                                df_sp = df_ok[df_ok["species"] == species_name]
+                                series_color = _fit_plot_color(i)
+                                ax.scatter(
+                                    df_sp["measured"].to_numpy(dtype=float),
+                                    df_sp["predicted"].to_numpy(dtype=float),
+                                    s=44,
+                                    alpha=0.9,
+                                    facecolors=series_color,
+                                    edgecolors="#ffffff",
+                                    linewidths=0.9,
+                                    label=species_name,
+                                    zorder=3,
+                                )
+                                min_v = float(
+                                    np.nanmin(
+                                        np.concatenate(
+                                            [
+                                                df_sp["measured"].to_numpy(),
+                                                df_sp["predicted"].to_numpy(),
+                                            ]
+                                        )
                                     )
                                 )
-                            )
-                            max_v = float(
-                                np.nanmax(
-                                    np.concatenate(
-                                        [
-                                            df_sp["measured"].to_numpy(),
-                                            df_sp["predicted"].to_numpy(),
-                                        ]
+                                max_v = float(
+                                    np.nanmax(
+                                        np.concatenate(
+                                            [
+                                                df_sp["measured"].to_numpy(),
+                                                df_sp["predicted"].to_numpy(),
+                                            ]
+                                        )
                                     )
                                 )
-                            )
-                            # x/y 坐标范围 + 等比例（可全局统一，也可逐图独立）
-                            if axis_ranges_by_species is None:
-                                axis_min_i, axis_max_i = axis_min_plot, axis_max_plot
-                            else:
-                                axis_min_i, axis_max_i = axis_ranges_by_species.get(
-                                    species_name,
-                                    (axis_min_auto, axis_max_auto),
-                                )
-                            ax.set_xlim(axis_min_i, axis_max_i)
-                            ax.set_ylim(axis_min_i, axis_max_i)
-                            ax.set_aspect("equal", adjustable="box")
+                                # x/y 坐标范围 + 等比例（可全局统一，也可逐图独立）
+                                if axis_ranges_by_species is None:
+                                    axis_min_i, axis_max_i = axis_min_plot, axis_max_plot
+                                else:
+                                    axis_min_i, axis_max_i = axis_ranges_by_species.get(
+                                        species_name,
+                                        (axis_min_auto, axis_max_auto),
+                                    )
+                                ax.set_xlim(axis_min_i, axis_max_i)
+                                ax.set_ylim(axis_min_i, axis_max_i)
+                                ax.set_aspect("equal", adjustable="box")
 
-                            if (
-                                np.isfinite(min_v)
-                                and np.isfinite(max_v)
-                                and max_v > min_v
-                            ):
-                                ax.plot(
-                                    [axis_min_i, axis_max_i],
-                                    [axis_min_i, axis_max_i],
-                                    color="#000000",
-                                    linestyle="--",
-                                    linewidth=1.2,
-                                    label="Ideal y = x",
-                                )
-                                if show_error_lines and (error_band_percent > 0.0):
-                                    e = float(error_band_percent) / 100.0
-                                    error_label = f"± {error_band_percent:.1f}% band"
+                                if (
+                                    np.isfinite(min_v)
+                                    and np.isfinite(max_v)
+                                    and max_v > min_v
+                                ):
                                     ax.plot(
                                         [axis_min_i, axis_max_i],
-                                        [
-                                            (1.0 - e) * axis_min_i,
-                                            (1.0 - e) * axis_max_i,
-                                        ],
-                                        color="tab:gray",
-                                        linestyle="--",
-                                        linewidth=1.0,
-                                        label=error_label,
-                                    )
-                                    ax.plot(
                                         [axis_min_i, axis_max_i],
-                                        [
-                                            (1.0 + e) * axis_min_i,
-                                            (1.0 + e) * axis_max_i,
-                                        ],
-                                        color="tab:gray",
+                                        color="#000000",
                                         linestyle="--",
-                                        linewidth=1.0,
-                                        label="_nolegend_",
+                                        linewidth=1.2,
+                                        label="Ideal y = x",
                                     )
-                            ax.set_title(f"Species: {species_name}")
-                            ax.set_xlabel(
-                                ui_text.axis_label_with_unit(
-                                    ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                                    if show_error_lines and (error_band_percent > 0.0):
+                                        e = float(error_band_percent) / 100.0
+                                        error_label = f"± {error_band_percent:.1f}% band"
+                                        ax.plot(
+                                            [axis_min_i, axis_max_i],
+                                            [
+                                                (1.0 - e) * axis_min_i,
+                                                (1.0 - e) * axis_max_i,
+                                            ],
+                                            color="tab:gray",
+                                            linestyle="--",
+                                            linewidth=1.0,
+                                            label=error_label,
+                                        )
+                                        ax.plot(
+                                            [axis_min_i, axis_max_i],
+                                            [
+                                                (1.0 + e) * axis_min_i,
+                                                (1.0 + e) * axis_max_i,
+                                            ],
+                                            color="tab:gray",
+                                            linestyle="--",
+                                            linewidth=1.0,
+                                            label="_nolegend_",
+                                        )
+                                ax.set_title(f"Species: {species_name}")
+                                ax.set_xlabel(
+                                    ui_text.axis_label_with_unit(
+                                        ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                                    )
                                 )
-                            )
-                            ax.set_ylabel(
-                                ui_text.axis_label_with_unit(
-                                    ui_text.AXIS_LABEL_PREDICTED, unit_text_parity
+                                ax.set_ylabel(
+                                    ui_text.axis_label_with_unit(
+                                        ui_text.AXIS_LABEL_PREDICTED, unit_text_parity
+                                    )
                                 )
+                                _style_fit_axis(ax, show_grid=False)
+                                _style_fit_legend(ax)
+
+                            for j in range(n_plots, n_rows * n_cols):
+                                axes[j // n_cols][j % n_cols].axis("off")
+
+                            fig.tight_layout()
+                            st.pyplot(fig)
+
+                            image_format = st.selectbox(
+                                "图像格式",
+                                ["png", "svg"],
+                                index=0,
+                                key="parity_image_format",
                             )
-                            _style_fit_axis(ax, show_grid=False)
-                            _style_fit_legend(ax)
-
-                        for j in range(n_plots, n_rows * n_cols):
-                            axes[j // n_cols][j % n_cols].axis("off")
-
-                        fig.tight_layout()
-                        st.pyplot(fig)
-
-                        image_format = st.selectbox(
-                            "图像格式",
-                            ["png", "svg"],
-                            index=0,
-                            key="parity_image_format",
-                        )
-                        st.download_button(
-                            "📥 下载奇偶校验图",
-                            ui_comp.figure_to_image_bytes(fig, image_format),
-                            file_name=f"parity_plot.{image_format}",
-                            mime=(
-                                "image/png"
-                                if image_format == "png"
-                                else "image/svg+xml"
-                            ),
-                        )
-                        plt.close(fig)
+                            st.download_button(
+                                "📥 下载奇偶校验图",
+                                ui_comp.figure_to_image_bytes(fig, image_format),
+                                file_name=f"parity_plot.{image_format}",
+                                mime=(
+                                    "image/png"
+                                    if image_format == "png"
+                                    else "image/svg+xml"
+                                ),
+                            )
+                        finally:
+                            plt.close(fig)
 
                 if show_residual_plot:
                     st.markdown("#### 残差图（预测值 - 实验值）")
@@ -793,64 +977,66 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             squeeze=False,
                         )
 
-                        for i, species_name in enumerate(species_list_residual):
-                            ax_r = axes_r[i // n_cols][i % n_cols]
-                            df_sp = df_res[df_res["species"] == species_name]
-                            series_color = _fit_plot_color(i)
-                            ax_r.scatter(
-                                df_sp["measured"].to_numpy(dtype=float),
-                                df_sp["residual"].to_numpy(dtype=float),
-                                s=42,
-                                alpha=0.9,
-                                facecolors=series_color,
-                                edgecolors="#ffffff",
-                                linewidths=0.9,
-                                label=species_name,
-                                zorder=3,
-                            )
-                            ax_r.axhline(
-                                0.0,
-                                color="#000000",
-                                linestyle="--",
-                                linewidth=1.2,
-                                label="Zero residual",
-                            )
-                            ax_r.set_title(f"Species: {species_name}")
-                            ax_r.set_xlabel(
-                                ui_text.axis_label_with_unit(
-                                    ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                        try:
+                            for i, species_name in enumerate(species_list_residual):
+                                ax_r = axes_r[i // n_cols][i % n_cols]
+                                df_sp = df_res[df_res["species"] == species_name]
+                                series_color = _fit_plot_color(i)
+                                ax_r.scatter(
+                                    df_sp["measured"].to_numpy(dtype=float),
+                                    df_sp["residual"].to_numpy(dtype=float),
+                                    s=42,
+                                    alpha=0.9,
+                                    facecolors=series_color,
+                                    edgecolors="#ffffff",
+                                    linewidths=0.9,
+                                    label=species_name,
+                                    zorder=3,
                                 )
-                            )
-                            ax_r.set_ylabel(
-                                ui_text.axis_label_with_unit(
-                                    ui_text.AXIS_LABEL_RESIDUAL, unit_text_parity
+                                ax_r.axhline(
+                                    0.0,
+                                    color="#000000",
+                                    linestyle="--",
+                                    linewidth=1.2,
+                                    label="Zero residual",
                                 )
+                                ax_r.set_title(f"Species: {species_name}")
+                                ax_r.set_xlabel(
+                                    ui_text.axis_label_with_unit(
+                                        ui_text.AXIS_LABEL_MEASURED, unit_text_parity
+                                    )
+                                )
+                                ax_r.set_ylabel(
+                                    ui_text.axis_label_with_unit(
+                                        ui_text.AXIS_LABEL_RESIDUAL, unit_text_parity
+                                    )
+                                )
+                                _style_fit_axis(ax_r, show_grid=False)
+                                _style_fit_legend(ax_r)
+
+                            for j in range(n_residual_plots, n_residual_rows * n_cols):
+                                axes_r[j // n_cols][j % n_cols].axis("off")
+
+                            fig_r.tight_layout()
+                            st.pyplot(fig_r)
+                            residual_image_format = st.selectbox(
+                                "残差图像格式",
+                                ["png", "svg"],
+                                index=0,
+                                key="residual_image_format",
                             )
-                            _style_fit_axis(ax_r, show_grid=False)
-                            _style_fit_legend(ax_r)
-
-                        for j in range(n_residual_plots, n_residual_rows * n_cols):
-                            axes_r[j // n_cols][j % n_cols].axis("off")
-
-                        fig_r.tight_layout()
-                        st.pyplot(fig_r)
-                        residual_image_format = st.selectbox(
-                            "残差图像格式",
-                            ["png", "svg"],
-                            index=0,
-                            key="residual_image_format",
-                        )
-                        st.download_button(
-                            "📥 下载残差图",
-                            ui_comp.figure_to_image_bytes(fig_r, residual_image_format),
-                            file_name=f"residual_plot.{residual_image_format}",
-                            mime=(
-                                "image/png"
-                                if residual_image_format == "png"
-                                else "image/svg+xml"
-                            ),
-                        )
-                        plt.close(fig_r)
+                            st.download_button(
+                                "📥 下载残差图",
+                                ui_comp.figure_to_image_bytes(fig_r, residual_image_format),
+                                file_name=f"residual_plot.{residual_image_format}",
+                                mime=(
+                                    "image/png"
+                                    if residual_image_format == "png"
+                                    else "image/svg+xml"
+                                ),
+                            )
+                        finally:
+                            plt.close(fig_r)
 
                 show_compare_table = st.checkbox("显示预测 vs 实验对比表", value=False)
                 if show_compare_table:
@@ -913,7 +1099,8 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
         with tab_parity:
             _parity_tab_fragment()
 
-        with tab_profile:
+        @st.fragment
+        def _profile_tab_fragment():
             st.markdown("#### 沿程/随时间剖面")
             st.caption("说明：本页剖面为模型**预测**数据（不是实验测量值）。")
             if df_fit.empty:
@@ -924,6 +1111,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                     "选择一个实验点（按 DataFrame index）",
                     row_indices,
                     index=0,
+                    key="profile_selected_row_index",
                 )
                 profile_points = int(
                     st.number_input(
@@ -932,12 +1120,14 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         max_value=UI_PROFILE_POINTS_MAX,
                         value=UI_PROFILE_POINTS_DEFAULT,
                         step=UI_PROFILE_POINTS_STEP,
+                        key="profile_points",
                     )
                 )
                 profile_species = st.multiselect(
                     "选择要画剖面的物种（可多选）",
                     list(species_names_fit),
                     default=list(species_names_fit[: min(3, len(species_names_fit))]),
+                    key="profile_species",
                 )
 
                 row_sel = df_fit.loc[selected_row_index]
@@ -951,244 +1141,118 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         format_func=lambda x: ui_text.map_label(
                             ui_text.PROFILE_KIND_LABELS, str(x)
                         ),
+                        key="profile_kind",
                     )
-                    reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
-                    temperature_K = float(row_sel.get("T_K", np.nan))
                     pfr_flow_model_fit = str(
                         res.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
                     ).strip()
+                else:
+                    profile_kind = "C (mol/m^3)"
+                    pfr_flow_model_fit = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
 
-                    molar_flow_inlet = np.zeros(len(species_names_fit), dtype=float)
-                    if pfr_flow_model_fit == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
-                        # 气相：入口强制用 F0_*
-                        pressure_Pa = float(row_sel.get("P_Pa", np.nan))
-                        for i, sp_name in enumerate(species_names_fit):
-                            molar_flow_inlet[i] = float(
-                                row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
-                            )
+                # 序列化行数据为可哈希的 dict（供缓存函数使用）
+                # 兼容 object 列中的数字字符串（如 "300"、"1e-3"）
+                row_data_dict: dict[str, float] = {}
+                for col in row_sel.index:
+                    raw_value = row_sel.get(col, float("nan"))
+                    try:
+                        row_data_dict[str(col)] = float(raw_value)
+                    except (TypeError, ValueError):
+                        continue
 
-                        volume_grid_m3, molar_flow_profile, ok, message = (
-                            reactors.integrate_pfr_profile_gas_ideal_const_p(
-                                reactor_volume_m3=reactor_volume_m3,
-                                temperature_K=temperature_K,
-                                pressure_Pa=pressure_Pa,
-                                molar_flow_inlet_mol_s=molar_flow_inlet,
-                                stoich_matrix=stoich_matrix_fit,
-                                k0=fitted_params["k0"],
-                                ea_J_mol=fitted_params["ea_J_mol"],
-                                reaction_order_matrix=fitted_params[
-                                    "reaction_order_matrix"
-                                ],
-                                solver_method=solver_method_fit,
-                                rtol=rtol_fit,
-                                atol=atol_fit,
-                                n_points=profile_points,
-                                kinetic_model=kinetic_model_fit,
-                                max_step_fraction=max_step_fraction_fit,
-                                K0_ads=fitted_params.get("K0_ads", None),
-                                Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                                m_inhibition=fitted_params.get("m_inhibition", None),
-                                k0_rev=fitted_params.get("k0_rev", None),
-                                ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                                order_rev_matrix=fitted_params.get("order_rev", None),
-                            )
-                        )
-                    else:
-                        # 液相：vdot 恒定（C=F/vdot）；Cout 拟合时允许入口用 C0_* 并由 vdot 换算
-                        vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
-                        use_conc_inlet = str(output_mode_fit).strip().startswith("C")
-                        for i, sp_name in enumerate(species_names_fit):
-                            if use_conc_inlet:
-                                c0 = float(row_sel.get(f"C0_{sp_name}_mol_m3", np.nan))
-                                molar_flow_inlet[i] = c0 * float(vdot_m3_s)
-                            else:
-                                molar_flow_inlet[i] = float(
-                                    row_sel.get(f"F0_{sp_name}_mol_s", np.nan)
-                                )
+                profile_result = _compute_reactor_profile(
+                    reactor_type=reactor_type_fit,
+                    kinetic_model=kinetic_model_fit,
+                    pfr_flow_model=pfr_flow_model_fit,
+                    output_mode=output_mode_fit,
+                    row_data_dict=row_data_dict,
+                    species_names=tuple(species_names_fit),
+                    fitted_params_frozen=_freeze_params(fitted_params),
+                    stoich_matrix_tuple=tuple(tuple(r) for r in stoich_matrix_fit),
+                    solver_method=solver_method_fit,
+                    rtol=rtol_fit,
+                    atol=atol_fit,
+                    max_step_fraction=max_step_fraction_fit,
+                    n_points=profile_points,
+                )
 
-                        volume_grid_m3, molar_flow_profile, ok, message = (
-                            reactors.integrate_pfr_profile(
-                                reactor_volume_m3=reactor_volume_m3,
-                                temperature_K=temperature_K,
-                                vdot_m3_s=vdot_m3_s,
-                                molar_flow_inlet_mol_s=molar_flow_inlet,
-                                stoich_matrix=stoich_matrix_fit,
-                                k0=fitted_params["k0"],
-                                ea_J_mol=fitted_params["ea_J_mol"],
-                                reaction_order_matrix=fitted_params[
-                                    "reaction_order_matrix"
-                                ],
-                                solver_method=solver_method_fit,
-                                rtol=rtol_fit,
-                                atol=atol_fit,
-                                n_points=profile_points,
-                                kinetic_model=kinetic_model_fit,
-                                max_step_fraction=max_step_fraction_fit,
-                                K0_ads=fitted_params.get("K0_ads", None),
-                                Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                                m_inhibition=fitted_params.get("m_inhibition", None),
-                                k0_rev=fitted_params.get("k0_rev", None),
-                                ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                                order_rev_matrix=fitted_params.get("order_rev", None),
-                            )
-                        )
-                    if not ok:
-                        st.error(
-                            f"PFR 剖面计算失败: {message}\n"
-                            "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
-                        )
-                    else:
-                        fig_pf, ax_pf = plt.subplots(figsize=(4.6, 3.0))
-                        name_to_index = {
-                            name: i for i, name in enumerate(species_names_fit)
-                        }
+                ok = profile_result["ok"]
+                message = profile_result["message"]
 
-                        profile_df = pd.DataFrame({"V_m3": volume_grid_m3})
+                if not ok:
+                    st.error(
+                        f"{reactor_type_fit} 剖面计算失败: {message}\n"
+                        "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
+                    )
+                else:
+                    x_grid = np.array(profile_result["x_grid"])
+                    profiles = np.array(profile_result["profiles"])
+                    x_label_key = profile_result["x_label"]
+
+                    name_to_index = {
+                        name: i for i, name in enumerate(species_names_fit)
+                    }
+
+                    fig_prof = None
+                    try:
+                        fig_prof, ax_prof = plt.subplots(figsize=(4.6, 3.0))
+
+                        if x_label_key == "V_m3":
+                            profile_df = pd.DataFrame({"V_m3": x_grid})
+                            x_axis_label = ui_text.AXIS_LABEL_REACTOR_VOLUME
+                        else:
+                            profile_df = pd.DataFrame({"t_s": x_grid})
+                            x_axis_label = ui_text.AXIS_LABEL_TIME
+
                         for i, species_name in enumerate(profile_species):
                             idx = name_to_index[species_name]
                             series_color = _fit_plot_color(i)
-                            if profile_kind.startswith("F"):
-                                y = molar_flow_profile[idx, :]
-                                _plot_reference_series(
-                                    ax_pf,
-                                    volume_grid_m3,
-                                    y,
-                                    label=species_name,
-                                    color=series_color,
-                                )
+
+                            if reactor_type_fit == REACTOR_TYPE_PFR and profile_kind.startswith("F"):
+                                y = profiles[idx, :]
                                 profile_df[f"F_{species_name}_mol_s"] = y
-                            else:
+                            elif reactor_type_fit == REACTOR_TYPE_PFR and not profile_kind.startswith("F"):
                                 if pfr_flow_model_fit == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
-                                    # C_i = y_i · P/(R·T)
                                     pressure_Pa = float(row_sel.get("P_Pa", np.nan))
+                                    temperature_K = float(row_sel.get("T_K", np.nan))
                                     conc_total = float(pressure_Pa) / max(
                                         float(R_GAS_J_MOL_K) * float(temperature_K),
                                         EPSILON_CONCENTRATION,
                                     )
-                                    total_flow = np.sum(molar_flow_profile, axis=0)
-                                    conc = (
-                                        molar_flow_profile[idx, :]
+                                    total_flow = np.sum(profiles, axis=0)
+                                    y = (
+                                        profiles[idx, :]
                                         / np.maximum(total_flow, EPSILON_FLOW_RATE)
                                         * float(conc_total)
                                     )
                                 else:
-                                    conc = molar_flow_profile[idx, :] / max(
-                                        vdot_m3_s, EPSILON_FLOW_RATE
-                                    )
-                                _plot_reference_series(
-                                    ax_pf,
-                                    volume_grid_m3,
-                                    conc,
-                                    label=species_name,
-                                    color=series_color,
-                                )
-                                profile_df[f"C_{species_name}_mol_m3"] = conc
+                                    vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
+                                    y = profiles[idx, :] / max(vdot_m3_s, EPSILON_FLOW_RATE)
+                                profile_df[f"C_{species_name}_mol_m3"] = y
+                            else:
+                                # CSTR / BSTR: 直接就是浓度剖面
+                                y = profiles[idx, :]
+                                profile_df[f"C_{species_name}_mol_m3"] = y
 
-                        ax_pf.set_xlabel(ui_text.AXIS_LABEL_REACTOR_VOLUME)
-                        ax_pf.set_ylabel(
-                            ui_text.AXIS_LABEL_FLOW_RATE
-                            if profile_kind.startswith("F")
-                            else ui_text.AXIS_LABEL_CONCENTRATION
-                        )
-                        _style_fit_axis(ax_pf, show_grid=False)
-                        _style_fit_legend(ax_pf)
-                        _render_centered_pyplot(fig_pf)
-
-                        st.download_button(
-                            "📥 下载剖面数据 CSV",
-                            profile_df.to_csv(index=False).encode("utf-8"),
-                            file_name="profile_data.csv",
-                            mime="text/csv",
-                        )
-                        image_format_pf = st.selectbox(
-                            "剖面图格式",
-                            ["png", "svg"],
-                            index=0,
-                            key="profile_image_format",
-                        )
-                        st.download_button(
-                            "📥 下载剖面图",
-                            ui_comp.figure_to_image_bytes(fig_pf, image_format_pf),
-                            file_name=f"profile_plot.{image_format_pf}",
-                            mime=(
-                                "image/png"
-                                if image_format_pf == "png"
-                                else "image/svg+xml"
-                            ),
-                        )
-                        plt.close(fig_pf)
-
-                elif reactor_type_fit == REACTOR_TYPE_CSTR:
-                    profile_kind = "C (mol/m^3)"
-                    reactor_volume_m3 = float(row_sel.get("V_m3", np.nan))
-                    temperature_K = float(row_sel.get("T_K", np.nan))
-                    vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
-
-                    conc_inlet = np.zeros(len(species_names_fit), dtype=float)
-                    for i, sp_name in enumerate(species_names_fit):
-                        conc_inlet[i] = float(
-                            row_sel.get(f"C0_{sp_name}_mol_m3", np.nan)
-                        )
-
-                    tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)
-                    simulation_time_s = float(5.0 * tau_s)
-
-                    time_grid_s, conc_profile, ok, message = (
-                        reactors.integrate_cstr_profile(
-                            simulation_time_s=simulation_time_s,
-                            temperature_K=temperature_K,
-                            reactor_volume_m3=reactor_volume_m3,
-                            vdot_m3_s=vdot_m3_s,
-                            conc_inlet_mol_m3=conc_inlet,
-                            stoich_matrix=stoich_matrix_fit,
-                            k0=fitted_params["k0"],
-                            ea_J_mol=fitted_params["ea_J_mol"],
-                            reaction_order_matrix=fitted_params[
-                                "reaction_order_matrix"
-                            ],
-                            solver_method=solver_method_fit,
-                            rtol=rtol_fit,
-                            atol=atol_fit,
-                            n_points=profile_points,
-                            kinetic_model=kinetic_model_fit,
-                            max_step_fraction=max_step_fraction_fit,
-                            K0_ads=fitted_params.get("K0_ads", None),
-                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                            m_inhibition=fitted_params.get("m_inhibition", None),
-                            k0_rev=fitted_params.get("k0_rev", None),
-                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                            order_rev_matrix=fitted_params.get("order_rev", None),
-                        )
-                    )
-
-                    if not ok:
-                        st.error(
-                            f"CSTR 剖面计算失败: {message}\n"
-                            "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
-                        )
-                    else:
-                        fig_cs, ax_cs = plt.subplots(figsize=(4.6, 3.0))
-                        name_to_index = {
-                            name: i for i, name in enumerate(species_names_fit)
-                        }
-                        profile_df = pd.DataFrame({"t_s": time_grid_s})
-                        for i, species_name in enumerate(profile_species):
-                            idx = name_to_index[species_name]
-                            y = conc_profile[idx, :]
                             _plot_reference_series(
-                                ax_cs,
-                                time_grid_s,
-                                y,
-                                label=species_name,
-                                color=_fit_plot_color(i),
+                                ax_prof, x_grid, y,
+                                label=species_name, color=series_color,
                             )
-                            profile_df[f"C_{species_name}_mol_m3"] = y
 
-                        ax_cs.set_xlabel(ui_text.AXIS_LABEL_TIME)
-                        ax_cs.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
-                        _style_fit_axis(ax_cs, show_grid=False)
-                        _style_fit_legend(ax_cs)
-                        _render_centered_pyplot(fig_cs)
+                        if reactor_type_fit == REACTOR_TYPE_PFR:
+                            y_axis_label = (
+                                ui_text.AXIS_LABEL_FLOW_RATE
+                                if profile_kind.startswith("F")
+                                else ui_text.AXIS_LABEL_CONCENTRATION
+                            )
+                        else:
+                            y_axis_label = ui_text.AXIS_LABEL_CONCENTRATION
+
+                        ax_prof.set_xlabel(x_axis_label)
+                        ax_prof.set_ylabel(y_axis_label)
+                        _style_fit_axis(ax_prof, show_grid=False)
+                        _style_fit_legend(ax_prof)
+                        _render_centered_pyplot(fig_prof)
 
                         st.download_button(
                             "📥 下载剖面数据 CSV",
@@ -1196,111 +1260,29 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             file_name="profile_data.csv",
                             mime="text/csv",
                         )
-                        image_format_cs = st.selectbox(
+                        image_format_key = f"{reactor_type_fit.lower()}_profile_image_format"
+                        image_format_prof = st.selectbox(
                             "剖面图格式",
                             ["png", "svg"],
                             index=0,
-                            key="cstr_profile_image_format",
+                            key=image_format_key,
                         )
                         st.download_button(
                             "📥 下载剖面图",
-                            ui_comp.figure_to_image_bytes(fig_cs, image_format_cs),
-                            file_name=f"profile_plot.{image_format_cs}",
+                            ui_comp.figure_to_image_bytes(fig_prof, image_format_prof),
+                            file_name=f"profile_plot.{image_format_prof}",
                             mime=(
                                 "image/png"
-                                if image_format_cs == "png"
+                                if image_format_prof == "png"
                                 else "image/svg+xml"
                             ),
                         )
-                        plt.close(fig_cs)
+                    finally:
+                        if fig_prof is not None:
+                            plt.close(fig_prof)
 
-                else:
-                    profile_kind = "C (mol/m^3)"
-                    reaction_time_s = float(row_sel.get("t_s", np.nan))
-                    temperature_K = float(row_sel.get("T_K", np.nan))
-                    conc_initial = np.zeros(len(species_names_fit), dtype=float)
-                    for i, sp_name in enumerate(species_names_fit):
-                        conc_initial[i] = float(
-                            row_sel.get(f"C0_{sp_name}_mol_m3", np.nan)
-                        )
-
-                    time_grid_s, conc_profile, ok, message = (
-                        reactors.integrate_batch_profile(
-                            reaction_time_s=reaction_time_s,
-                            temperature_K=temperature_K,
-                            conc_initial_mol_m3=conc_initial,
-                            stoich_matrix=stoich_matrix_fit,
-                            k0=fitted_params["k0"],
-                            ea_J_mol=fitted_params["ea_J_mol"],
-                            reaction_order_matrix=fitted_params[
-                                "reaction_order_matrix"
-                            ],
-                            solver_method=solver_method_fit,
-                            rtol=rtol_fit,
-                            atol=atol_fit,
-                            n_points=profile_points,
-                            kinetic_model=kinetic_model_fit,
-                            max_step_fraction=max_step_fraction_fit,
-                            K0_ads=fitted_params.get("K0_ads", None),
-                            Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                            m_inhibition=fitted_params.get("m_inhibition", None),
-                            k0_rev=fitted_params.get("k0_rev", None),
-                            ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                            order_rev_matrix=fitted_params.get("order_rev", None),
-                        )
-                    )
-                    if not ok:
-                        st.error(
-                            f"BSTR 剖面计算失败: {message}\n"
-                            "建议：尝试将求解器切换为 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`。"
-                        )
-                    else:
-                        fig_bt, ax_bt = plt.subplots(figsize=(4.6, 3.0))
-                        name_to_index = {
-                            name: i for i, name in enumerate(species_names_fit)
-                        }
-                        profile_df = pd.DataFrame({"t_s": time_grid_s})
-                        for i, species_name in enumerate(profile_species):
-                            idx = name_to_index[species_name]
-                            y = conc_profile[idx, :]
-                            _plot_reference_series(
-                                ax_bt,
-                                time_grid_s,
-                                y,
-                                label=species_name,
-                                color=_fit_plot_color(i),
-                            )
-                            profile_df[f"C_{species_name}_mol_m3"] = y
-
-                        ax_bt.set_xlabel(ui_text.AXIS_LABEL_TIME)
-                        ax_bt.set_ylabel(ui_text.AXIS_LABEL_CONCENTRATION)
-                        _style_fit_axis(ax_bt, show_grid=False)
-                        _style_fit_legend(ax_bt)
-                        _render_centered_pyplot(fig_bt)
-
-                        st.download_button(
-                            "📥 下载剖面数据 CSV",
-                            profile_df.to_csv(index=False).encode("utf-8"),
-                            file_name="profile_data.csv",
-                            mime="text/csv",
-                        )
-                        image_format_bt = st.selectbox(
-                            "剖面图格式",
-                            ["png", "svg"],
-                            index=0,
-                            key="batch_profile_image_format",
-                        )
-                        st.download_button(
-                            "📥 下载剖面图",
-                            ui_comp.figure_to_image_bytes(fig_bt, image_format_bt),
-                            file_name=f"profile_plot.{image_format_bt}",
-                            mime=(
-                                "image/png"
-                                if image_format_bt == "png"
-                                else "image/svg+xml"
-                            ),
-                        )
-                        plt.close(fig_bt)
+        with tab_profile:
+            _profile_tab_fragment()
 
         with tab_export:
             st.markdown("#### 导出拟合结果与对比数据")

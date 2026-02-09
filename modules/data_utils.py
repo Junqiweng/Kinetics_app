@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from . import fitting
 from .constants import (
@@ -65,6 +66,31 @@ def _get_output_unit_text(output_mode: str) -> str:
     return "-"
 
 
+def _freeze_params(params: dict) -> tuple:
+    """将 fitted_params dict 转为可哈希的 tuple 表示（供 @st.cache_data 使用）。"""
+
+    def _to_hashable(obj):
+        """递归地将 list 转为 tuple（保留嵌套结构 / 多维形状）。"""
+        if isinstance(obj, list):
+            return tuple(_to_hashable(x) for x in obj)
+        return obj
+
+    items = []
+    for k in sorted(params.keys()):
+        v = params[k]
+        if isinstance(v, np.ndarray):
+            # 使用 tolist() 保留多维结构（如 reaction_order_matrix 的 2D 形状）
+            items.append((k, _to_hashable(v.tolist())))
+        elif isinstance(v, (list, tuple)):
+            items.append((k, _to_hashable(v)))
+        elif v is None:
+            items.append((k, None))
+        else:
+            items.append((k, v))
+    return tuple(items)
+
+
+@st.cache_data(show_spinner="正在计算对比数据…")
 def _build_fit_comparison_long_table(
     data_df: pd.DataFrame,
     species_names: list[str],

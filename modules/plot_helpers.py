@@ -122,7 +122,6 @@ def _configure_matplotlib_chinese_font() -> None:
 
 def apply_runtime_patches() -> None:
     _patch_tornado_websocket_noise()
-    _configure_matplotlib_chinese_font()
 
 
 def _fit_plot_color(index: int) -> str:

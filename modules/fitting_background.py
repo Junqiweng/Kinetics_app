@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html as html_lib
 import difflib
 import queue
@@ -910,7 +911,8 @@ def _run_fitting_job(
 
         return {
             "params": fitted_params,
-            "data": data_df,
+            "data": data_df.copy(deep=True),
+            "data_hash": hashlib.md5(data_df.to_csv(index=False).encode()).hexdigest(),
             "species_names": species_names,
             "output_mode": output_mode,
             "output_species": output_species_list,
@@ -1087,7 +1089,8 @@ def _run_fitting_job(
 
     return {
         "params": fitted_params,
-        "data": data_df,
+        "data": data_df.copy(deep=True),
+        "data_hash": hashlib.md5(data_df.to_csv(index=False).encode()).hexdigest(),
         "species_names": species_names,
         "output_mode": output_mode,
         "output_species": output_species_list,
