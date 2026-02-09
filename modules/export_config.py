@@ -241,6 +241,6 @@ def render_export_config_button(
         export_config_bytes,
         file_name="kinetics_config.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
         key=button_key,
     )

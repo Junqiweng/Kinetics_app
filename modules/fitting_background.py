@@ -204,12 +204,11 @@ def _render_fitting_progress_panel() -> None:
 
 def _finalize_finished_fitting_future() -> None:
     """
-    在 fragment 刷新上下文中完成 future 收尾，避免额外触发全局 rerun。
+    在 fragment 刷新上下文中完成 future 收尾。
 
-    设计意图：
-    - 浏览器连接刚关闭时，强制 st.rerun(scope="app") 可能与 websocket 关闭竞争，
-      在控制台产生 WebSocketClosedError 提示。
-    - 这里直接回收结果并写入 session_state，后续由用户任意交互触发整页渲染即可。
+    说明：
+    - 仅在这里回收结果并写入 session_state；
+    - 是否触发整页渲染由 _render_fitting_live_progress 统一控制。
     """
     fitting_future = st.session_state.get("fitting_future", None)
     if fitting_future is None:
@@ -227,6 +226,9 @@ def _finalize_finished_fitting_future() -> None:
         fit_results = fitting_future.result()
         _drain_fitting_progress_queue()
         st.session_state["fit_results"] = fit_results
+        st.session_state["fit_results_version"] = (
+            int(st.session_state.get("fit_results_version", 0)) + 1
+        )
         st.session_state["fitting_status"] = "拟合完成。"
 
         phi_value = float(fit_results.get("phi_final", fit_results.get("cost", 0.0)))
@@ -262,25 +264,14 @@ def _render_fitting_live_progress() -> None:
     fitting_running = bool(st.session_state.get("fitting_running", False))
 
     # 重要：st.fragment(run_every=...) 只会重跑 fragment 本身，不会执行整页脚本。
-    # 当后台任务结束时，这里直接回收结果并停止自动刷新，不再强制 st.rerun(scope="app")。
-    # 这样可降低 websocket 关闭瞬间的控制台异常提示概率。
+    # 因此当后台任务结束后，需要触发一次 app 级 rerun 才能立即展示完整结果。
     if fitting_running and (fitting_future is not None) and bool(fitting_future.done()):
         _finalize_finished_fitting_future()
         fitting_running = bool(st.session_state.get("fitting_running", False))
 
     if bool(st.session_state.get("fitting_needs_app_rerun", False)):
-        with st.container(border=True):
-            st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
-            st.markdown("#### 后台拟合已结束")
-            st.caption("结果已写入缓存。点击下方按钮刷新页面以展示完整结果。")
-            if st.button(
-                "刷新页面显示结果",
-                key="fit_refresh_after_done",
-                use_container_width=True,
-            ):
-                st.session_state["fitting_needs_app_rerun"] = False
-                st.rerun(scope="app")
-        _render_fitting_progress_panel()
+        st.session_state["fitting_needs_app_rerun"] = False
+        st.rerun(scope="app")
         return
 
     if not fitting_running:
@@ -299,7 +290,7 @@ def _render_fitting_live_progress() -> None:
 
     if not bool(st.session_state.get("fitting_auto_refresh", True)):
         st.button(
-            "🔄 刷新进度", use_container_width=True, key="fit_manual_refresh_progress"
+            "🔄 刷新进度", width="stretch", key="fit_manual_refresh_progress"
         )
 
 

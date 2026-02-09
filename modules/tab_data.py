@@ -248,7 +248,7 @@ def render_data_tab(tab_data, ctx: dict) -> dict:
                 st.markdown("#### 数据预览")
                 st.dataframe(
                     data_df.head(UI_DATA_PREVIEW_ROWS),
-                    use_container_width=True,
+                    width="stretch",
                     height=UI_DATA_PREVIEW_HEIGHT_PX,
                 )
             except Exception as exc:

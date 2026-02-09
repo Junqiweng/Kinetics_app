@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import matplotlib.pyplot as plt
@@ -50,7 +51,7 @@ def _render_centered_pyplot(fig) -> None:
     left_col, center_col, right_col = st.columns([1, 2, 1])
     del left_col, right_col
     with center_col:
-        st.pyplot(fig, use_container_width=False)
+        st.pyplot(fig, width="content")
 
 
 def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state: dict, runtime_state: dict) -> dict:
@@ -94,8 +95,41 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
         parity_species_candidates = list(species_names_fit)
         parity_species_unavailable = []
 
+        result_tab_labels = ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"]
+        fit_result_tab_default = result_tab_labels[0]
+
+        fit_result_tab_idx = st.query_params.get("fit_result_tab_i", None)
+        if isinstance(fit_result_tab_idx, (list, tuple)):
+            fit_result_tab_idx = fit_result_tab_idx[0] if fit_result_tab_idx else None
+        if fit_result_tab_idx is not None:
+            try:
+                fit_result_tab_idx_int = int(str(fit_result_tab_idx).strip())
+            except Exception:
+                fit_result_tab_idx_int = -1
+            if 0 <= fit_result_tab_idx_int < len(result_tab_labels):
+                fit_result_tab_default = result_tab_labels[fit_result_tab_idx_int]
+        else:
+            fit_result_tab_legacy = st.query_params.get("fit_result_tab", None)
+            if isinstance(fit_result_tab_legacy, (list, tuple)):
+                fit_result_tab_legacy = (
+                    fit_result_tab_legacy[0] if fit_result_tab_legacy else None
+                )
+            fit_result_tab_legacy = (
+                str(fit_result_tab_legacy).strip()
+                if fit_result_tab_legacy is not None
+                else ""
+            )
+            if fit_result_tab_legacy in result_tab_labels:
+                fit_result_tab_default = fit_result_tab_legacy
+
+        if (
+            fit_result_tab_default == result_tab_labels[0]
+            and "parity_validation_choice" in st.session_state
+        ):
+            fit_result_tab_default = "奇偶校验图"
         tab_param, tab_parity, tab_profile, tab_export = tab_fit_results_container.tabs(
-            ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"]
+            result_tab_labels,
+            default=fit_result_tab_default,
         )
 
         with tab_param:
@@ -114,7 +148,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                 st.markdown("**k₀ 与 Eₐ**")
                 st.dataframe(
                     ui_comp.format_dataframe_for_display(df_k0_ea),
-                    use_container_width=True,
+                    width="stretch",
                     height=UI_PARAM_TABLE_HEIGHT_PX,
                 )
 
@@ -127,7 +161,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                 )
                 st.dataframe(
                     ui_comp.format_dataframe_for_display(df_orders),
-                    use_container_width=True,
+                    width="stretch",
                     height=UI_PARAM_TABLE_HEIGHT_PX,
                 )
 
@@ -148,7 +182,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         )
                         st.dataframe(
                             ui_comp.format_dataframe_for_display(df_ads),
-                            use_container_width=True,
+                            width="stretch",
                             height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
                 with col_lh2:
@@ -159,7 +193,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         )
                         st.dataframe(
                             ui_comp.format_dataframe_for_display(df_m),
-                            use_container_width=True,
+                            width="stretch",
                             height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
 
@@ -178,7 +212,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                     )
                     st.dataframe(
                         ui_comp.format_dataframe_for_display(df_rev),
-                        use_container_width=True,
+                        width="stretch",
                         height=UI_PARAM_TABLE_HEIGHT_PX,
                     )
                 if fitted_params.get("order_rev", None) is not None:
@@ -190,11 +224,12 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                     )
                     st.dataframe(
                         ui_comp.format_dataframe_for_display(df_order_rev),
-                        use_container_width=True,
+                        width="stretch",
                         height=UI_PARAM_TABLE_HEIGHT_PX,
                     )
 
-        with tab_parity:
+        @st.fragment
+        def _parity_tab_fragment():
             st.markdown("#### 分物种奇偶校验图（实验值 vs 预测值）")
             output_mode_fit_str = str(output_mode_fit).strip()
             output_label_map = {
@@ -840,7 +875,7 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                     df_show = df_show[existing_preferred + remaining_cols]
                     st.dataframe(
                         df_show,
-                        use_container_width=True,
+                        width="stretch",
                         height=UI_COMPARE_TABLE_HEIGHT_PX,
                     )
 
@@ -871,9 +906,12 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                 if rows_metric:
                     st.dataframe(
                         pd.DataFrame(rows_metric),
-                        use_container_width=True,
+                        width="stretch",
                         height=UI_METRICS_TABLE_HEIGHT_PX,
                     )
+
+        with tab_parity:
+            _parity_tab_fragment()
 
         with tab_profile:
             st.markdown("#### 沿程/随时间剖面")

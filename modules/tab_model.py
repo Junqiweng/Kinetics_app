@@ -69,7 +69,7 @@ def render_model_tab(tab_model, ctx: dict) -> dict:
 
         nu_table = st.data_editor(
             nu_default,
-            use_container_width=True,
+            width="stretch",
             key=f"nu_{len(species_names)}_{n_reactions}",
         )
         stoich_matrix = nu_table.to_numpy(dtype=float)

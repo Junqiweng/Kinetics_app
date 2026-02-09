@@ -281,7 +281,7 @@ def render_param_table(
 
     edited_df = st.data_editor(
         df,
-        use_container_width=True,
+        width="stretch",
         num_rows="fixed",
         height=height,
         column_config=col_cfg,
@@ -360,7 +360,7 @@ def render_order_table(
 
     edited_df = st.data_editor(
         df,
-        use_container_width=True,
+        width="stretch",
         num_rows="fixed",
         height=height,
         column_config=col_cfg,

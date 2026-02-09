@@ -31,7 +31,7 @@ def render_sidebar(ctx: dict) -> dict:
             st.markdown(
                 '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
-            help_btn = st.button("使用帮助", use_container_width=True)
+            help_btn = st.button("使用帮助", width="stretch")
             if help_btn:
                 show_help_dialog()
 

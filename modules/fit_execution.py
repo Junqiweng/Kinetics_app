@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
-import time
 
-import numpy as np
 import streamlit as st
 
 import modules.ui_text as ui_text
@@ -99,14 +97,14 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             "🚀 开始拟合",
             type="primary",
             disabled=fitting_running,
-            use_container_width=True,
+            width="stretch",
             on_click=_request_start_fitting,
         )
         col_act2.button(
             "⏹️ 终止",
             type="secondary",
             disabled=not fitting_running,
-            use_container_width=True,
+            width="stretch",
             on_click=_request_stop_fitting,
         )
         auto_refresh = col_act3.checkbox(
@@ -144,7 +142,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             "🧹 清除结果",
             type="secondary",
             disabled=fitting_running,
-            use_container_width=True,
+            width="stretch",
             help="清除上一次拟合的结果、对比表缓存与时间线（不影响当前输入配置）。",
         )
     st.session_state["fitting_auto_refresh"] = bool(auto_refresh)
@@ -311,16 +309,17 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
 
     if fitting_running:
         st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；如需降低页面刷新负载可关闭。")
-        refresh_interval_s = float(
-            st.session_state.get("fitting_refresh_interval_s", 2.0)
-        )
-        _render_fitting_live_progress()
+        refresh_interval_s = float(st.session_state.get("fitting_refresh_interval_s", 2.0))
+        refresh_interval_s = float(max(0.2, min(30.0, refresh_interval_s)))
         if bool(st.session_state.get("fitting_auto_refresh", True)):
-            # 稳定性优先：避免 st.fragment(run_every=...) 在连接关闭瞬间留下异步写任务。
-            # 这里改为常规轮询刷新（整页 rerun），代价是页面刷新频率更高。
-            refresh_interval_s = float(np.clip(refresh_interval_s, 0.2, 30.0))
-            time.sleep(refresh_interval_s)
-            st.rerun()
+
+            @st.fragment(run_every=refresh_interval_s)
+            def _fit_live_progress_fragment() -> None:
+                _render_fitting_live_progress()
+
+            _fit_live_progress_fragment()
+        else:
+            _render_fitting_live_progress()
     elif st.session_state.get("fitting_timeline", []):
         _render_fitting_progress_panel()
 

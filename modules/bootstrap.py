@@ -75,38 +75,55 @@ def bootstrap_app_state() -> dict:
         """
         tab_labels_json = json.dumps(MAIN_TAB_LABELS, ensure_ascii=False)
         default_label_json = json.dumps(MAIN_TAB_LABELS[0], ensure_ascii=False)
+        result_tab_labels_json = json.dumps(
+            ["参数", "奇偶校验图", "沿程/随时间剖面", "导出"], ensure_ascii=False
+        )
+        fit_results_version = int(st.session_state.get("fit_results_version", 0))
         components.html(
             f"""
             <script>
               const TAB_LABELS = {tab_labels_json};
               const DEFAULT_LABEL = {default_label_json};
               const STORAGE_KEY = "kinetics_active_main_tab_label_v1";
+              const RESULT_TAB_LABELS = {result_tab_labels_json};
+              const RESULT_TAB_PARAM_KEY = "fit_result_tab_i";
+              const RESULT_TAB_PARAM_KEY_LEGACY = "fit_result_tab";
+              const FIT_RESULTS_SCROLL_KEY = "kinetics_fit_results_scroll_y_v1";
+              const FIT_RESULTS_SCROLL_TS_KEY = "kinetics_fit_results_scroll_ts_v1";
+              const FIT_RESULTS_SCROLL_VERSION_KEY = "kinetics_fit_results_scroll_ver_v1";
+              const FIT_RESULTS_SCROLL_RESTORE_TTL_MS = 4000;
+              const FIT_RESULTS_VERSION = {fit_results_version};
               function norm(s) {{ return (s || '').replace(/\\s+/g, ' ').trim(); }}
 
-              function getButtons() {{
-                // 页面里可能还有其它 st.tabs（例如帮助页的 tab），这里需要只锁定“主 Tabs”。
+              function getButtonsByLabels(labels, fallbackAll) {{
                 const tabLists = window.parent.document.querySelectorAll('div[data-baseweb="tab-list"]');
                 for (const tabList of tabLists) {{
                   const buttons = tabList.querySelectorAll('button[data-baseweb="tab"]');
                   if (!buttons || buttons.length === 0) continue;
 
                   const texts = Array.from(buttons).map(b => norm(b.innerText));
-                  let isMain = true;
-                  for (const label of TAB_LABELS) {{
+                  let matched = true;
+                  for (const label of labels) {{
                     if (texts.indexOf(norm(label)) < 0) {{
-                      isMain = false;
+                      matched = false;
                       break;
                     }}
                   }}
-                  if (isMain) return buttons;
+                  if (matched) return Array.from(buttons);
                 }}
 
-                // 兜底：若找不到明确的主 tabList，则返回全部（避免完全失效）。
-                return window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+                if (fallbackAll) {{
+                  return Array.from(window.parent.document.querySelectorAll('button[data-baseweb="tab"]'));
+                }}
+                return [];
               }}
 
-              function getActiveLabelFromDom() {{
-                const buttons = getButtons();
+              function getButtons() {{
+                // 页面里可能还有其它 st.tabs（例如帮助页的 tab），这里需要只锁定“主 Tabs”。
+                return getButtonsByLabels(TAB_LABELS, true);
+              }}
+
+              function getActiveLabelFromDom(buttons) {{
                 for (const btn of buttons) {{
                   const selected = btn.getAttribute("aria-selected");
                   if (selected === "true") {{
@@ -145,10 +162,12 @@ def bootstrap_app_state() -> dict:
               }}
 
               function tryRestore() {{
+                const buttons = getButtons();
+                if (!buttons || buttons.length === 0) return false;
                 installClickListeners();
 
                 // 第一次进入页面时，先把“当前激活 Tab”写入 storage，避免空值。
-                const currentActive = getActiveLabelFromDom();
+                const currentActive = getActiveLabelFromDom(buttons);
                 if (currentActive) {{
                   const stored = loadStoredLabel();
                   if (!stored) saveStoredLabel(currentActive);
@@ -159,10 +178,9 @@ def bootstrap_app_state() -> dict:
                 if (TAB_LABELS.map(norm).indexOf(target) < 0) target = norm(DEFAULT_LABEL);
 
                 // 如果当前已在目标 Tab，则不做任何动作（避免抖动）。
-                const nowActive = getActiveLabelFromDom();
+                const nowActive = getActiveLabelFromDom(buttons);
                 if (nowActive && norm(nowActive) === norm(target)) return true;
 
-                const buttons = getButtons();
                 for (const btn of buttons) {{
                   if (norm(btn.innerText) === norm(target)) {{
                     btn.click();
@@ -172,9 +190,190 @@ def bootstrap_app_state() -> dict:
                 return false;
               }}
 
-              setTimeout(tryRestore, 30);
-              setTimeout(tryRestore, 150);
-              setTimeout(tryRestore, 600);
+              function setResultTabInUrl(label) {{
+                const tabLabel = norm(label);
+                if (!tabLabel) return;
+                const labelsNorm = RESULT_TAB_LABELS.map(norm);
+                const tabIndex = labelsNorm.indexOf(tabLabel);
+                if (tabIndex < 0) return;
+                try {{
+                  const url = new URL(window.parent.location.href);
+                  const current = norm(url.searchParams.get(RESULT_TAB_PARAM_KEY));
+                  const target = String(tabIndex);
+                  if (!current && tabIndex === 0) return;
+                  if (current === target) return;
+                  url.searchParams.set(RESULT_TAB_PARAM_KEY, target);
+                  if (url.searchParams.has(RESULT_TAB_PARAM_KEY_LEGACY)) {{
+                    url.searchParams.delete(RESULT_TAB_PARAM_KEY_LEGACY);
+                  }}
+                  window.parent.history.replaceState(null, "", url.toString());
+                }} catch (e) {{}}
+              }}
+
+              function installResultTabSync() {{
+                const buttons = getButtonsByLabels(RESULT_TAB_LABELS, false);
+                if (!buttons || buttons.length === 0) return;
+                for (const btn of buttons) {{
+                  if (btn.dataset.kineticsFitResultsTabSyncInstalled === "1") continue;
+                  btn.dataset.kineticsFitResultsTabSyncInstalled = "1";
+                  btn.addEventListener("click", () => {{
+                    setResultTabInUrl(btn.innerText);
+                  }});
+                }}
+              }}
+
+              function isFitResultsMainTabActive() {{
+                try {{
+                  const buttons = getButtons();
+                  const active = getActiveLabelFromDom(buttons);
+                  if (active) {{
+                    return norm(active) === norm("拟合与结果");
+                  }}
+                  const stored = loadStoredLabel();
+                  return norm(stored) === norm("拟合与结果");
+                }} catch (e) {{
+                  return false;
+                }}
+              }}
+
+              function installFitResultsScrollGuard() {{
+                const parentWin = window.parent;
+                const listenerKey = "__kinetics_fit_results_scroll_guard_listener_v1";
+                const captureKey = "__kinetics_fit_results_scroll_guard_capture_v1";
+
+                function persistScrollNow() {{
+                  if (!isFitResultsMainTabActive()) return;
+                  try {{
+                    const nowTs = Date.now();
+                    parentWin.sessionStorage.setItem(
+                      FIT_RESULTS_SCROLL_KEY,
+                      String(parentWin.scrollY || 0),
+                    );
+                    parentWin.sessionStorage.setItem(
+                      FIT_RESULTS_SCROLL_TS_KEY,
+                      String(nowTs),
+                    );
+                    parentWin.sessionStorage.setItem(
+                      FIT_RESULTS_SCROLL_VERSION_KEY,
+                      String(FIT_RESULTS_VERSION),
+                    );
+                  }} catch (e) {{}}
+                }}
+
+                if (!parentWin[listenerKey]) {{
+                  const onScroll = () => {{
+                    persistScrollNow();
+                  }};
+                  parentWin.addEventListener("scroll", onScroll, {{ passive: true }});
+                  parentWin[listenerKey] = onScroll;
+                }}
+
+                if (!parentWin[captureKey] && parentWin.document) {{
+                  const doc = parentWin.document;
+                  const onCapture = () => {{
+                    persistScrollNow();
+                  }};
+                  doc.addEventListener("pointerdown", onCapture, true);
+                  doc.addEventListener("keydown", onCapture, true);
+                  doc.addEventListener("input", onCapture, true);
+                  doc.addEventListener("change", onCapture, true);
+                  parentWin[captureKey] = onCapture;
+                }}
+
+                if (!isFitResultsMainTabActive()) return;
+
+                let savedY = NaN;
+                let savedTs = NaN;
+                let savedVersion = NaN;
+                try {{
+                  savedY = parseFloat(
+                    parentWin.sessionStorage.getItem(FIT_RESULTS_SCROLL_KEY) || "nan"
+                  );
+                  savedTs = parseFloat(
+                    parentWin.sessionStorage.getItem(FIT_RESULTS_SCROLL_TS_KEY) || "nan"
+                  );
+                  savedVersion = parseFloat(
+                    parentWin.sessionStorage.getItem(FIT_RESULTS_SCROLL_VERSION_KEY) || "nan"
+                  );
+                }} catch (e) {{
+                  savedY = NaN;
+                  savedTs = NaN;
+                  savedVersion = NaN;
+                }}
+                if (!Number.isFinite(savedY)) return;
+                if (!Number.isFinite(savedTs)) return;
+                if (!Number.isFinite(savedVersion)) return;
+                if (Number(savedVersion) !== Number(FIT_RESULTS_VERSION)) return;
+                if ((Date.now() - savedTs) > FIT_RESULTS_SCROLL_RESTORE_TTL_MS) return;
+
+                const restore = () => {{
+                  if (!isFitResultsMainTabActive()) return;
+                  try {{
+                    parentWin.scrollTo(0, Math.max(0, savedY));
+                  }} catch (e) {{}}
+                }};
+
+                parentWin.requestAnimationFrame(() => {{
+                  restore();
+                  parentWin.setTimeout(restore, 80);
+                  parentWin.setTimeout(restore, 260);
+                }});
+              }}
+
+              (function installPreciseRestore() {{
+                const parentWin = window.parent;
+                const observerKey = "__kinetics_main_tab_restore_observer_v2";
+                const rafKey = "__kinetics_main_tab_restore_raf_v2";
+
+                function stopObserver() {{
+                  const observer = parentWin[observerKey];
+                  if (observer && observer.disconnect) {{
+                    observer.disconnect();
+                  }}
+                  parentWin[observerKey] = null;
+                }}
+
+                function scheduleTryRestore() {{
+                  if (parentWin[rafKey]) return;
+                  parentWin[rafKey] = parentWin.requestAnimationFrame(() => {{
+                    parentWin[rafKey] = null;
+                    const restored = tryRestore();
+                    if (restored) stopObserver();
+                  }});
+                }}
+
+                scheduleTryRestore();
+
+                if (!parentWin[observerKey] && parentWin.document && parentWin.document.body) {{
+                  const observer = new MutationObserver(() => {{
+                    scheduleTryRestore();
+                  }});
+                  observer.observe(parentWin.document.body, {{
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ["aria-selected"],
+                  }});
+                  parentWin[observerKey] = observer;
+                }}
+
+                parentWin.setTimeout(() => {{
+                  if (tryRestore()) stopObserver();
+                }}, 1200);
+              }})();
+
+              (function installFitResultTabSyncOnce() {{
+                const parentWin = window.parent;
+                const run = () => {{
+                  installResultTabSync();
+                  installFitResultsScrollGuard();
+                }};
+                run();
+                parentWin.requestAnimationFrame(run);
+                parentWin.setTimeout(run, 120);
+                parentWin.setTimeout(run, 600);
+                parentWin.setTimeout(run, 1200);
+              }})();
             </script>
             """,
             height=0,
@@ -270,6 +469,9 @@ def bootstrap_app_state() -> dict:
             fit_results = fitting_future.result()
             _drain_fitting_progress_queue()
             st.session_state["fit_results"] = fit_results
+            st.session_state["fit_results_version"] = (
+                int(st.session_state.get("fit_results_version", 0)) + 1
+            )
             st.session_state["fitting_status"] = "拟合完成。"
             phi_value = float(
                 fit_results.get("phi_final", fit_results.get("cost", 0.0))
@@ -426,6 +628,8 @@ def bootstrap_app_state() -> dict:
         st.session_state["fitting_executor"] = None
     if "fitting_needs_app_rerun" not in st.session_state:
         st.session_state["fitting_needs_app_rerun"] = False
+    if "fit_results_version" not in st.session_state:
+        st.session_state["fit_results_version"] = 0
 
     # --- 恢复缓存的已上传 CSV（浏览器刷新后仍保留）---
     if "uploaded_csv_bytes" not in st.session_state:

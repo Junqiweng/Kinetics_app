@@ -129,7 +129,7 @@ def render_help_page() -> None:
             data=user_guide_bytes,
             file_name="Kinetics_app_user_guide.md",
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
         )
 
     tab_quick, tab_csv, tab_models, tab_fit, tab_trouble = st.tabs(
@@ -166,7 +166,7 @@ def render_help_page() -> None:
                     file_name="pfr_example.csv",
                     mime="text/csv",
                     help="示例：A → B 一级反应（正交设计，27 组工况）。测量列为 Fout_A_mol_s；建议目标物种只选 A。",
-                    use_container_width=True,
+                    width="stretch",
                 )
         with col_ex2:
             cstr_example_bytes = _build_example_cstr_csv_bytes()
@@ -176,7 +176,7 @@ def render_help_page() -> None:
                 file_name="cstr_example.csv",
                 mime="text/csv",
                 help="示例：A → B 一级反应稳态 CSTR，列包含 V_m3/T_K/vdot/C0_*/Cout_*/Fout_*。",
-                use_container_width=True,
+                width="stretch",
             )
         with col_ex3:
             batch_example_bytes = _build_example_batch_csv_bytes()
@@ -186,7 +186,7 @@ def render_help_page() -> None:
                 file_name="batch_example.csv",
                 mime="text/csv",
                 help="示例：A → B 一级反应，列包含 t_s/T_K/C0_*/Cout_*。",
-                use_container_width=True,
+                width="stretch",
             )
 
     with tab_csv:
