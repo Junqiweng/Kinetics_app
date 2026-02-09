@@ -101,16 +101,16 @@
     ]
   ],
   "k0_guess": [
-    1000.0,
-    1000.0,
-    1000.0,
-    1000.0
+    20000000000.0,
+    800000000000.0,
+    300000.0,
+    50000.0
   ],
   "ea_guess_J_mol": [
-    80000.0,
-    80000.0,
-    80000.0,
-    80000.0
+    68000.0,
+    58000.0,
+    76000.0,
+    68000.0
   ],
   "fit_k0_flags": [
     true,
@@ -125,14 +125,14 @@
     true
   ],
   "K0_ads": [
-    1.0,
+    0.05,
     0.0,
     0.0,
     0.0,
     0.0
   ],
   "Ea_K_J_mol": [
-    -20000.0,
+    -15000.0,
     0.0,
     0.0,
     0.0,
@@ -275,11 +275,11 @@
   "order_rev_min": -2.0,
   "order_rev_max": 5.0,
   "residual_type": "百分比残差",
-  "diff_step_rel": 0.01,
+  "diff_step_rel": 0.001,
   "max_nfev": 3000,
   "use_x_scale_jac": true,
   "use_multi_start": false,
-  "n_starts": 10,
+  "n_starts": 1,
   "max_nfev_coarse": 300,
   "random_seed": 42,
   "table_number_style": "科学计数",
