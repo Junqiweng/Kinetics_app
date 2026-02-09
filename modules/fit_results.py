@@ -88,7 +88,9 @@ def _compute_reactor_profile(
         if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
             pressure_Pa = float(row_data_dict.get("P_Pa", float("nan")))
             for i, sp_name in enumerate(species_names_list):
-                molar_flow_inlet[i] = float(row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan")))
+                molar_flow_inlet[i] = float(
+                    row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan"))
+                )
 
             x_grid, profiles, ok, message = (
                 reactors.integrate_pfr_profile_gas_ideal_const_p(
@@ -122,31 +124,31 @@ def _compute_reactor_profile(
                     c0 = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
                     molar_flow_inlet[i] = c0 * float(vdot_m3_s)
                 else:
-                    molar_flow_inlet[i] = float(row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan")))
+                    molar_flow_inlet[i] = float(
+                        row_data_dict.get(f"F0_{sp_name}_mol_s", float("nan"))
+                    )
 
-            x_grid, profiles, ok, message = (
-                reactors.integrate_pfr_profile(
-                    reactor_volume_m3=reactor_volume_m3,
-                    temperature_K=temperature_K,
-                    vdot_m3_s=vdot_m3_s,
-                    molar_flow_inlet_mol_s=molar_flow_inlet,
-                    stoich_matrix=stoich_matrix,
-                    k0=fitted_params["k0"],
-                    ea_J_mol=fitted_params["ea_J_mol"],
-                    reaction_order_matrix=fitted_params["reaction_order_matrix"],
-                    solver_method=solver_method,
-                    rtol=rtol,
-                    atol=atol,
-                    n_points=n_points,
-                    kinetic_model=kinetic_model,
-                    max_step_fraction=max_step_fraction,
-                    K0_ads=fitted_params.get("K0_ads", None),
-                    Ea_K_J_mol=fitted_params.get("Ea_K", None),
-                    m_inhibition=fitted_params.get("m_inhibition", None),
-                    k0_rev=fitted_params.get("k0_rev", None),
-                    ea_rev_J_mol=fitted_params.get("ea_rev", None),
-                    order_rev_matrix=fitted_params.get("order_rev", None),
-                )
+            x_grid, profiles, ok, message = reactors.integrate_pfr_profile(
+                reactor_volume_m3=reactor_volume_m3,
+                temperature_K=temperature_K,
+                vdot_m3_s=vdot_m3_s,
+                molar_flow_inlet_mol_s=molar_flow_inlet,
+                stoich_matrix=stoich_matrix,
+                k0=fitted_params["k0"],
+                ea_J_mol=fitted_params["ea_J_mol"],
+                reaction_order_matrix=fitted_params["reaction_order_matrix"],
+                solver_method=solver_method,
+                rtol=rtol,
+                atol=atol,
+                n_points=n_points,
+                kinetic_model=kinetic_model,
+                max_step_fraction=max_step_fraction,
+                K0_ads=fitted_params.get("K0_ads", None),
+                Ea_K_J_mol=fitted_params.get("Ea_K", None),
+                m_inhibition=fitted_params.get("m_inhibition", None),
+                k0_rev=fitted_params.get("k0_rev", None),
+                ea_rev_J_mol=fitted_params.get("ea_rev", None),
+                order_rev_matrix=fitted_params.get("order_rev", None),
             )
 
         return {
@@ -162,9 +164,12 @@ def _compute_reactor_profile(
         vdot_m3_s = float(row_data_dict.get("vdot_m3_s", float("nan")))
         conc_inlet = np.zeros(len(species_names_list), dtype=float)
         for i, sp_name in enumerate(species_names_list):
-            conc_inlet[i] = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
+            conc_inlet[i] = float(
+                row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan"))
+            )
 
         from modules.constants import EPSILON_FLOW_RATE
+
         tau_s = reactor_volume_m3 / max(vdot_m3_s, EPSILON_FLOW_RATE)
         simulation_time_s = float(5.0 * tau_s)
 
@@ -203,7 +208,9 @@ def _compute_reactor_profile(
         reaction_time_s = float(row_data_dict.get("t_s", float("nan")))
         conc_initial = np.zeros(len(species_names_list), dtype=float)
         for i, sp_name in enumerate(species_names_list):
-            conc_initial[i] = float(row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan")))
+            conc_initial[i] = float(
+                row_data_dict.get(f"C0_{sp_name}_mol_m3", float("nan"))
+            )
 
         x_grid, profiles, ok, message = reactors.integrate_batch_profile(
             reaction_time_s=reaction_time_s,
@@ -242,7 +249,9 @@ def _render_centered_pyplot(fig) -> None:
         st.pyplot(fig, width="content")
 
 
-def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state: dict, runtime_state: dict) -> dict:
+def render_fit_results(
+    tab_fit_results_container, ctx: dict, fit_advanced_state: dict, runtime_state: dict
+) -> dict:
     get_cfg = ctx["get_cfg"]
     species_names = ctx["species_names"]
     stoich_matrix = ctx["stoich_matrix"]
@@ -273,7 +282,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
         # 若当前缓存数据与拟合时数据不一致，提示用户“当前上传数据已变化”
         current_df = st.session_state.get("data_df_cached", pd.DataFrame())
         if not current_df.empty and "data_hash" in res:
-            current_hash = hashlib.md5(current_df.to_csv(index=False).encode()).hexdigest()
+            current_hash = hashlib.md5(
+                current_df.to_csv(index=False).encode()
+            ).hexdigest()
             if current_hash != res["data_hash"]:
                 tab_fit_results_container.warning(
                     "⚠️ 当前数据与拟合时使用的数据不一致（已上传新数据），结果可能不匹配。"
@@ -461,7 +472,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                 compare_validation_mode = "output"
                 unit_text_parity = _get_output_unit_text(compare_output_mode)
             else:
-                compare_output_mode = output_mode_fit_str  # 占位：conversion 模式下不会使用测量列名映射
+                compare_output_mode = (
+                    output_mode_fit_str  # 占位：conversion 模式下不会使用测量列名映射
+                )
                 compare_validation_mode = "conversion"
                 unit_text_parity = "-"
 
@@ -471,9 +484,13 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
 
             for sp_name in species_names_fit:
                 if compare_validation_mode == "output":
-                    meas_col = _get_measurement_column_name(compare_output_mode, sp_name)
+                    meas_col = _get_measurement_column_name(
+                        compare_output_mode, sp_name
+                    )
                     if meas_col not in df_cols:
-                        parity_species_unavailable.append(f"{sp_name}（缺少列 {meas_col}）")
+                        parity_species_unavailable.append(
+                            f"{sp_name}（缺少列 {meas_col}）"
+                        )
                         continue
                     numeric_series = pd.to_numeric(df_fit[meas_col], errors="coerce")
                     if bool(np.any(np.isfinite(numeric_series.to_numpy()))):
@@ -500,7 +517,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         pd.to_numeric(df_fit[required_cols[0]], errors="coerce"),
                         pd.to_numeric(df_fit[required_cols[1]], errors="coerce"),
                     ]
-                    if any(bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list):
+                    if any(
+                        bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list
+                    ):
                         parity_species_candidates.append(sp_name)
                     else:
                         parity_species_unavailable.append(
@@ -526,7 +545,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         pd.to_numeric(df_fit[required_cols[0]], errors="coerce"),
                         pd.to_numeric(df_fit[required_cols[1]], errors="coerce"),
                     ]
-                    if any(bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list):
+                    if any(
+                        bool(np.any(np.isfinite(s.to_numpy()))) for s in series_list
+                    ):
                         parity_species_candidates.append(sp_name)
                     else:
                         parity_species_unavailable.append(
@@ -536,13 +557,11 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
 
                 # 其他（液相 PFR / CSTR）：允许 F0/Fout；若缺则用 C0/Cout + vdot 换算
                 need_vdot = "vdot_m3_s" in df_cols
-                has_inlet = (
-                    (f"F0_{sp_name}_mol_s" in df_cols)
-                    or (need_vdot and (f"C0_{sp_name}_mol_m3" in df_cols))
+                has_inlet = (f"F0_{sp_name}_mol_s" in df_cols) or (
+                    need_vdot and (f"C0_{sp_name}_mol_m3" in df_cols)
                 )
-                has_outlet = (
-                    (f"Fout_{sp_name}_mol_s" in df_cols)
-                    or (need_vdot and (f"Cout_{sp_name}_mol_m3" in df_cols))
+                has_outlet = (f"Fout_{sp_name}_mol_s" in df_cols) or (
+                    need_vdot and (f"Cout_{sp_name}_mol_m3" in df_cols)
                 )
                 if not has_inlet or not has_outlet:
                     parts = []
@@ -550,7 +569,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         parts.append("入口缺少 F0 或 C0+vdot")
                     if not has_outlet:
                         parts.append("出口缺少 Fout 或 Cout+vdot")
-                    parity_species_unavailable.append(f"{sp_name}（{'；'.join(parts)}）")
+                    parity_species_unavailable.append(
+                        f"{sp_name}（{'；'.join(parts)}）"
+                    )
                     continue
 
                 inlet_col = (
@@ -578,7 +599,8 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                 show_missing = st.checkbox("显示无法绘图的物种原因", value=False)
                 if show_missing:
                     st.caption(
-                        "无法绘制奇偶校验图的物种： " + "，".join(parity_species_unavailable)
+                        "无法绘制奇偶校验图的物种： "
+                        + "，".join(parity_species_unavailable)
                     )
 
             try:
@@ -682,7 +704,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         n_rows = int(np.ceil(n_plots / max(n_cols, 1)))
 
                         axis_ranges_by_species = None
-                        with st.expander("坐标范围设置（横纵一致 + 等比例）", expanded=False):
+                        with st.expander(
+                            "坐标范围设置（横纵一致 + 等比例）", expanded=False
+                        ):
                             st.caption(
                                 "默认强制 x/y 等比例，以避免因为坐标拉伸导致对拟合优劣的误判。"
                             )
@@ -777,7 +801,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                                     h2.markdown("**min**")
                                     h3.markdown("**max**")
                                     invalid_species = []
-                                    for idx, species_name in enumerate(species_list_plot):
+                                    for idx, species_name in enumerate(
+                                        species_list_plot
+                                    ):
                                         c1, c2, c3 = st.columns([1.2, 1, 1])
                                         c1.write(species_name)
                                         auto_min, auto_max = auto_ranges[species_name]
@@ -865,7 +891,10 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                                 )
                                 # x/y 坐标范围 + 等比例（可全局统一，也可逐图独立）
                                 if axis_ranges_by_species is None:
-                                    axis_min_i, axis_max_i = axis_min_plot, axis_max_plot
+                                    axis_min_i, axis_max_i = (
+                                        axis_min_plot,
+                                        axis_max_plot,
+                                    )
                                 else:
                                     axis_min_i, axis_max_i = axis_ranges_by_species.get(
                                         species_name,
@@ -890,7 +919,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                                     )
                                     if show_error_lines and (error_band_percent > 0.0):
                                         e = float(error_band_percent) / 100.0
-                                        error_label = f"± {error_band_percent:.1f}% band"
+                                        error_label = (
+                                            f"± {error_band_percent:.1f}% band"
+                                        )
                                         ax.plot(
                                             [axis_min_i, axis_max_i],
                                             [
@@ -957,13 +988,16 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                     df_res = df_long[df_long["ok"]].copy()
                     df_res = df_res[df_res["species"].isin(species_selected)]
                     df_res = df_res[
-                        np.isfinite(df_res["residual"]) & np.isfinite(df_res["measured"])
+                        np.isfinite(df_res["residual"])
+                        & np.isfinite(df_res["measured"])
                     ]
                     if df_res.empty:
                         st.warning("所选物种没有可用残差数据。")
                     else:
                         species_list_residual = [
-                            sp for sp in species_selected if sp in set(df_res["species"])
+                            sp
+                            for sp in species_selected
+                            if sp in set(df_res["species"])
                         ]
                         n_residual_plots = len(species_list_residual)
                         n_residual_rows = int(
@@ -1027,7 +1061,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             )
                             st.download_button(
                                 "📥 下载残差图",
-                                ui_comp.figure_to_image_bytes(fig_r, residual_image_format),
+                                ui_comp.figure_to_image_bytes(
+                                    fig_r, residual_image_format
+                                ),
                                 file_name=f"residual_plot.{residual_image_format}",
                                 mime=(
                                     "image/png"
@@ -1056,8 +1092,12 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                         "residual",
                         "relative_residual",
                     ]
-                    existing_preferred = [c for c in preferred_order if c in df_show.columns]
-                    remaining_cols = [c for c in df_show.columns if c not in existing_preferred]
+                    existing_preferred = [
+                        c for c in preferred_order if c in df_show.columns
+                    ]
+                    remaining_cols = [
+                        c for c in df_show.columns if c not in existing_preferred
+                    ]
                     df_show = df_show[existing_preferred + remaining_cols]
                     st.dataframe(
                         df_show,
@@ -1208,11 +1248,20 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             idx = name_to_index[species_name]
                             series_color = _fit_plot_color(i)
 
-                            if reactor_type_fit == REACTOR_TYPE_PFR and profile_kind.startswith("F"):
+                            if (
+                                reactor_type_fit == REACTOR_TYPE_PFR
+                                and profile_kind.startswith("F")
+                            ):
                                 y = profiles[idx, :]
                                 profile_df[f"F_{species_name}_mol_s"] = y
-                            elif reactor_type_fit == REACTOR_TYPE_PFR and not profile_kind.startswith("F"):
-                                if pfr_flow_model_fit == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+                            elif (
+                                reactor_type_fit == REACTOR_TYPE_PFR
+                                and not profile_kind.startswith("F")
+                            ):
+                                if (
+                                    pfr_flow_model_fit
+                                    == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+                                ):
                                     pressure_Pa = float(row_sel.get("P_Pa", np.nan))
                                     temperature_K = float(row_sel.get("T_K", np.nan))
                                     conc_total = float(pressure_Pa) / max(
@@ -1227,7 +1276,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                                     )
                                 else:
                                     vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
-                                    y = profiles[idx, :] / max(vdot_m3_s, EPSILON_FLOW_RATE)
+                                    y = profiles[idx, :] / max(
+                                        vdot_m3_s, EPSILON_FLOW_RATE
+                                    )
                                 profile_df[f"C_{species_name}_mol_m3"] = y
                             else:
                                 # CSTR / BSTR: 直接就是浓度剖面
@@ -1235,8 +1286,11 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                                 profile_df[f"C_{species_name}_mol_m3"] = y
 
                             _plot_reference_series(
-                                ax_prof, x_grid, y,
-                                label=species_name, color=series_color,
+                                ax_prof,
+                                x_grid,
+                                y,
+                                label=species_name,
+                                color=series_color,
                             )
 
                         if reactor_type_fit == REACTOR_TYPE_PFR:
@@ -1260,7 +1314,9 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
                             file_name="profile_data.csv",
                             mime="text/csv",
                         )
-                        image_format_key = f"{reactor_type_fit.lower()}_profile_image_format"
+                        image_format_key = (
+                            f"{reactor_type_fit.lower()}_profile_image_format"
+                        )
                         image_format_prof = st.selectbox(
                             "剖面图格式",
                             ["png", "svg"],
@@ -1331,4 +1387,3 @@ def render_fit_results(tab_fit_results_container, ctx: dict, fit_advanced_state:
             else:
                 st.info("先在「奇偶校验图」页生成对比数据后，再导出对比表。")
     return {}
-

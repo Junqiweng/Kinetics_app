@@ -87,9 +87,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
     fitting_running = bool(st.session_state.get("fitting_running", False))
 
     with st.container(border=True):
-        st.markdown(
-            '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
-        )
+        st.markdown('<div class="kinetics-card-marker"></div>', unsafe_allow_html=True)
         col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(
             [3, 1, 1, 1, 1], vertical_alignment="center"
         )
@@ -306,8 +304,12 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             )
 
     if fitting_running:
-        st.caption("“自动刷新”：仅刷新进度区域（避免整页闪烁）；如需降低页面刷新负载可关闭。")
-        refresh_interval_s = float(st.session_state.get("fitting_refresh_interval_s", 2.0))
+        st.caption(
+            "“自动刷新”：仅刷新进度区域（避免整页闪烁）；如需降低页面刷新负载可关闭。"
+        )
+        refresh_interval_s = float(
+            st.session_state.get("fitting_refresh_interval_s", 2.0)
+        )
         refresh_interval_s = float(max(0.2, min(30.0, refresh_interval_s)))
         if bool(st.session_state.get("fitting_auto_refresh", True)):
 
@@ -328,4 +330,3 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
         "tab_fit_results_container": tab_fit_results_container,
         "fitting_running": bool(st.session_state.get("fitting_running", False)),
     }
-

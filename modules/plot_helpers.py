@@ -108,7 +108,9 @@ def _configure_matplotlib_chinese_font() -> None:
         # 关键：优先把可用中文字体放到 sans-serif 的最前面
         base_list = list(mpl.rcParams.get("font.sans-serif", []))
         if chosen is not None:
-            mpl.rcParams["font.sans-serif"] = [chosen] + [x for x in base_list if x != chosen]
+            mpl.rcParams["font.sans-serif"] = [chosen] + [
+                x for x in base_list if x != chosen
+            ]
         else:
             # 没找到则把候选列表追加到前面，让 Matplotlib 自行尝试匹配
             mpl.rcParams["font.sans-serif"] = candidates + base_list

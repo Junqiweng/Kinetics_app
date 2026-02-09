@@ -178,7 +178,9 @@ def _clear_config_related_state(
 
     # 5) CSV 数据缓存（仅 reset 场景清空）
     if not keep_csv_data:
-        keys_to_delete.extend(["uploaded_csv_bytes", "uploaded_csv_name", "data_df_cached"])
+        keys_to_delete.extend(
+            ["uploaded_csv_bytes", "uploaded_csv_name", "data_df_cached"]
+        )
 
     # 6) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
     keys_to_delete.extend(

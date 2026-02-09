@@ -127,7 +127,13 @@ def _build_fit_comparison_long_table(
             return float("nan")
 
     validation_mode_norm = str(validation_mode).strip().lower()
-    if validation_mode_norm in ("conversion", "conv", "x_conv", "xconversion", "转化率"):
+    if validation_mode_norm in (
+        "conversion",
+        "conv",
+        "x_conv",
+        "xconversion",
+        "转化率",
+    ):
         rows = []
         row_indices = data_df.index.to_numpy()
         columns = set(map(str, data_df.columns))
@@ -147,7 +153,10 @@ def _build_fit_comparison_long_table(
         elif reactor_type == REACTOR_TYPE_CSTR:
             pred_output_mode = OUTPUT_MODE_FOUT
             inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
-        elif reactor_type == REACTOR_TYPE_PFR and str(pfr_flow_model).strip() == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P:
+        elif (
+            reactor_type == REACTOR_TYPE_PFR
+            and str(pfr_flow_model).strip() == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+        ):
             pred_output_mode = OUTPUT_MODE_FOUT
             inlet_column_names = [f"F0_{name}_mol_s" for name in species_names]
         elif reactor_type == REACTOR_TYPE_PFR:
@@ -214,12 +223,8 @@ def _build_fit_comparison_long_table(
                         message = f"Cout_{species_name}_mol_m3 缺失/无效"
 
                     cout_pred = float(pred_vals[out_i]) if ok else np.nan
-                    measured_value = (
-                        (c0 - cout_meas) / c0 if ok else float("nan")
-                    )
-                    predicted_value = (
-                        (c0 - cout_pred) / c0 if ok else float("nan")
-                    )
+                    measured_value = (c0 - cout_meas) / c0 if ok else float("nan")
+                    predicted_value = (c0 - cout_pred) / c0 if ok else float("nan")
 
                 else:
                     # PFR/CSTR：按摩尔流率计算转化率（必要时可由浓度+vdot换算）
@@ -227,7 +232,11 @@ def _build_fit_comparison_long_table(
                     c0 = _row_get_value(row, f"C0_{species_name}_mol_m3")
 
                     if not np.isfinite(f0):
-                        if np.isfinite(c0) and np.isfinite(vdot_m3_s) and vdot_m3_s > 0.0:
+                        if (
+                            np.isfinite(c0)
+                            and np.isfinite(vdot_m3_s)
+                            and vdot_m3_s > 0.0
+                        ):
                             f0 = float(c0) * float(vdot_m3_s)
                         else:
                             ok = False
@@ -249,14 +258,20 @@ def _build_fit_comparison_long_table(
 
                     if ok and (not (np.isfinite(f0) and (f0 > 0.0))):
                         ok = False
-                        message = f"入口摩尔流率 F0_{species_name}_mol_s 无效（<=0/NaN）"
+                        message = (
+                            f"入口摩尔流率 F0_{species_name}_mol_s 无效（<=0/NaN）"
+                        )
 
                     if pred_output_mode == OUTPUT_MODE_FOUT:
                         fout_pred = float(pred_vals[out_i]) if ok else np.nan
                     else:
                         # pred_output_mode == Cout：转为 Fout = Cout * vdot
                         if np.isfinite(vdot_m3_s) and vdot_m3_s > 0.0:
-                            fout_pred = float(pred_vals[out_i]) * float(vdot_m3_s) if ok else np.nan
+                            fout_pred = (
+                                float(pred_vals[out_i]) * float(vdot_m3_s)
+                                if ok
+                                else np.nan
+                            )
                         else:
                             ok = False
                             message = "vdot_m3_s 无效：无法将 Cout 预测值换算为 Fout"
@@ -266,7 +281,11 @@ def _build_fit_comparison_long_table(
                     predicted_value = (f0 - fout_pred) / f0 if ok else float("nan")
 
                 residual_value = float(predicted_value) - float(measured_value)
-                if ok and np.isfinite(measured_value) and (abs(measured_value) > EPSILON_DENOMINATOR):
+                if (
+                    ok
+                    and np.isfinite(measured_value)
+                    and (abs(measured_value) > EPSILON_DENOMINATOR)
+                ):
                     relative_residual = residual_value / float(measured_value)
                 else:
                     relative_residual = float("nan")
@@ -279,7 +298,9 @@ def _build_fit_comparison_long_table(
                         "predicted": float(predicted_value),
                         "residual": float(residual_value),
                         "relative_residual": float(relative_residual),
-                        "ok": bool(ok) and np.isfinite(measured_value) and np.isfinite(predicted_value),
+                        "ok": bool(ok)
+                        and np.isfinite(measured_value)
+                        and np.isfinite(predicted_value),
                         "message": str(message),
                     }
                 )
@@ -351,7 +372,11 @@ def _build_fit_comparison_long_table(
             measured_value = float(measured_matrix[row_pos, out_i])
             predicted_value = float(pred_vals[out_i]) if ok else np.nan
             residual_value = predicted_value - measured_value
-            if ok and np.isfinite(measured_value) and (abs(measured_value) > EPSILON_DENOMINATOR):
+            if (
+                ok
+                and np.isfinite(measured_value)
+                and (abs(measured_value) > EPSILON_DENOMINATOR)
+            ):
                 relative_residual = residual_value / float(measured_value)
             else:
                 relative_residual = float("nan")

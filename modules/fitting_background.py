@@ -234,7 +234,9 @@ def _finalize_finished_fitting_future() -> None:
 
         phi_value = float(fit_results.get("phi_final", fit_results.get("cost", 0.0)))
         phi_text = f"{phi_value:.3e}"
-        st.session_state["fitting_timeline"].append(("✅", f"拟合完成，最终 Φ: {phi_text}"))
+        st.session_state["fitting_timeline"].append(
+            ("✅", f"拟合完成，最终 Φ: {phi_text}")
+        )
         st.session_state["fit_notice"] = {
             "kind": "success",
             "text": "拟合完成！结果已缓存（结果展示将锁定为本次拟合的配置与数据）。"
@@ -290,9 +292,7 @@ def _render_fitting_live_progress() -> None:
     _render_fitting_progress_panel()
 
     if not bool(st.session_state.get("fitting_auto_refresh", True)):
-        st.button(
-            "🔄 刷新进度", width="stretch", key="fit_manual_refresh_progress"
-        )
+        st.button("🔄 刷新进度", width="stretch", key="fit_manual_refresh_progress")
 
 
 def _run_fitting_job(
@@ -373,15 +373,21 @@ def _run_fitting_job(
     ord_max = job_inputs["ord_max"]
     k0_rev_min = float(job_inputs.get("k0_rev_min", DEFAULT_K0_REV_MIN))
     k0_rev_max = float(job_inputs.get("k0_rev_max", DEFAULT_K0_REV_MAX))
-    ea_rev_min_J_mol = float(job_inputs.get("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
-    ea_rev_max_J_mol = float(job_inputs.get("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
+    ea_rev_min_J_mol = float(
+        job_inputs.get("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL)
+    )
+    ea_rev_max_J_mol = float(
+        job_inputs.get("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL)
+    )
     ord_rev_min = float(job_inputs.get("order_rev_min", DEFAULT_ORDER_REV_MIN))
     ord_rev_max = float(job_inputs.get("order_rev_max", DEFAULT_ORDER_REV_MAX))
     K0_ads_min = job_inputs.get("K0_ads_min", 0.0)
     K0_ads_max = job_inputs.get("K0_ads_max", DEFAULT_K0_ADS_MAX)
     Ea_K_min = job_inputs.get("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL)
     Ea_K_max = job_inputs.get("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL)
-    max_step_fraction = float(job_inputs.get("max_step_fraction", DEFAULT_MAX_STEP_FRACTION))
+    max_step_fraction = float(
+        job_inputs.get("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
+    )
     residual_type = str(job_inputs.get("residual_type", "绝对残差"))
 
     if stop_event.is_set():
