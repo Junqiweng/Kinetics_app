@@ -159,6 +159,14 @@ def _render_fitting_overview_box(job_summary: dict) -> None:
     )
 
 
+def _render_summary_lines(summary_text: str) -> None:
+    lines = [line.strip() for line in str(summary_text).splitlines() if line.strip()]
+    if not lines:
+        return
+    for line in lines:
+        st.write(f"• {line}")
+
+
 def _render_fitting_progress_panel() -> None:
     job_summary = st.session_state.get("fitting_job_summary", {})
     timeline = st.session_state.get("fitting_timeline", [])
@@ -191,7 +199,7 @@ def _render_fitting_progress_panel() -> None:
                     '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
                 )
                 st.markdown("#### 多起点（Multi-start）摘要")
-                st.code(ms_summary, language="text")
+                _render_summary_lines(ms_summary)
 
         if final_summary:
             st.write("")
@@ -200,7 +208,7 @@ def _render_fitting_progress_panel() -> None:
                     '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
                 )
                 st.markdown("#### 拟合摘要")
-                st.caption(final_summary)
+                _render_summary_lines(final_summary)
 
 
 def _finalize_finished_fitting_future() -> None:
@@ -887,9 +895,11 @@ def _run_fitting_job(
         set_status("跳过拟合（直接使用初值计算）。")
         set_progress(1.0)
         set_final_summary(
-            f"目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，{residual_formula_for_summary}。\n"
-            f"本次未执行 least_squares，直接使用初值；Φ={initial_cost:.3e}\n"
-            f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"
+            f"目标函数定义：Φ(θ)=1/2·∑ r_i(θ)^2\n"
+            f"残差定义：{residual_formula_for_summary}\n"
+            f"执行结果：未执行 least_squares（{skip_reason}）\n"
+            f"目标函数值：Φ={initial_cost:.3e}\n"
+            f"失败罚项：typical_scale≈{typical_measured_scale:.3e}，penalty={residual_penalty_value:.3e}\n"
             f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
         )
 
@@ -995,8 +1005,10 @@ def _run_fitting_job(
             f"粗拟合完成，最佳起点: {best_start_index}/{n_starts}，最佳 Φ: {coarse_best_phi:.4e}",
         )
         set_ms_summary(
-            f"multi-start: n_starts={n_starts}, seed={random_seed}, coarse max_nfev={max_nfev_coarse}, "
-            f"best_start={best_start_index}/{n_starts}"
+            f"多起点数量：{int(n_starts)}（seed={int(random_seed)}）\n"
+            f"粗拟合预算：max_nfev={int(max_nfev_coarse)}\n"
+            f"最佳起点：{int(best_start_index)}/{int(n_starts)}\n"
+            f"粗拟合最佳 Φ：{coarse_best_phi:.3e}"
         )
 
         set_status("使用最优起点做精细拟合...")
@@ -1058,10 +1070,11 @@ def _run_fitting_job(
     set_metric("phi_ratio", phi_ratio)
     set_metric("param_relative_change", param_relative_change)
     set_final_summary(
-        f"目标函数：Φ(θ)=1/2·∑ r_i(θ)^2，{residual_formula_for_summary}。\n"
-        f"Φ：初始 {initial_cost:.3e} -> 拟合 {final_phi:.3e} (比例 {phi_ratio:.3e}); "
-        f"参数相对变化 {param_relative_change:.3e}\n"
-        f"失败罚项：typical_scale≈{typical_measured_scale:.3e}, penalty={residual_penalty_value:.3e}\n"
+        f"目标函数定义：Φ(θ)=1/2·∑ r_i(θ)^2\n"
+        f"残差定义：{residual_formula_for_summary}\n"
+        f"Φ 变化：初始 {initial_cost:.3e} -> 拟合 {final_phi:.3e}（比例 {phi_ratio:.3e}）\n"
+        f"参数相对变化：{param_relative_change:.3e}\n"
+        f"失败罚项：typical_scale≈{typical_measured_scale:.3e}，penalty={residual_penalty_value:.3e}\n"
         f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
     )
 

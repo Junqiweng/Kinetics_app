@@ -223,21 +223,49 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
                 fit_ea_rev_flags,
                 fit_order_rev_flags_matrix,
             )
+            reactor_label = ui_text.map_label(
+                ui_text.REACTOR_TYPE_LABELS, str(reactor_type)
+            )
+            if str(reactor_type) == "PFR":
+                reactor_label = (
+                    f"{reactor_label} / "
+                    f"{ui_text.map_label(ui_text.PFR_FLOW_MODEL_LABELS, str(pfr_flow_model))}"
+                )
+            solver_label = ui_text.map_label(
+                ui_text.SOLVER_METHOD_LABELS, str(solver_method)
+            )
+            target_species_text = (
+                "、".join([str(x) for x in output_species_list])
+                if output_species_list
+                else "未选择"
+            )
+            if use_ms and int(n_starts) > 1:
+                ms_text = (
+                    f"开启（n_starts={int(n_starts)}, coarse_max_nfev={int(max_nfev_coarse)}, "
+                    f"seed={int(random_seed)}）"
+                )
+            else:
+                ms_text = "关闭"
+
             st.session_state["fitting_job_summary"] = {
                 "title": "拟合任务概览",
                 "lines": [
-                    f"数据点数量: {int(len(data_df))} 行",
+                    f"数据规模: {int(len(data_df))} 行 × {int(len(output_species_list))} 个目标物种",
                     f"待拟合参数: {int(n_fit_params)} 个",
-                    f"反应器类型: {ui_text.map_label(ui_text.REACTOR_TYPE_LABELS, str(reactor_type))}",
+                    f"目标物种: {target_species_text}",
+                    f"反应器/流动模型: {reactor_label}",
                     f"动力学模型: {ui_text.map_label(ui_text.KINETIC_MODEL_LABELS, str(kinetic_model))}",
-                    f"残差类型: {residual_type}",
-                    "优化算法: Trust Region Reflective (trf)",
-                    f"最大函数评估次数: {int(max_nfev)}",
+                    f"残差定义: {residual_type}",
                     (
-                        f"多起点拟合: {int(n_starts)} 个起点"
-                        if (use_ms and int(n_starts) > 1)
-                        else "多起点拟合: 关闭"
+                        f"数值求解: {solver_label}, "
+                        f"rtol={float(rtol):.1e}, atol={float(atol):.1e}"
                     ),
+                    (
+                        "优化设置: least_squares(trf), "
+                        f"max_nfev={int(max_nfev)}, diff_step={float(diff_step_rel):.1e}, "
+                        f"x_scale={'jac' if bool(use_x_scale_jac) else '1.0'}"
+                    ),
+                    f"多起点策略: {ms_text}",
                 ],
             }
 

@@ -189,18 +189,10 @@ def _plot_reference_series(
     label: str,
     color: str,
 ) -> None:
-    n_points = int(np.size(x_values))
-    marker_step = max(n_points // 8, 1)
     ax.plot(
         x_values,
         y_values,
         color=color,
         linewidth=2.2,
-        marker="o",
-        markersize=6.0,
-        markerfacecolor=color,
-        markeredgecolor="#ffffff",
-        markeredgewidth=0.9,
-        markevery=marker_step,
         label=label,
     )
