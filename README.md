@@ -10,6 +10,12 @@
 - **详细用户指南**：`docs/user_guide.md`
 - **App 内教程/帮助**：左侧 `📖 教程/帮助`（内容来自 `docs/help_*.md`）
 
+## 最近更新（2026-02-10）
+
+- 清理历史遗留文件与缓存目录（例如 `*.bak`、`__pycache__`）
+- 同步 `README / TODO / user_guide / test_data` 的口径，统一“示例 CSV 需脚本生成”的说明
+- 增加并固定回归验证命令：`scripts/smoke_validate.py`、`scripts/regression_state_validate.py`
+
 ## 功能特性
 
 - 📊 **多物种、多反应系统**：支持自定义物种数量和反应数量
@@ -50,9 +56,15 @@ $$k_j^{\pm}(T) = k_{0,j}^{\pm} \exp\left(-\frac{E_{a,j}^{\pm}}{RT}\right)$$
 
 $$\frac{dF_i}{dV} = \sum_{j=1}^{N_{rxn}} \nu_{i,j} r_j$$
 
-其中浓度与摩尔流量的关系为（液相/恒定体积流量假设）：
+其中浓度与摩尔流量关系按流动模型选择：
+
+液相恒定体积流量：
 
 $$C_i = \frac{F_i}{\dot{v}}$$
+
+气相理想气体等温恒压（无压降）：
+
+$$C_i = y_i\frac{P}{RT},\quad y_i=\frac{F_i}{\sum_k F_k}$$
 
 ### 符号说明
 
@@ -94,7 +106,7 @@ streamlit run main.py
 
 ## 快速验证（推荐先跑通一次）
 
-1) （可选）生成/更新 PFR 示例数据（App 的“教程/帮助”也可直接下载现成示例）：
+1) 生成/更新 PFR 示例数据（仓库默认不提交生成后的 CSV，需本地生成一次）：
 
 ```bash
 python test_data/generate_orthogonal_design.py
@@ -102,7 +114,14 @@ python test_data/generate_orthogonal_design.py
 
 2) 打开 App：`streamlit run main.py`
 
-3) 在“教程/帮助”页按推荐流程操作（下载示例数据/模板 → 上传 → 选择目标 → 开始拟合）。
+3) 运行轻量脚本验证核心路径：
+
+```bash
+python scripts/smoke_validate.py
+python scripts/regression_state_validate.py
+```
+
+4) 在“教程/帮助”页按推荐流程操作（下载示例数据/模板 → 上传 → 选择目标 → 开始拟合）。
 
 也可以直接阅读 `docs/user_guide.md`（更详细）。
 
@@ -121,15 +140,25 @@ python test_data/generate_orthogonal_design.py
 
 上传 CSV 文件，必须包含以下输入列（按反应器类型）：
 
-**PFR 输入列**
+**PFR 输入列（按流动模型区分）**
+
+液相恒定体积流量（默认）：
 
 | 列名 | 含义 | 单位 |
 |:---|:---|:---|
 | `V_m3` | 反应器体积 | m³ |
 | `T_K` | 反应温度 | K |
 | `vdot_m3_s` | 体积流量 | m³/s |
-| `F0_<物种名>_mol_s` | 各物种入口摩尔流量（拟合目标为 `Fout/xout` 时使用） | mol/s |
-| `C0_<物种名>_mol_m3` | 各物种入口浓度（拟合目标为 `Cout` 时使用） | mol/m³ |
+| `F0_<物种名>_mol_s` | 各物种入口摩尔流量 | mol/s |
+
+气相理想气体、等温恒压（无压降）：
+
+| 列名 | 含义 | 单位 |
+|:---|:---|:---|
+| `V_m3` | 反应器体积 | m³ |
+| `T_K` | 反应温度 | K |
+| `P_Pa` | 反应压力 | Pa |
+| `F0_<物种名>_mol_s` | 各物种入口摩尔流量 | mol/s |
 
 **CSTR 输入列**
 
@@ -176,7 +205,7 @@ python test_data/generate_orthogonal_design.py
 
 ## 重要假设与限制（建议使用前确认）
 
-- **PFR**：采用液相/恒定体积流量假设 $C_i = F_i/\dot{v}$，未包含压降与体积流量沿程变化。
+- **PFR**：支持两种模式：液相恒定体积流量（$C_i = F_i/\dot{v}$）与气相理想气体等温恒压（$C_i = y_iP/RT$）；两种模式均未包含压降与非理想气体效应。
 - **CSTR**：采用稳态物料衡算 $0=\dot{v}(C_{0,i}-C_i)+V\sum_j\nu_{i,j}r_j$（内部用非线性最小二乘求解稳态 $C$）。
 - **BSTR**：采用恒体积、无进出料的 $dC/dt=\nu r$ 模型；BSTR 模式不支持 `Fout` 作为拟合输出。
 - **测量缺失**：所选测量列不允许出现 NaN/空值；若某物种/某些行缺测，建议拆分数据文件或取消选择对应目标物种。
@@ -214,13 +243,16 @@ Kinetics_app/
 ├── requirements.txt        # Python 依赖
 ├── README.md               # 项目说明文档
 ├── docs/                   # 更详细的教程与说明
+├── scripts/                # 轻量自检/回归脚本
+│   ├── smoke_validate.py
+│   └── regression_state_validate.py
 ├── .streamlit/
 │   └── config.toml        # Streamlit 主题配置
 └── test_data/
     ├── generate_orthogonal_design.py  # PFR 示例数据生成（正交设计）
-    ├── orthogonal_design_data.csv     # PFR 示例数据（可直接上传）
+    ├── orthogonal_design_data.csv     # 生成后得到（默认不提交到仓库）
     ├── generate_complex_data.py       # 复杂验证数据生成
-    ├── validation_*.csv               # 复杂验证数据（可直接上传）
+    ├── validation_*.csv               # 生成后得到（默认不提交到仓库）
     └── validation_*.json              # 对应的可导入配置（与 CSV 匹配）
 ```
 
@@ -239,7 +271,8 @@ bootstrap_app_state
 
 ## 测试数据
 
-`test_data/` 文件夹包含用于测试的示例数据：
+`test_data/` 提供“数据生成脚本 + 可导入配置”。  
+说明：`orthogonal_design_data.csv` 与 `validation_*.csv` 属于脚本产物，默认被 `.gitignore` 忽略，不保证仓库内直接存在。
 
 - **`orthogonal_design_data.csv`**：PFR 示例数据（A 一级反应，27 组工况，带少量噪声；示例测量列为 `Fout_A_mol_s`）
 - **`generate_orthogonal_design.py`**：重新生成上述 PFR 示例数据

@@ -45,7 +45,6 @@ def _assert_finite_array(x: np.ndarray, name: str) -> None:
 
 def smoke_predict_pfr() -> None:
     species_names = ["A", "B"]
-    n_reactions = 1
     # A -> B
     stoich_matrix = np.array([[-1.0], [1.0]], dtype=float)  # (n_species, n_reactions)
 
@@ -83,7 +82,6 @@ def smoke_predict_pfr() -> None:
 
 def smoke_predict_cstr() -> None:
     species_names = ["A", "B"]
-    n_reactions = 1
     stoich_matrix = np.array([[-1.0], [1.0]], dtype=float)
 
     k0 = np.array([1.0e6], dtype=float)
@@ -120,7 +118,6 @@ def smoke_predict_cstr() -> None:
 
 def smoke_predict_bstr() -> None:
     species_names = ["A", "B"]
-    n_reactions = 1
     stoich_matrix = np.array([[-1.0], [1.0]], dtype=float)
 
     k0 = np.array([1.0e6], dtype=float)

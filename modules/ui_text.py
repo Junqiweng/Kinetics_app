@@ -35,6 +35,7 @@ KINETIC_MODEL_LABELS = {
 }
 
 SOLVER_METHOD_LABELS = {
+    "LSODA": "LSODA（自动刚性检测，推荐）",
     "RK45": "RK45（显式 Runge-Kutta）",
     "BDF": "BDF（后向差分）",
     "Radau": "Radau（隐式 Runge-Kutta）",

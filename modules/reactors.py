@@ -31,6 +31,114 @@ from .kinetics import (
 )
 
 
+def _precompute_arrhenius(
+    temperature_K: float,
+    kinetic_model: str,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    K0_ads: np.ndarray | None = None,
+    Ea_K_J_mol: np.ndarray | None = None,
+    k0_rev: np.ndarray | None = None,
+    ea_rev_J_mol: np.ndarray | None = None,
+) -> dict:
+    """
+    等温条件下预计算 Arrhenius 常数，避免在 ODE 每步重复计算 exp()。
+
+    返回 dict，键名与 calc_rate_vector_* 的 `*_precomputed` 参数对应。
+    """
+    RT = R_GAS_J_MOL_K * temperature_K
+    pre = {}
+    k_T = k0 * np.exp(-ea_J_mol / RT)
+    pre["k_T"] = k_T
+
+    if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
+        if K0_ads is not None and Ea_K_J_mol is not None:
+            pre["K_ads_T"] = K0_ads * np.exp(-Ea_K_J_mol / RT)
+
+    if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+        if k0_rev is not None and ea_rev_J_mol is not None:
+            pre["k_rev_T"] = k0_rev * np.exp(-ea_rev_J_mol / RT)
+
+    return pre
+
+
+def _dispatch_rate_vector(
+    conc_mol_m3: np.ndarray,
+    temperature_K: float,
+    kinetic_model: str,
+    k0: np.ndarray,
+    ea_J_mol: np.ndarray,
+    reaction_order_matrix: np.ndarray,
+    K0_ads: np.ndarray | None,
+    Ea_K_J_mol: np.ndarray | None,
+    m_inhibition: np.ndarray | None,
+    k0_rev: np.ndarray | None,
+    ea_rev_J_mol: np.ndarray | None,
+    order_rev_matrix: np.ndarray | None,
+    precomputed: dict | None = None,
+) -> np.ndarray:
+    """
+    统一分派不同动力学模型的速率计算，并传入预计算的 Arrhenius 常数。
+    减少在每个 ODE 闭包中重复的 if/elif 分支。
+    """
+    pre = precomputed or {}
+
+    if kinetic_model == KINETIC_MODEL_POWER_LAW:
+        return calc_rate_vector_power_law(
+            conc_mol_m3=conc_mol_m3,
+            temperature_K=temperature_K,
+            k0=k0,
+            ea_J_mol=ea_J_mol,
+            reaction_order_matrix=reaction_order_matrix,
+            k_T_precomputed=pre.get("k_T"),
+        )
+    if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
+        return calc_rate_vector_langmuir_hinshelwood(
+            conc_mol_m3=conc_mol_m3,
+            temperature_K=temperature_K,
+            k0=k0,
+            ea_J_mol=ea_J_mol,
+            reaction_order_matrix=reaction_order_matrix,
+            K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+            Ea_K_J_mol=(
+                Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+            ),
+            m_inhibition=(
+                m_inhibition if m_inhibition is not None else np.ones(k0.size)
+            ),
+            k_T_precomputed=pre.get("k_T"),
+            K_ads_T_precomputed=pre.get("K_ads_T"),
+        )
+    if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+        return calc_rate_vector_reversible(
+            conc_mol_m3=conc_mol_m3,
+            temperature_K=temperature_K,
+            k0_fwd=k0,
+            ea_fwd_J_mol=ea_J_mol,
+            order_fwd_matrix=reaction_order_matrix,
+            k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+            ea_rev_J_mol=(
+                ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+            ),
+            order_rev_matrix=(
+                order_rev_matrix
+                if order_rev_matrix is not None
+                else np.zeros_like(reaction_order_matrix)
+            ),
+            k_fwd_T_precomputed=pre.get("k_T"),
+            k_rev_T_precomputed=pre.get("k_rev_T"),
+        )
+    # 默认回退到 power_law
+    return calc_rate_vector_power_law(
+        conc_mol_m3=conc_mol_m3,
+        temperature_K=temperature_K,
+        k0=k0,
+        ea_J_mol=ea_J_mol,
+        reaction_order_matrix=reaction_order_matrix,
+        k_T_precomputed=pre.get("k_T"),
+    )
+
+
 def _compute_max_step(total_span: float, max_step_fraction: float | None) -> float:
     """
     将 “max_step_fraction” 转为 solve_ivp 的 max_step。
@@ -111,6 +219,18 @@ def integrate_pfr_molar_flows(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -123,54 +243,21 @@ def integrate_pfr_molar_flows(
             vdot_m3_s, EPSILON_FLOW_RATE
         )
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_mol_m3,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
@@ -186,7 +273,9 @@ def integrate_pfr_molar_flows(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return molar_flow_inlet_mol_s.copy(), False, f"solve_ivp异常: {exc}"
 
     if not solution.success:
@@ -274,6 +363,18 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -287,54 +388,21 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
         y = flow_safe / max(total_flow, EPSILON_FLOW_RATE)
         conc_mol_m3 = y * float(conc_total_mol_m3)
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_mol_m3,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
@@ -419,6 +487,18 @@ def integrate_batch_reactor(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -429,54 +509,21 @@ def integrate_batch_reactor(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_safe,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dC_dt = stoich_matrix @ rate_vector
         return dC_dt
@@ -492,7 +539,9 @@ def integrate_batch_reactor(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return conc_initial_mol_m3.copy(), False, f"solve_ivp异常: {exc}"
 
     if not solution.success:
@@ -588,54 +637,34 @@ def solve_cstr_steady_state_concentrations(
 
     conc_inlet_mol_m3 = conc_inlet_mol_m3.astype(float)
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def _rate_vector(conc_mol_m3: np.ndarray) -> np.ndarray:
         conc_safe = safe_nonnegative(conc_mol_m3)
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            return calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            return calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        if kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            return calc_rate_vector_reversible(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        return calc_rate_vector_power_law(
-            conc_mol_m3=conc_safe,
-            temperature_K=temperature_K,
-            k0=k0,
-            ea_J_mol=ea_J_mol,
-            reaction_order_matrix=reaction_order_matrix,
+        return _dispatch_rate_vector(
+            conc_safe,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
         )
 
     def residual_fun(conc_guess_mol_m3: np.ndarray) -> np.ndarray:
@@ -664,7 +693,9 @@ def solve_cstr_steady_state_concentrations(
             ftol=float(ftol),
             gtol=float(gtol),
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return conc_inlet_mol_m3.copy(), False, f"CSTR 稳态求解异常: {exc}"
 
     conc_outlet_mol_m3 = result.x.astype(float)
@@ -804,6 +835,18 @@ def integrate_cstr_profile(
 
     conc_inlet_mol_m3 = conc_inlet_mol_m3.astype(float)
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -814,54 +857,21 @@ def integrate_cstr_profile(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_safe,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         reaction_source_mol_m3_s = stoich_matrix @ rate_vector
         mixing_term_mol_m3_s = (conc_inlet_mol_m3 - conc_safe) / max(
@@ -883,7 +893,9 @@ def integrate_cstr_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             time_grid_s,
             conc_inlet_mol_m3.astype(float)[:, None],
@@ -1010,6 +1022,18 @@ def integrate_pfr_profile(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -1022,54 +1046,21 @@ def integrate_pfr_profile(
             vdot_m3_s, EPSILON_FLOW_RATE
         )
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_mol_m3,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
@@ -1088,7 +1079,9 @@ def integrate_pfr_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             volume_grid_m3,
             molar_flow_inlet_mol_s.astype(float)[:, None],
@@ -1224,6 +1217,18 @@ def integrate_pfr_profile_gas_ideal_const_p(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(volume_m3: float, molar_flow_mol_s: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -1237,54 +1242,21 @@ def integrate_pfr_profile_gas_ideal_const_p(
         y = flow_safe / max(total_flow, EPSILON_FLOW_RATE)
         conc_mol_m3 = y * float(conc_total_mol_m3)
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_mol_m3,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_mol_m3,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dF_dV = stoich_matrix @ rate_vector
         return dF_dV
@@ -1412,6 +1384,18 @@ def integrate_batch_profile(
         ):
             max_wall_time_s = None
 
+    # 等温预计算 Arrhenius 常数
+    _pre = _precompute_arrhenius(
+        temperature_K,
+        kinetic_model,
+        k0,
+        ea_J_mol,
+        K0_ads,
+        Ea_K_J_mol,
+        k0_rev,
+        ea_rev_J_mol,
+    )
+
     def ode_fun(time_s: float, conc_mol_m3: np.ndarray) -> np.ndarray:
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("用户终止（stop_event）")
@@ -1422,54 +1406,21 @@ def integrate_batch_profile(
 
         conc_safe = safe_nonnegative(conc_mol_m3)
 
-        if kinetic_model == KINETIC_MODEL_POWER_LAW:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
-        elif kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            rate_vector = calc_rate_vector_langmuir_hinshelwood(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-                K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_safe.size),
-                Ea_K_J_mol=(
-                    Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_safe.size)
-                ),
-                m_inhibition=(
-                    m_inhibition if m_inhibition is not None else np.ones(k0.size)
-                ),
-            )
-        elif kinetic_model == KINETIC_MODEL_REVERSIBLE:
-            rate_vector = calc_rate_vector_reversible(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0_fwd=k0,
-                ea_fwd_J_mol=ea_J_mol,
-                order_fwd_matrix=reaction_order_matrix,
-                k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
-                ea_rev_J_mol=(
-                    ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
-                ),
-                order_rev_matrix=(
-                    order_rev_matrix
-                    if order_rev_matrix is not None
-                    else np.zeros_like(reaction_order_matrix)
-                ),
-            )
-        else:
-            rate_vector = calc_rate_vector_power_law(
-                conc_mol_m3=conc_safe,
-                temperature_K=temperature_K,
-                k0=k0,
-                ea_J_mol=ea_J_mol,
-                reaction_order_matrix=reaction_order_matrix,
-            )
+        rate_vector = _dispatch_rate_vector(
+            conc_safe,
+            temperature_K,
+            kinetic_model,
+            k0,
+            ea_J_mol,
+            reaction_order_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev_matrix,
+            precomputed=_pre,
+        )
 
         dC_dt = stoich_matrix @ rate_vector
         return dC_dt
@@ -1487,7 +1438,9 @@ def integrate_batch_profile(
             atol=atol,
             max_step=max_step_value,
         )
-    except Exception as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
+    except (
+        Exception
+    ) as exc:  # scipy 可能抛出多种异常（ValueError, RuntimeError等），宽泛捕获确保稳定性
         return (
             time_grid_s,
             conc_initial_mol_m3.astype(float)[:, None],

@@ -40,7 +40,9 @@ def render_sidebar(ctx: dict) -> dict:
                 '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
             st.markdown("#### 核心模型")
-            reactor_type_default = str(get_cfg("reactor_type", REACTOR_TYPE_PFR)).strip()
+            reactor_type_default = str(
+                get_cfg("reactor_type", REACTOR_TYPE_PFR)
+            ).strip()
             if reactor_type_default == "Batch":
                 reactor_type_default = REACTOR_TYPE_BSTR
             reactor_type_options = list(REACTOR_TYPES)
@@ -103,8 +105,10 @@ def render_sidebar(ctx: dict) -> dict:
             st.markdown("#### 求解器")
             solver_method = st.selectbox(
                 "求解方法（Method）",
-                ["RK45", "BDF", "Radau"],
-                index=["RK45", "BDF", "Radau"].index(get_cfg("solver_method", "RK45")),
+                ["LSODA", "RK45", "BDF", "Radau"],
+                index=["LSODA", "RK45", "BDF", "Radau"].index(
+                    get_cfg("solver_method", "LSODA")
+                ),
                 format_func=lambda x: ui_text.map_label(
                     ui_text.SOLVER_METHOD_LABELS, str(x)
                 ),

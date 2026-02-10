@@ -115,12 +115,8 @@ def render_fit_advanced(ctx: dict) -> dict:
         # 可逆反应边界（逆反应）
         k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
         k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
-        ea_rev_min_J_mol = float(
-            get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL)
-        )
-        ea_rev_max_J_mol = float(
-            get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL)
-        )
+        ea_rev_min_J_mol = float(get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
+        ea_rev_max_J_mol = float(get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
         order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
         order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
         if kinetic_model == KINETIC_MODEL_REVERSIBLE:
@@ -185,9 +181,7 @@ def render_fit_advanced(ctx: dict) -> dict:
         with col_iter3:
             max_step_fraction = ui_comp.smart_number_input(
                 "最大步长比例（max_step_fraction）",
-                value=float(
-                    get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
-                ),
+                value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
                 min_value=0.0,
                 max_value=10.0,
                 step=UI_MAX_STEP_FRACTION_STEP,
@@ -226,7 +220,7 @@ def render_fit_advanced(ctx: dict) -> dict:
             )
 
         # 第三行：其他选项
-        col_opt1, col_opt2, col_opt3 = st.columns(3)
+        col_opt1, col_opt2 = st.columns(2)
         with col_opt1:
             use_x_scale_jac = st.checkbox(
                 "启用雅可比尺度归一（x_scale='jac'）",
@@ -367,4 +361,3 @@ def render_fit_advanced(ctx: dict) -> dict:
         "random_seed": int(random_seed),
         "residual_type": str(residual_type),
     }
-

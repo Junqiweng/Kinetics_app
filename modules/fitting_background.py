@@ -397,7 +397,6 @@ def _run_fitting_job(
         job_inputs.get("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
     )
     residual_type = str(job_inputs.get("residual_type", "绝对残差"))
-
     if stop_event.is_set():
         raise FittingStoppedError("Stopped by user")
 
@@ -959,12 +958,17 @@ def _run_fitting_job(
 
     if use_ms and n_starts > 1:
         timeline_add("⏳", f"阶段 2: 多起点粗拟合 ({n_starts} 个起点)...")
-        rng = np.random.default_rng(random_seed)
+
+        # Latin Hypercube Sampling（LHS）替代纯随机：在高维空间中更均匀地覆盖参数区间
+        from scipy.stats.qmc import LatinHypercube
+
+        lhs_sampler = LatinHypercube(d=len(lb), seed=random_seed)
+        lhs_samples = lhs_sampler.random(n=n_starts - 1)  # shape (n_starts-1, d)
+        lhs_scaled = lb + (ub - lb) * lhs_samples  # 缩放到 [lb, ub]
 
         starts = [param_vector]
-        for _ in range(n_starts - 1):
-            rand_vec = lb + (ub - lb) * rng.random(len(lb))
-            rand_vec = np.clip(rand_vec, lb, ub)
+        for i in range(n_starts - 1):
+            rand_vec = np.clip(lhs_scaled[i], lb, ub)
             starts.append(rand_vec)
 
         for start_index, x0 in enumerate(starts):

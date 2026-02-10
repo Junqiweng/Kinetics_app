@@ -45,8 +45,8 @@ UI 选项与公式：
   - $$r_i = y_i^{pred} - y_i^{meas}$$
   - 适用：测量值数量级相近；缺点：大值更容易主导拟合
 - `相对残差`
-  - $$r_i = \frac{y_i^{pred} - y_i^{meas}}{y_i^{meas}}$$
-  - 适用：测量值跨多个数量级；风险：当 $y^{meas}\to 0$ 时会“炸”
+  - $$r_i = \frac{y_i^{pred} - y_i^{meas}}{\mathrm{sign}(y_i^{meas})\cdot\max(|y_i^{meas}|,\epsilon)}$$
+  - 适用：测量值跨多个数量级；通过 $\epsilon$ 抑制 $y^{meas}\approx 0$ 的除零问题
 - `百分比残差`
   - $$r_i = 100 \times \frac{y_i^{pred} - y_i^{meas}}{|y_i^{meas}| + \epsilon}$$
   - 其中 $\epsilon$ 为小正数，用于避免除零；该残差以 % 计，更适合需要直观百分比误差权重的场景
@@ -221,6 +221,7 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 - 先做：侧边栏 `Method→BDF`；放宽 `rtol/atol`
 - 再做：`最大步长比例（max_step_fraction）` 调小；收紧边界避免极端参数
+- 再检查：PFR 时 `PFR 流动模型` 与 CSV 是否匹配（液相 `vdot_m3_s` / 气相 `P_Pa`）
 
 4) **场景：拟合“不动”**
 
@@ -271,5 +272,6 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 1) 优先解决数值求解：`Method→BDF`、放宽 `rtol/atol`
 2) 调整 `最大步长比例（max_step_fraction）`（减小或设 `0` 对比）
-3) 收紧边界，避免优化跑到极端参数区
+3) 若为 PFR：检查 `PFR 流动模型` 与输入列匹配（液相用 `vdot_m3_s`，气相用 `P_Pa`）
+4) 收紧边界，避免优化跑到极端参数区
 

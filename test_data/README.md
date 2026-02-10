@@ -1,12 +1,14 @@
 # test_data：示例与验证数据
 
-本目录用于提供**可直接上传到 App** 的示例 CSV，以及生成脚本，帮助你先跑通流程再替换真实实验数据。
+本目录用于提供示例/验证数据的**生成脚本**与配置文件，帮助你先跑通流程再替换真实实验数据。
+
+> 提示：`orthogonal_design_data.csv`、`validation_*.csv` 为脚本生成产物，默认被 `.gitignore` 忽略，仓库内可能不存在。
 
 > 注意：当前 App 支持 **PFR / CSTR / BSTR** 三类反应器。
 
 ## 1) 快速示例（推荐）
 
-- `orthogonal_design_data.csv`：PFR 示例数据（A 一级反应，27 组工况，带少量噪声）  
+- `orthogonal_design_data.csv`：PFR 示例数据（A 一级反应，27 组工况，带少量噪声；由脚本生成）  
   - 列包含：`V_m3, T_K, vdot_m3_s, F0_A_mol_s, ... , Fout_A_mol_s`
   - 注意：该示例**只有 `Fout_A_mol_s`** 这一列测量输出，因此在 App 里建议：
     - 目标变量选 `Fout (mol/s)`

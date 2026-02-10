@@ -138,7 +138,7 @@ App 的 UI 设计原则：
 
 ### E1. PFR（两种浓度换算方式）
 
-$$\frac{dF_i}{dV} = \sum_j \nu_{i,j} r_j,\quad C_i=\frac{F_i}{\dot{v}}$$
+$$\frac{dF_i}{dV} = \sum_j \nu_{i,j} r_j$$
 
 说明：App 的 PFR 提供两种模式（侧边栏 **PFR 流动模型**）：
 
@@ -146,6 +146,11 @@ $$\frac{dF_i}{dV} = \sum_j \nu_{i,j} r_j,\quad C_i=\frac{F_i}{\dot{v}}$$
 - **气相(理想气体、等温、恒压 $P$、无压降)**：$C_i = y_i\frac{P}{RT}$，其中 $y_i=F_i/\sum_k F_k$
 
 注意：气相模式仍不支持压降（即不求解 $P(V)$）。
+
+与 CSV 输入列对应关系（常见误区）：
+
+- 液相 PFR：`V_m3, T_K, vdot_m3_s` + `F0_*`（`Cout` 模式下也允许 `C0_*` 入口）
+- 气相 PFR：`V_m3, T_K, P_Pa` + `F0_*`（不使用 `vdot_m3_s`）
 
 ### E2. CSTR（稳态连续搅拌釜）
 
@@ -290,4 +295,17 @@ $$\frac{dC_i}{dt} = \sum_j \nu_{i,j} r_j$$
 1) 先固定 `n`（取消 `拟合 <物种>`）
 2) 收紧 `Order Min/Max`，避免极端负级数
 3) 求解器切换到 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`
+
+### H4. PFR 数据列与流动模型不匹配
+
+常见表现：
+
+- 选择了气相 PFR，但 CSV 仍使用 `vdot_m3_s` 且没有 `P_Pa`
+- 选择了液相 PFR，却使用了气相列定义
+
+处理（优先级）：
+
+1) 先在侧边栏确认 `PFR 流动模型`
+2) 按模型重下 `CSV 模板` 并对照填列
+3) 再检查输出模式与测量列是否匹配（`Fout/Cout/xout`）
 

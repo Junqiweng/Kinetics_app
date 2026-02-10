@@ -48,7 +48,7 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_pfr_flow_model"] = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
     if kinetic_model_cfg in KINETIC_MODELS:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
-    if solver_method_cfg in ["RK45", "BDF", "Radau"]:
+    if solver_method_cfg in ["LSODA", "RK45", "BDF", "Radau"]:
         st.session_state["cfg_solver_method"] = solver_method_cfg
 
     if "rtol" in config:

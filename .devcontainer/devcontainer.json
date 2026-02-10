@@ -6,7 +6,7 @@
     "codespaces": {
       "openFiles": [
         "README.md",
-        "app.py"
+        "main.py"
       ]
     },
     "vscode": {
@@ -21,7 +21,7 @@
   "postAttachCommand": {
     // 说明：容器开发默认使用 Streamlit 的安全默认值（启用 XSRF/CORS 保护）。
     // 如确需在特定开发环境关闭，请在本地自行覆盖，不要作为仓库默认值提交。
-    "server": "streamlit run app.py"
+    "server": "streamlit run main.py"
   },
   "portsAttributes": {
     "8501": {

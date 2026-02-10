@@ -31,6 +31,10 @@ from modules.config_state import (
 
 # 在“非 streamlit run”模式下，屏蔽无关的 ScriptRunContext 警告，保留断言失败信息。
 logging.getLogger("streamlit").setLevel(logging.ERROR)
+logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
+    logging.ERROR
+)
+logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
 
 
 def _assert_true(condition: bool, message: str) -> None:

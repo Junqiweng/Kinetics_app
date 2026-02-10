@@ -53,10 +53,21 @@ pip install -r requirements.txt
 ### 2.3 运行
 
 ```bash
-streamlit run app.py
+streamlit run main.py
 ```
 
 默认打开：`http://localhost:8501`
+
+### 2.4 快速自检（推荐）
+
+在项目根目录运行：
+
+```bash
+python scripts/smoke_validate.py
+python scripts/regression_state_validate.py
+```
+
+若两条命令分别输出 `SMOKE_VALIDATE: OK` 与 `REGRESSION_STATE_VALIDATE: OK`，说明核心路径与状态回归检查通过。
 
 ---
 
@@ -65,10 +76,10 @@ streamlit run app.py
 应用主界面分为：
 
 1) **① 反应与模型**：设置反应器类型、动力学模型、物种、反应数、$\nu$ 矩阵、级数矩阵、参数初值与拟合开关  
-2) **② 实验数据**：下载 CSV 模板、上传 CSV、选择拟合目标变量（Fout/Cout）与参与拟合的物种  
+2) **② 实验数据**：下载 CSV 模板、上传 CSV、选择拟合目标变量（Fout/Cout/xout）与参与拟合的物种  
 3) **③ 拟合与结果**：设置拟合高级选项与边界，开始拟合，查看图表与导出结果  
 
-左侧侧边栏是“全局设置”（反应器/动力学/求解器）与“配置管理（导入/导出/重置）”。
+左侧侧边栏是“全局设置”（反应器/PFR 流动模型/动力学/求解器）与“配置管理（导入/导出/重置）”。
 
 ---
 
@@ -79,12 +90,12 @@ streamlit run app.py
 **Step 1：打开 App**
 
 ```bash
-streamlit run app.py
+streamlit run main.py
 ```
 
 **Step 2：点左侧 `📖 教程/帮助`，下载示例 CSV（PFR 或 BSTR）**
 
-- PFR 示例：`test_data/orthogonal_design_data.csv`（也可运行 `python test_data/generate_orthogonal_design.py` 重新生成）
+- PFR 示例：`test_data/orthogonal_design_data.csv`（该文件为脚本产物，若不存在请运行 `python test_data/generate_orthogonal_design.py` 生成）
 - CSTR/BSTR 示例：App 内自动生成（下载即可）
 
 **Step 3：按示例配置输入模型**
@@ -96,6 +107,8 @@ streamlit run app.py
 - $k_0,E_a$：填一个合理初值（不确定就先用示例默认）
 
 **Step 4：到「② 实验数据」上传 CSV**
+
+- 若为 PFR，请先确认侧边栏 `PFR 流动模型` 与 CSV 输入列匹配（液相 `vdot_m3_s` / 气相 `P_Pa`）
 
 **Step 5：选择拟合目标变量与目标物种**
 
@@ -185,7 +198,7 @@ App 中：
 
 ### 6.1 一行数据代表什么？
 
-- **PFR**：一行 = 一个实验工况（给定 $V,T$，以及液相模式下的 $\dot{v}$ 或气相模式下的 $P$，与入口 $F_{0,i}$），测量是该工况下的出口  
+- **PFR**：一行 = 一个实验工况（给定 $V,T$，以及液相模式下的 $\dot{v}$ 或气相模式下的 $P$，与入口信息 $F_{0,i}$ 或 $C_{0,i}$），测量是该工况下的出口  
 - **CSTR**：一行 = 一个稳态工况（给定 $V,T,\dot{v}$ 与入口 $C_{0,i}$），测量是该工况下的出口（通常认为出口=釜内浓度）
 - **BSTR**：一行 = 在同一组初始浓度 $C_{0,i}$ 与温度 $T$ 下，某个时间点 $t$ 的测量
 
@@ -198,7 +211,9 @@ PFR 有两种模式（在侧边栏 **PFR 流动模型** 中选择），两者输
 - `V_m3`：反应器体积 [m³]
 - `T_K`：温度 [K]
 - `vdot_m3_s`：体积流量 [m³/s]
-- `F0_<物种名>_mol_s`：入口摩尔流量 [mol/s]（每个物种一列）
+- 入口列按输出模式区分：
+  - 输出模式为 `Cout`：`C0_<物种名>_mol_m3`
+  - 输出模式为 `Fout/xout`：`F0_<物种名>_mol_s`
 
 **(B) 气相 PFR：理想气体、等温、恒压 $P$（不考虑压降）**
 
@@ -294,6 +309,16 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 多起点会更慢，但更不容易陷入局部极小值。
 
+### 7.6 残差类型（目标函数）
+
+在「③ 拟合与结果」可选 3 种残差定义：
+
+- 绝对残差：$r = y_{pred} - y_{meas}$
+- 相对残差：$r = \frac{y_{pred} - y_{meas}}{\mathrm{sign}(y_{meas})\cdot\max(|y_{meas}|,\epsilon)}$
+- 百分比残差：$r = 100\cdot\frac{y_{pred} - y_{meas}}{|y_{meas}|+\epsilon}$
+
+其中 $\epsilon$ 为小正数，用于避免 $y_{meas}\approx 0$ 时除零。
+
 ---
 
 ## 8. 结果解读与导出
@@ -315,7 +340,7 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 ### 8.3 残差图
 
-残差 $r = y^{pred}-y^{meas}$：
+残差图中的 $r$ 取决于你选择的残差类型（绝对/相对/百分比）：
 
 - 残差随工况（$T,V,t$）呈趋势：提示模型缺项（传质/热效应/副反应等）或数据系统误差
 - 少数点残差极大：先排查数据录入/单位/列名
@@ -359,8 +384,9 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 1) 求解器换 `BDF` 或 `Radau`
 2) 放宽 `rtol/atol`（例如 `rtol=1e-6~1e-4`，`atol=1e-9~1e-7`）
-3) 调整 `max_step_fraction`（更小更稳但更慢；有时设 0 反而更快）
-4) 缩紧参数边界、改进初值（避免参数导致极端速率）
+3) 若为 PFR，检查 `PFR 流动模型` 与 CSV 输入列是否匹配（液相 `vdot_m3_s` / 气相 `P_Pa`）
+4) 调整 `max_step_fraction`（更小更稳但更慢；有时设 0 反而更快）
+5) 缩紧参数边界、改进初值（避免参数导致极端速率）
 
 ### 9.4 拟合不收敛/卡在边界
 

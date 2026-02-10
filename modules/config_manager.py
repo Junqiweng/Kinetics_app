@@ -85,7 +85,6 @@ def _get_auto_save_file(session_id: str | None = None) -> str:
     return os.path.join(persist_dir, "last_config.json")
 
 
-
 def _convert_to_serializable(obj: Any) -> Any:
     """
     将 NumPy/Pandas 对象转换为可 JSON 序列化的 Python 原生类型。
@@ -203,7 +202,8 @@ def collect_config(
         "version": "1.0",
         # 基础设置
         "reactor_type": reactor_type,
-        "pfr_flow_model": str(pfr_flow_model).strip() or PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+        "pfr_flow_model": str(pfr_flow_model).strip()
+        or PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": kinetic_model,
         "solver_method": solver_method,
         "rtol": rtol,
@@ -506,7 +506,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
 
     # 可选项：求解器/容限
     if "solver_method" in config:
-        if config["solver_method"] not in ["RK45", "BDF", "Radau"]:
+        if config["solver_method"] not in ["LSODA", "RK45", "BDF", "Radau"]:
             return False, f"无效的 solver_method：{config['solver_method']}"
     if "rtol" in config:
         try:
@@ -562,7 +562,9 @@ def validate_config(config: dict) -> tuple[bool, str]:
         output_mode = str(config["output_mode"])
 
         allowed_output_modes = (
-            OUTPUT_MODES_BATCH if reactor_type == REACTOR_TYPE_BSTR else OUTPUT_MODES_FLOW
+            OUTPUT_MODES_BATCH
+            if reactor_type == REACTOR_TYPE_BSTR
+            else OUTPUT_MODES_FLOW
         )
 
         if output_mode not in allowed_output_modes:
@@ -758,7 +760,10 @@ def validate_config(config: dict) -> tuple[bool, str]:
             if k0_rev_max <= 0:
                 return False, "k0_rev_max 必须为正值"
             if k0_rev_min >= k0_rev_max:
-                return False, f"k0_rev_min ({k0_rev_min}) 必须小于 k0_rev_max ({k0_rev_max})"
+                return (
+                    False,
+                    f"k0_rev_min ({k0_rev_min}) 必须小于 k0_rev_max ({k0_rev_max})",
+                )
 
         if "ea_rev_min_J_mol" in config and "ea_rev_max_J_mol" in config:
             try:
@@ -767,8 +772,14 @@ def validate_config(config: dict) -> tuple[bool, str]:
             except (ValueError, TypeError):
                 return False, "ea_rev_min_J_mol 或 ea_rev_max_J_mol 无法转换为数值"
             if not (np.isfinite(ea_rev_min) and np.isfinite(ea_rev_max)):
-                return False, "ea_rev_min_J_mol 或 ea_rev_max_J_mol 包含无效值（NaN 或 Inf）"
+                return (
+                    False,
+                    "ea_rev_min_J_mol 或 ea_rev_max_J_mol 包含无效值（NaN 或 Inf）",
+                )
             if ea_rev_min >= ea_rev_max:
-                return False, f"ea_rev_min_J_mol ({ea_rev_min}) 必须小于 ea_rev_max_J_mol ({ea_rev_max})"
+                return (
+                    False,
+                    f"ea_rev_min_J_mol ({ea_rev_min}) 必须小于 ea_rev_max_J_mol ({ea_rev_max})",
+                )
 
     return True, ""

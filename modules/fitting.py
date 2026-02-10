@@ -305,8 +305,8 @@ def _build_bounds(
     # 1. k0
     n_fit_k0 = int(np.sum(fit_k0_flags))
     if n_fit_k0 > 0:
-        lower_parts.append(np.full(n_fit_k0, k0_min, dtype=float))
-        upper_parts.append(np.full(n_fit_k0, k0_max, dtype=float))
+        lower_parts.append(np.full(n_fit_k0, float(k0_min), dtype=float))
+        upper_parts.append(np.full(n_fit_k0, float(k0_max), dtype=float))
 
     # 2. Ea
     n_fit_ea = int(np.sum(fit_ea_flags))
@@ -345,8 +345,8 @@ def _build_bounds(
     if fit_k0_rev_flags is not None:
         n_fit_k0_rev = int(np.sum(fit_k0_rev_flags))
         if n_fit_k0_rev > 0:
-            lower_parts.append(np.full(n_fit_k0_rev, k0_rev_min, dtype=float))
-            upper_parts.append(np.full(n_fit_k0_rev, k0_rev_max, dtype=float))
+            lower_parts.append(np.full(n_fit_k0_rev, float(k0_rev_min), dtype=float))
+            upper_parts.append(np.full(n_fit_k0_rev, float(k0_rev_max), dtype=float))
 
     # 8. Ea_rev
     if fit_ea_rev_flags is not None:
@@ -487,28 +487,30 @@ def _predict_outputs_for_row(
                     molar_flow_outlet, ok, message = cached
 
             if molar_flow_outlet is None:
-                molar_flow_outlet, ok, message = integrate_pfr_molar_flows_gas_ideal_const_p(
-                    reactor_volume_m3=reactor_volume_m3,
-                    temperature_K=temperature_K,
-                    pressure_Pa=pressure_Pa,
-                    molar_flow_inlet_mol_s=molar_flow_inlet,
-                    stoich_matrix=stoich_matrix,
-                    k0=k0,
-                    ea_J_mol=ea_J_mol,
-                    reaction_order_matrix=reaction_order_matrix,
-                    solver_method=solver_method,
-                    rtol=rtol,
-                    atol=atol,
-                    kinetic_model=kinetic_model,
-                    max_step_fraction=max_step_fraction,
-                    K0_ads=K0_ads,
-                    Ea_K_J_mol=Ea_K_J_mol,
-                    m_inhibition=m_inhibition,
-                    k0_rev=k0_rev,
-                    ea_rev_J_mol=ea_rev_J_mol,
-                    order_rev_matrix=order_rev_matrix,
-                    stop_event=stop_event,
-                    max_wall_time_s=max_wall_time_s,
+                molar_flow_outlet, ok, message = (
+                    integrate_pfr_molar_flows_gas_ideal_const_p(
+                        reactor_volume_m3=reactor_volume_m3,
+                        temperature_K=temperature_K,
+                        pressure_Pa=pressure_Pa,
+                        molar_flow_inlet_mol_s=molar_flow_inlet,
+                        stoich_matrix=stoich_matrix,
+                        k0=k0,
+                        ea_J_mol=ea_J_mol,
+                        reaction_order_matrix=reaction_order_matrix,
+                        solver_method=solver_method,
+                        rtol=rtol,
+                        atol=atol,
+                        kinetic_model=kinetic_model,
+                        max_step_fraction=max_step_fraction,
+                        K0_ads=K0_ads,
+                        Ea_K_J_mol=Ea_K_J_mol,
+                        m_inhibition=m_inhibition,
+                        k0_rev=k0_rev,
+                        ea_rev_J_mol=ea_rev_J_mol,
+                        order_rev_matrix=order_rev_matrix,
+                        stop_event=stop_event,
+                        max_wall_time_s=max_wall_time_s,
+                    )
                 )
                 if model_eval_cache is not None:
                     model_eval_cache[cache_key] = (
