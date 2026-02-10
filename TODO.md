@@ -151,7 +151,7 @@
 ### 数值稳定性
 
 - 负反应级数 + 零浓度：已通过 `EPSILON_CONCENTRATION` 限幅避免 `0^(-n)`
-- 刚性 ODE：提供 BDF/Radau 求解器选项，但不保证所有刚性系统收敛
+- 刚性 ODE：提供 LSODA（默认）/ BDF / Radau / RK45 求解器选项，但不保证所有刚性系统收敛
 
 ---
 

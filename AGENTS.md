@@ -10,6 +10,7 @@ Quick health checks live in `scripts/` (`smoke_validate.py`).
 - `pip install -r requirements.txt` - install runtime dependencies.
 - `streamlit run main.py` - start the local app (`http://localhost:8501`).
 - `python scripts/smoke_validate.py` - run lightweight prediction/config smoke checks for PFR/CSTR/BSTR paths.
+- `python scripts/regression_state_validate.py` - run session-state regression checks.
 - `python test_data/generate_orthogonal_design.py` - generate baseline PFR sample data.
 - `python test_data/generate_complex_data.py` - regenerate advanced validation datasets.
 

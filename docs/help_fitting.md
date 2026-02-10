@@ -87,7 +87,7 @@ UI 选项与公式：
 
 此外，ODE 求解器与容差在侧边栏：
 
-- `Method`：`RK45 / BDF / Radau`
+- `Method`：`LSODA（默认推荐） / RK45 / BDF / Radau`
 - `rtol`、`atol`
 
 ### C1. `1. 基础边界设置`（必用）

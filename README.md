@@ -195,7 +195,7 @@ python scripts/regression_state_validate.py
 
 ## 拟合算法说明（与代码一致）
 
-- 数值积分：`scipy.integrate.solve_ivp`（可选 `RK45 / BDF / Radau`）
+- 数值积分：`scipy.integrate.solve_ivp`（可选 `LSODA（默认推荐） / RK45 / BDF / Radau`）
 - 参数拟合：`scipy.optimize.least_squares`（`method="trf"`）
 - 鲁棒性选项：多起点（multi-start）、有限差分步长 `diff_step`、参数缩放 `x_scale="jac"`
 - 残差定义：
@@ -224,12 +224,15 @@ python scripts/regression_state_validate.py
 Kinetics_app/
 ├── main.py                 # Streamlit 主应用程序
 ├── modules/                # 核心计算与 UI 辅助模块
-│   ├── contexts.py         # App 上下文类型与构建（bootstrap/sidebar/model/data/fit）
+│   ├── __init__.py         # Package 初始化
+│   ├── constants.py        # 项目级常量定义（反应器类型、模型标识、默认值等）
+│   ├── contexts.py         # App 上下文 TypedDict 与构建函数
 │   ├── bootstrap.py        # 启动/会话恢复/全局状态初始化
+│   ├── style.py            # 自定义 CSS 与 Matplotlib 绘图风格
 │   ├── sidebar.py          # 侧边栏渲染（全局模型、求解器、配置管理）
 │   ├── tab_model.py        # 模型页签（物种、反应、参数初值）
 │   ├── tab_data.py         # 数据页签（模板、上传、预览、配置导出）
-│   ├── tab_fit.py          # 拟合页签编排入口（advanced -> execution -> results）
+│   ├── tab_fit.py          # 拟合页签编排入口（advanced → execution → results）
 │   ├── fit_advanced.py     # 拟合高级设置与边界
 │   ├── fit_execution.py    # 拟合操作与后台任务触发
 │   ├── fit_results.py      # 拟合结果展示（参数/奇偶校验/剖面/导出）
@@ -237,17 +240,28 @@ Kinetics_app/
 │   ├── kinetics.py         # 动力学：幂律 / L-H / 可逆速率
 │   ├── reactors.py         # 反应器：PFR/CSTR/BSTR 数值积分/稳态求解 + 剖面
 │   ├── fitting.py          # 拟合工具：参数打包/解包、单行预测
+│   ├── fitting_background.py  # 后台拟合线程/队列编排（多起点、进度推送）
+│   ├── data_utils.py       # 数据预处理与格式转换工具
 │   ├── config_manager.py   # 配置导入/导出/自动保存
+│   ├── config_state.py     # 配置导入/重置 session state 辅助
+│   ├── plot_helpers.py     # Matplotlib 中文字体配置与补丁
 │   ├── ui_help.py          # 教程/帮助（渲染 docs/help_*.md）
-│   └── ui_components.py    # UI 组件与导出工具
+│   ├── ui_components.py    # UI 组件与导出工具
+│   ├── ui_text.py          # UI 文本/标签常量
+│   ├── file_utils.py       # 原子写文件辅助
+│   ├── session_cleanup.py  # 过期会话目录清理
+│   ├── upload_persistence.py  # 上传文件持久化与恢复
+│   └── browser_storage.py  # 浏览器 LocalStorage 集成（云端部署用）
 ├── requirements.txt        # Python 依赖
 ├── README.md               # 项目说明文档
+├── AGENTS.md               # 开发与协作规范
+├── TODO.md                 # 开发路线图与已知限制
 ├── docs/                   # 更详细的教程与说明
 ├── scripts/                # 轻量自检/回归脚本
 │   ├── smoke_validate.py
 │   └── regression_state_validate.py
 ├── .streamlit/
-│   └── config.toml        # Streamlit 主题配置
+│   └── config.toml         # Streamlit 主题配置
 └── test_data/
     ├── generate_orthogonal_design.py  # PFR 示例数据生成（正交设计）
     ├── orthogonal_design_data.csv     # 生成后得到（默认不提交到仓库）

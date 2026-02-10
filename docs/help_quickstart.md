@@ -60,7 +60,7 @@
 - `反应器`：`PFR / CSTR / BSTR`
 - `PFR 流动模型`（仅 PFR 显示）：`液相(恒定 vdot)` / `气相(理想气体、等温、恒压)`
 - `动力学`：`power_law / langmuir_hinshelwood / reversible`
-- `Method`（ODE 求解器）：`RK45 / BDF / Radau`
+- `Method`（ODE 求解器）：`LSODA（默认推荐） / RK45 / BDF / Radau`
 - `rtol`、`atol`：ODE 积分容差（影响能否算出来 + 速度）
 - `⚙️ 配置管理 (导入/导出/重置)`：本次文档范围不展开（如需也可扩写到用户指南）
 
@@ -193,7 +193,7 @@
 |---|---|---|---|
 | 反应器类型 | `反应器` | 侧边栏 | `PFR/CSTR/BSTR` |
 | 动力学模型 | `动力学` | 侧边栏 | `power_law / langmuir_hinshelwood / reversible` |
-| 求解器 | `Method` | 侧边栏 | `RK45/BDF/Radau` |
+| 求解器 | `Method` | 侧边栏 | `LSODA（默认）/RK45/BDF/Radau` |
 | ODE 容差 | `rtol`、`atol` | 侧边栏 | 越小越精细但可能更慢/更易失败 |
 | 正向 `k₀/Eₐ` 初值 + 拟合勾选 | `k₀`、`Eₐ [J/mol]`、`拟合 k₀`、`拟合 Eₐ` | 「① 反应与模型」 | `Eₐ` 单位 J/mol |
 | 级数矩阵 `n` + 拟合勾选 | `n_<物种>`、`拟合 <物种>` | 「① 反应与模型」 | 行=反应，列=物种 |
@@ -227,7 +227,7 @@
 
 优先级从高到低：
 
-1) 侧边栏把 `Method` 切到 `BDF`（或 `Radau`）
+1) 侧边栏把 `Method` 切到 `LSODA`（默认推荐）或 `BDF` / `Radau`
 2) 放宽 `rtol/atol`（例如 `rtol: 1e-6 → 1e-5`；`atol: 1e-9 → 1e-8`）
 3) 在「③」把 `最大步长比例（max_step_fraction）` 调小（例如 `0.1 → 0.05 → 0.01`），或直接设 `0`（不限制）对比一下
 4) 收紧参数边界（避免优化跑到极端 `k₀/Eₐ/n`）

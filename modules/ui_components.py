@@ -5,12 +5,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
 
 
 from .constants import (
     PLOT_EXPORT_DPI,
-    PLOT_SCI_POWERLIMITS,
     UI_FLOAT_NORMAL_MAX_DECIMALS,
     UI_FLOAT_SCI_DECIMALS,
     UI_FLOAT_SCI_FORMAT_STREAMLIT,
@@ -138,45 +136,6 @@ def figure_to_image_bytes(fig: plt.Figure, image_format: str) -> bytes:
         save_kwargs["dpi"] = PLOT_EXPORT_DPI
     fig.savefig(buf, **save_kwargs)
     return buf.getvalue()
-
-
-def apply_plot_tick_format(
-    ax: plt.Axes, number_style: str, decimal_places: int, use_auto: bool
-) -> None:
-    if use_auto:
-        # 自动模式：根据数量级自动切换科学计数
-        try:
-            from matplotlib.ticker import ScalarFormatter
-
-            formatter = ScalarFormatter(useMathText=True)
-            formatter.set_powerlimits(PLOT_SCI_POWERLIMITS)
-            ax.xaxis.set_major_formatter(formatter)
-            ax.yaxis.set_major_formatter(formatter)
-        except Exception:
-            return
-    decimal_places = int(decimal_places)
-    fmt_str = (
-        f"{{:.{decimal_places}e}}"
-        if number_style == "科学计数"
-        else f"{{:.{decimal_places}f}}"
-    )
-    formatter = FuncFormatter(
-        lambda x, pos: "" if not np.isfinite(x) else fmt_str.format(float(x))
-    )
-    ax.xaxis.set_major_formatter(formatter)
-    ax.yaxis.set_major_formatter(formatter)
-
-
-def build_table_column_config(data_df: pd.DataFrame, number_format: str) -> dict:
-    column_config: dict = {}
-    for col in data_df.columns:
-        if pd.api.types.is_numeric_dtype(data_df[col]):
-            column_config[col] = st.column_config.NumberColumn(
-                col, format=number_format
-            )
-        else:
-            column_config[col] = st.column_config.TextColumn(col)
-    return column_config
 
 
 def format_dataframe_for_display(data_df: pd.DataFrame) -> pd.DataFrame:

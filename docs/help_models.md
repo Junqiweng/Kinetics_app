@@ -294,7 +294,7 @@ $$\frac{dC_i}{dt} = \sum_j \nu_{i,j} r_j$$
 
 1) 先固定 `n`（取消 `拟合 <物种>`）
 2) 收紧 `Order Min/Max`，避免极端负级数
-3) 求解器切换到 `BDF` 或 `Radau`，并适当放宽 `rtol/atol`
+3) 求解器切换到 `LSODA`（默认推荐）、`BDF` 或 `Radau`，并适当放宽 `rtol/atol`
 
 ### H4. PFR 数据列与流动模型不匹配
 

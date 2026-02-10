@@ -114,29 +114,3 @@ def cleanup_old_sessions(max_age_hours: int = DEFAULT_MAX_AGE_HOURS) -> int:
         pass
 
     return deleted_count
-
-
-def get_session_count() -> int:
-    """
-    获取当前会话目录数量。
-
-    返回:
-        会话目录数量
-    """
-    if not os.path.exists(_PERSIST_BASE_DIR):
-        return 0
-
-    count = 0
-    try:
-        for item in os.listdir(_PERSIST_BASE_DIR):
-            item_path = os.path.join(_PERSIST_BASE_DIR, item)
-            if (
-                os.path.isdir(item_path)
-                and len(item) == UUID_STRING_LENGTH
-                and item.count("-") == UUID_HYPHEN_COUNT
-            ):
-                count += 1
-    except Exception:
-        pass
-
-    return count

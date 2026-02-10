@@ -271,10 +271,11 @@ App 会对你“当前选中的目标变量 + 目标物种”对应的测量列�
 - 不确定时：先把边界设置得“合理但不离谱”，避免优化跑到物理不可能区间
 - 如果出现 `x₀ infeasible`（初值不在边界内）：App 会把初值裁剪到边界内，但更推荐你自己把初值/边界设得一致
 
-### 7.2 ODE 求解器（RK45 / BDF / Radau）
+### 7.2 ODE 求解器（LSODA / RK45 / BDF / Radau）
 
 数值积分使用 `scipy.integrate.solve_ivp`：
 
+- `LSODA`（默认推荐）：自动刚性检测，兼顾速度与稳健性
 - `RK45`：非刚性问题常用，速度快
 - `BDF`：刚性问题更稳（常见于快慢反应并存、级数较大、浓度跨数量级）
 - `Radau`：刚性问题也很稳，但可能更慢
@@ -382,7 +383,7 @@ $$\text{max\_step}=\text{max\_step\_fraction}\times(\text{总时间或总体积}
 
 优先尝试（从容易到更激进）：
 
-1) 求解器换 `BDF` 或 `Radau`
+1) 求解器换 `LSODA`（默认推荐）、`BDF` 或 `Radau`
 2) 放宽 `rtol/atol`（例如 `rtol=1e-6~1e-4`，`atol=1e-9~1e-7`）
 3) 若为 PFR，检查 `PFR 流动模型` 与 CSV 输入列是否匹配（液相 `vdot_m3_s` / 气相 `P_Pa`）
 4) 调整 `max_step_fraction`（更小更稳但更慢；有时设 0 反而更快）
