@@ -68,6 +68,23 @@ def map_label(mapping: dict[str, str], value: str) -> str:
     return str(mapping.get(key, key))
 
 
+def kinetic_model_display_text(kinetic_model: str, reversible_enabled: bool) -> str:
+    """
+    生成动力学显示文案（基础模型 + 可逆选项）。
+
+    兼容历史结果：若 kinetic_model=reversible，则按“幂律 + 可逆”展示。
+    """
+    model_value = str(kinetic_model).strip()
+    if model_value == KINETIC_MODEL_REVERSIBLE:
+        model_value = KINETIC_MODEL_POWER_LAW
+        reversible_enabled = True
+
+    base_text = map_label(KINETIC_MODEL_LABELS, model_value)
+    if bool(reversible_enabled):
+        return f"{base_text} + 可逆反应"
+    return base_text
+
+
 def format_plot_unit(unit_text: str) -> str:
     """
     将单位字符串转换为 Matplotlib 友好的 mathtext 形式。

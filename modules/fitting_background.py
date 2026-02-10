@@ -42,6 +42,8 @@ from .constants import (
     PERCENTAGE_RESIDUAL_EPSILON_FACTOR,
     PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
     PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
+    KINETIC_MODEL_POWER_LAW,
+    KINETIC_MODEL_REVERSIBLE,
     REACTOR_TYPE_CSTR,
     REACTOR_TYPE_PFR,
 )
@@ -356,6 +358,10 @@ def _run_fitting_job(
     atol = job_inputs["atol"]
     reactor_type = job_inputs["reactor_type"]
     kinetic_model = job_inputs["kinetic_model"]
+    reversible_enabled = bool(job_inputs.get("reversible_enabled", False))
+    if str(kinetic_model).strip() == KINETIC_MODEL_REVERSIBLE:
+        kinetic_model = KINETIC_MODEL_POWER_LAW
+        reversible_enabled = True
     pfr_flow_model = str(
         job_inputs.get("pfr_flow_model", PFR_FLOW_MODEL_LIQUID_CONST_VDOT)
     ).strip()
@@ -840,6 +846,7 @@ def _run_fitting_job(
                 atol,
                 reactor_type,
                 kinetic_model,
+                reversible_enabled,
                 pfr_flow_model,
                 p["K0_ads"],
                 p["Ea_K"],
@@ -997,6 +1004,7 @@ def _run_fitting_job(
             "max_step_fraction": float(max_step_fraction),
             "reactor_type": reactor_type,
             "kinetic_model": kinetic_model,
+            "reversible_enabled": bool(reversible_enabled),
             "pfr_flow_model": str(pfr_flow_model),
             # 向后兼容的键名
             "initial_cost": float(initial_cost),
@@ -1188,6 +1196,7 @@ def _run_fitting_job(
         "max_step_fraction": float(max_step_fraction),
         "reactor_type": reactor_type,
         "kinetic_model": kinetic_model,
+        "reversible_enabled": bool(reversible_enabled),
         "pfr_flow_model": str(pfr_flow_model),
         # 向后兼容的键名
         "initial_cost": float(initial_cost),

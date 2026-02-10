@@ -9,13 +9,13 @@ from modules.config_state import _warn_once
 from modules.data_utils import _build_default_nu_table, _clean_species_names
 from modules.constants import (
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
-    KINETIC_MODEL_REVERSIBLE,
 )
 
 
 def render_model_tab(tab_model, ctx: dict) -> dict:
     get_cfg = ctx["get_cfg"]
     kinetic_model = ctx["kinetic_model"]
+    reversible_enabled = bool(ctx.get("reversible_enabled", False))
     # ---------------- 选项卡 1：模型 ----------------
     with tab_model:
         col_def1, col_def2 = st.columns([2, 1])
@@ -148,69 +148,92 @@ def render_model_tab(tab_model, ctx: dict) -> dict:
             )
 
         # --- L-H 参数 ---
-        K0_ads, Ea_K_J_mol, fit_K0_ads_flags, fit_Ea_K_flags = None, None, None, None
-        m_inhibition, fit_m_flags = None, None
+        K0_ads_cfg = get_cfg("K0_ads", None)
+        K0_ads = (
+            np.ones(len(species_names), dtype=float)
+            if K0_ads_cfg is None
+            else np.asarray(K0_ads_cfg, dtype=float)
+        )
+        if K0_ads.shape != (len(species_names),):
+            fixed = np.zeros(len(species_names), dtype=float)
+            n_fill = min(len(species_names), int(K0_ads.size))
+            fixed[:n_fill] = np.ravel(K0_ads)[:n_fill]
+            K0_ads = fixed
+
+        Ea_K_cfg = get_cfg("Ea_K_J_mol", None)
+        Ea_K_J_mol = (
+            np.full(len(species_names), -2e4, dtype=float)
+            if Ea_K_cfg is None
+            else np.asarray(Ea_K_cfg, dtype=float)
+        )
+        if Ea_K_J_mol.shape != (len(species_names),):
+            fixed = np.zeros(len(species_names), dtype=float)
+            n_fill = min(len(species_names), int(Ea_K_J_mol.size))
+            fixed[:n_fill] = np.ravel(Ea_K_J_mol)[:n_fill]
+            Ea_K_J_mol = fixed
+
+        fit_K0_ads_cfg = get_cfg("fit_K0_ads_flags", None)
+        fit_K0_ads_flags = (
+            np.full(len(species_names), False, dtype=bool)
+            if fit_K0_ads_cfg is None
+            else np.asarray(fit_K0_ads_cfg, dtype=bool)
+        )
+        if fit_K0_ads_flags.shape != (len(species_names),):
+            fit_K0_ads_flags = np.full(len(species_names), False, dtype=bool)
+
+        fit_Ea_K_cfg = get_cfg("fit_Ea_K_flags", None)
+        fit_Ea_K_flags = (
+            np.full(len(species_names), False, dtype=bool)
+            if fit_Ea_K_cfg is None
+            else np.asarray(fit_Ea_K_cfg, dtype=bool)
+        )
+        if fit_Ea_K_flags.shape != (len(species_names),):
+            fit_Ea_K_flags = np.full(len(species_names), False, dtype=bool)
+
+        m_cfg = get_cfg("m_inhibition", None)
+        m_inhibition = (
+            np.ones(n_reactions, dtype=float)
+            if m_cfg is None
+            else np.asarray(m_cfg, dtype=float)
+        )
+        if m_inhibition.shape != (n_reactions,):
+            fixed = np.ones(n_reactions, dtype=float)
+            n_fill = min(n_reactions, int(m_inhibition.size))
+            fixed[:n_fill] = np.ravel(m_inhibition)[:n_fill]
+            m_inhibition = fixed
+
+        fit_m_cfg = get_cfg("fit_m_flags", None)
+        fit_m_flags = (
+            np.full(n_reactions, False, dtype=bool)
+            if fit_m_cfg is None
+            else np.asarray(fit_m_cfg, dtype=bool)
+        )
+        if fit_m_flags.shape != (n_reactions,):
+            fit_m_flags = np.full(n_reactions, False, dtype=bool)
 
         if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
             with st.expander("Langmuir-Hinshelwood (L-H) 参数", expanded=True):
                 col_lh1, col_lh2 = st.columns(2)
                 with col_lh1:
                     st.caption("吸附常数 K (每物种)")
-                    # 默认值
-                    K0_ads_cfg = get_cfg("K0_ads", None)
-                    if K0_ads_cfg is None:
-                        K0_def = np.ones(len(species_names), dtype=float)
-                    else:
-                        K0_def = np.asarray(K0_ads_cfg, dtype=float)
-
-                    Ea_K_cfg = get_cfg("Ea_K_J_mol", None)
-                    if Ea_K_cfg is None:
-                        EaK_def = np.full(len(species_names), -2e4, dtype=float)
-                    else:
-                        EaK_def = np.asarray(Ea_K_cfg, dtype=float)
-
-                    fit_K0_ads_cfg = get_cfg("fit_K0_ads_flags", None)
-                    if fit_K0_ads_cfg is None:
-                        fit_K0_def = np.full(len(species_names), False, dtype=bool)
-                    else:
-                        fit_K0_def = np.asarray(fit_K0_ads_cfg, dtype=bool)
-
-                    fit_Ea_K_cfg = get_cfg("fit_Ea_K_flags", None)
-                    if fit_Ea_K_cfg is None:
-                        fit_EaK_def = np.full(len(species_names), False, dtype=bool)
-                    else:
-                        fit_EaK_def = np.asarray(fit_Ea_K_cfg, dtype=bool)
-
                     K0_ads, Ea_K_J_mol, fit_K0_ads_flags, fit_Ea_K_flags = (
                         ui_comp.render_param_table(
                             f"lh_ads_{len(species_names)}",
                             species_names,
                             "K₀,ads",
-                            K0_def,
+                            K0_ads,
                             "吸附常数指前因子",
                             "Eₐ,K [J/mol]",
-                            EaK_def,
+                            Ea_K_J_mol,
                             "吸附热",
-                            fit_K0_def,
-                            fit_EaK_def,
+                            fit_K0_ads_flags,
+                            fit_Ea_K_flags,
                         )
                     )
                 with col_lh2:
                     st.caption("抑制指数 m (每反应)")
-                    m_cfg = get_cfg("m_inhibition", None)
-                    if m_cfg is None:
-                        m_def = np.ones(n_reactions, dtype=float)
-                    else:
-                        m_def = np.asarray(m_cfg, dtype=float)
-
-                    fit_m_cfg = get_cfg("fit_m_flags", None)
-                    if fit_m_cfg is None:
-                        fit_m_def = np.full(n_reactions, False, dtype=bool)
-                    else:
-                        fit_m_def = np.asarray(fit_m_cfg, dtype=bool)
-
                     m_df = pd.DataFrame(
-                        {"m": m_def, "Fit_m": fit_m_def},
+                        {"m": m_inhibition, "Fit_m": fit_m_flags},
                         index=[f"R{i+1}" for i in range(n_reactions)],
                     )
                     m_editor = st.data_editor(
@@ -223,99 +246,117 @@ def render_model_tab(tab_model, ctx: dict) -> dict:
                     m_inhibition = m_editor["m"].to_numpy(dtype=float)
                     fit_m_flags = m_editor["Fit_m"].to_numpy(dtype=bool)
         else:
-            # 为兼容旧版本，初始化为空
-            K0_ads = np.zeros(len(species_names))
-            Ea_K_J_mol = np.zeros(len(species_names))
             fit_K0_ads_flags = np.zeros(len(species_names), dtype=bool)
             fit_Ea_K_flags = np.zeros(len(species_names), dtype=bool)
-            m_inhibition = np.ones(n_reactions)
             fit_m_flags = np.zeros(n_reactions, dtype=bool)
 
         # --- 可逆反应参数 ---
-        k0_rev, ea_rev_J_mol, fit_k0_rev_flags, fit_ea_rev_flags = (
-            None,
-            None,
-            None,
-            None,
+        k0_rev_cfg = get_cfg("k0_rev", None)
+        k0_rev = (
+            np.full(n_reactions, 1e2, dtype=float)
+            if k0_rev_cfg is None
+            else np.asarray(k0_rev_cfg, dtype=float)
         )
-        order_rev, fit_order_rev_flags_matrix = None, None
+        if k0_rev.shape != (n_reactions,):
+            fixed = np.zeros(n_reactions, dtype=float)
+            n_fill = min(n_reactions, int(k0_rev.size))
+            fixed[:n_fill] = np.ravel(k0_rev)[:n_fill]
+            k0_rev = fixed
 
-        if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+        ea_rev_cfg = get_cfg("ea_rev_J_mol", None)
+        ea_rev_J_mol = (
+            np.full(n_reactions, 9e4, dtype=float)
+            if ea_rev_cfg is None
+            else np.asarray(ea_rev_cfg, dtype=float)
+        )
+        if ea_rev_J_mol.shape != (n_reactions,):
+            fixed = np.zeros(n_reactions, dtype=float)
+            n_fill = min(n_reactions, int(ea_rev_J_mol.size))
+            fixed[:n_fill] = np.ravel(ea_rev_J_mol)[:n_fill]
+            ea_rev_J_mol = fixed
+
+        fit_k0_rev_cfg = get_cfg("fit_k0_rev_flags", None)
+        fit_k0_rev_flags = (
+            np.full(n_reactions, False, dtype=bool)
+            if fit_k0_rev_cfg is None
+            else np.asarray(fit_k0_rev_cfg, dtype=bool)
+        )
+        if fit_k0_rev_flags.shape != (n_reactions,):
+            fit_k0_rev_flags = np.full(n_reactions, False, dtype=bool)
+
+        fit_ea_rev_cfg = get_cfg("fit_ea_rev_flags", None)
+        fit_ea_rev_flags = (
+            np.full(n_reactions, False, dtype=bool)
+            if fit_ea_rev_cfg is None
+            else np.asarray(fit_ea_rev_cfg, dtype=bool)
+        )
+        if fit_ea_rev_flags.shape != (n_reactions,):
+            fit_ea_rev_flags = np.full(n_reactions, False, dtype=bool)
+
+        order_rev_cfg = get_cfg("order_rev", None)
+        if order_rev_cfg is None:
+            order_rev = np.zeros((n_reactions, len(species_names)), dtype=float)
+        else:
+            order_rev = np.asarray(order_rev_cfg, dtype=float)
+            if order_rev.shape != (n_reactions, len(species_names)):
+                fixed = np.zeros((n_reactions, len(species_names)), dtype=float)
+                n_rows = min(n_reactions, order_rev.shape[0] if order_rev.ndim >= 1 else 0)
+                n_cols = min(
+                    len(species_names),
+                    order_rev.shape[1] if order_rev.ndim >= 2 else 0,
+                )
+                if order_rev.ndim >= 2:
+                    fixed[:n_rows, :n_cols] = order_rev[:n_rows, :n_cols]
+                order_rev = fixed
+
+        fit_order_rev_cfg = get_cfg("fit_order_rev_flags_matrix", None)
+        if fit_order_rev_cfg is None:
+            fit_order_rev_flags_matrix = np.zeros(
+                (n_reactions, len(species_names)), dtype=bool
+            )
+        else:
+            fit_order_rev_flags_matrix = np.asarray(fit_order_rev_cfg, dtype=bool)
+            if fit_order_rev_flags_matrix.shape != (n_reactions, len(species_names)):
+                fit_order_rev_flags_matrix = np.zeros(
+                    (n_reactions, len(species_names)), dtype=bool
+                )
+
+        if reversible_enabled:
             with st.expander("可逆反应 (逆反应) 参数", expanded=True):
                 col_rev1, col_rev2 = st.columns(2)
                 with col_rev1:
                     st.caption("逆反应 k₀⁻ 与 Eₐ⁻")
-                    k0_rev_cfg = get_cfg("k0_rev", None)
-                    if k0_rev_cfg is None:
-                        k0r_def = np.full(n_reactions, 1e2, dtype=float)
-                    else:
-                        k0r_def = np.asarray(k0_rev_cfg, dtype=float)
-
-                    ea_rev_cfg = get_cfg("ea_rev_J_mol", None)
-                    if ea_rev_cfg is None:
-                        ear_def = np.full(n_reactions, 9e4, dtype=float)
-                    else:
-                        ear_def = np.asarray(ea_rev_cfg, dtype=float)
-
-                    fit_k0_rev_cfg = get_cfg("fit_k0_rev_flags", None)
-                    if fit_k0_rev_cfg is None:
-                        fit_k0r_def = np.full(n_reactions, False, dtype=bool)
-                    else:
-                        fit_k0r_def = np.asarray(fit_k0_rev_cfg, dtype=bool)
-
-                    fit_ea_rev_cfg = get_cfg("fit_ea_rev_flags", None)
-                    if fit_ea_rev_cfg is None:
-                        fit_ear_def = np.full(n_reactions, False, dtype=bool)
-                    else:
-                        fit_ear_def = np.asarray(fit_ea_rev_cfg, dtype=bool)
-
                     k0_rev, ea_rev_J_mol, fit_k0_rev_flags, fit_ea_rev_flags = (
                         ui_comp.render_param_table(
                             f"rev_params_{n_reactions}",
                             [f"R{i+1}" for i in range(n_reactions)],
                             "k₀⁻",
-                            k0r_def,
+                            k0_rev,
                             "逆反应指前因子",
                             "Eₐ⁻ [J/mol]",
-                            ear_def,
+                            ea_rev_J_mol,
                             "逆反应活化能",
-                            fit_k0r_def,
-                            fit_ear_def,
+                            fit_k0_rev_flags,
+                            fit_ea_rev_flags,
                         )
                     )
                 with col_rev2:
                     st.caption("逆反应级数 n⁻")
-                    order_rev_cfg = get_cfg("order_rev", None)
-                    ordr_def = (
-                        None
-                        if order_rev_cfg is None
-                        else np.asarray(order_rev_cfg, dtype=float)
-                    )
-
-                    fit_order_rev_cfg = get_cfg("fit_order_rev_flags_matrix", None)
-                    fit_ordr_def = (
-                        None
-                        if fit_order_rev_cfg is None
-                        else np.asarray(fit_order_rev_cfg, dtype=bool)
-                    )
-
                     order_rev, fit_order_rev_flags_matrix = ui_comp.render_order_table(
                         f"rev_orders_{n_reactions}",
                         [f"R{i+1}" for i in range(n_reactions)],
                         species_names,
-                        ordr_def,
-                        fit_ordr_def,
+                        order_rev,
+                        fit_order_rev_flags_matrix,
                     )
         else:
-            k0_rev = np.zeros(n_reactions)
-            ea_rev_J_mol = np.zeros(n_reactions)
             fit_k0_rev_flags = np.zeros(n_reactions, dtype=bool)
             fit_ea_rev_flags = np.zeros(n_reactions, dtype=bool)
-            order_rev = np.zeros((n_reactions, len(species_names)))
             fit_order_rev_flags_matrix = np.zeros(
                 (n_reactions, len(species_names)), dtype=bool
             )
     return {
+        "reversible_enabled": bool(reversible_enabled),
         "species_text": species_text,
         "n_reactions": n_reactions,
         "species_names": species_names,

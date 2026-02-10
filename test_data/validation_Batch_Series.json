@@ -2,6 +2,7 @@
   "version": "1.0",
   "reactor_type": "BSTR",
   "kinetic_model": "power_law",
+  "reversible_enabled": false,
   "solver_method": "RK45",
   "rtol": 9.999999999992654e-07,
   "atol": 1e-09,

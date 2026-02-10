@@ -59,7 +59,7 @@
 
 - `反应器`：`PFR / CSTR / BSTR`
 - `PFR 流动模型`（仅 PFR 显示）：`液相(恒定 vdot)` / `气相(理想气体、等温、恒压)`
-- `动力学`：`power_law / langmuir_hinshelwood / reversible`
+- `动力学`：`power_law / langmuir_hinshelwood`，并可通过 `reversible_enabled` 开启可逆扩展
 - `Method`（ODE 求解器）：`LSODA（默认推荐） / RK45 / BDF / Radau`
 - `rtol`、`atol`：ODE 积分容差（影响能否算出来 + 速度）
 - `⚙️ 配置管理 (导入/导出/重置)`：本次文档范围不展开（如需也可扩写到用户指南）
@@ -73,7 +73,7 @@
   - `k₀` 与 `Eₐ [J/mol]`（按反应：R1、R2…）
   - `反应级数 n`（矩阵：行=反应，列=物种）
   - 若动力学为 `langmuir_hinshelwood`：`K₀,ads`、`Eₐ,K [J/mol]`（按物种）与 `m`（按反应）
-  - 若动力学为 `reversible`：逆反应 `k₀⁻`、`Eₐ⁻ [J/mol]` 与逆反应级数 `n⁻`
+  - 若启用 `reversible_enabled`：逆反应 `k₀⁻`、`Eₐ⁻ [J/mol]` 与逆反应级数 `n⁻`
 
 > 关键：**是否参与拟合**由复选框决定（例如 `拟合 k₀`、`拟合 Eₐ`、`拟合 <物种>`）。未勾选的参数会保持为你输入的初值。
 
@@ -121,7 +121,7 @@
 ### 2.2 对 L-H / 可逆模型的建议
 
 - `langmuir_hinshelwood`：先把幂律部分（`k₀/Eₐ/n`）跑稳，再逐步放开 `K₀,ads`、`Eₐ,K`、`m`
-- `reversible`：先只拟合正向，再逐步放开逆向 `k₀⁻/Eₐ⁻/n⁻`
+- `reversible_enabled=true`：先只拟合正向，再逐步放开逆向 `k₀⁻/Eₐ⁻/n⁻`
 
 ---
 
@@ -192,7 +192,7 @@
 | 你要改什么 | UI 字段名（必须一致） | 在哪里改 | 单位/备注 |
 |---|---|---|---|
 | 反应器类型 | `反应器` | 侧边栏 | `PFR/CSTR/BSTR` |
-| 动力学模型 | `动力学` | 侧边栏 | `power_law / langmuir_hinshelwood / reversible` |
+| 动力学模型 | `动力学 + 可逆开关` | 侧边栏 | `power_law / langmuir_hinshelwood` + `reversible_enabled` |
 | 求解器 | `Method` | 侧边栏 | `LSODA（默认）/RK45/BDF/Radau` |
 | ODE 容差 | `rtol`、`atol` | 侧边栏 | 越小越精细但可能更慢/更易失败 |
 | 正向 `k₀/Eₐ` 初值 + 拟合勾选 | `k₀`、`Eₐ [J/mol]`、`拟合 k₀`、`拟合 Eₐ` | 「① 反应与模型」 | `Eₐ` 单位 J/mol |

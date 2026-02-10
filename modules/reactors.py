@@ -20,11 +20,11 @@ from .constants import (
     EPSILON_FLOW_RATE,
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
     KINETIC_MODEL_POWER_LAW,
-    KINETIC_MODEL_REVERSIBLE,
     R_GAS_J_MOL_K,
 )
 from .kinetics import (
     calc_rate_vector_langmuir_hinshelwood,
+    calc_rate_vector_langmuir_hinshelwood_reversible,
     calc_rate_vector_power_law,
     calc_rate_vector_reversible,
     safe_nonnegative,
@@ -34,6 +34,7 @@ from .kinetics import (
 def _precompute_arrhenius(
     temperature_K: float,
     kinetic_model: str,
+    reversible_enabled: bool,
     k0: np.ndarray,
     ea_J_mol: np.ndarray,
     K0_ads: np.ndarray | None = None,
@@ -55,7 +56,7 @@ def _precompute_arrhenius(
         if K0_ads is not None and Ea_K_J_mol is not None:
             pre["K_ads_T"] = K0_ads * np.exp(-Ea_K_J_mol / RT)
 
-    if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+    if reversible_enabled:
         if k0_rev is not None and ea_rev_J_mol is not None:
             pre["k_rev_T"] = k0_rev * np.exp(-ea_rev_J_mol / RT)
 
@@ -66,6 +67,7 @@ def _dispatch_rate_vector(
     conc_mol_m3: np.ndarray,
     temperature_K: float,
     kinetic_model: str,
+    reversible_enabled: bool,
     k0: np.ndarray,
     ea_J_mol: np.ndarray,
     reaction_order_matrix: np.ndarray,
@@ -83,7 +85,7 @@ def _dispatch_rate_vector(
     """
     pre = precomputed or {}
 
-    if kinetic_model == KINETIC_MODEL_POWER_LAW:
+    if kinetic_model == KINETIC_MODEL_POWER_LAW and (not reversible_enabled):
         return calc_rate_vector_power_law(
             conc_mol_m3=conc_mol_m3,
             temperature_K=temperature_K,
@@ -92,24 +94,7 @@ def _dispatch_rate_vector(
             reaction_order_matrix=reaction_order_matrix,
             k_T_precomputed=pre.get("k_T"),
         )
-    if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-        return calc_rate_vector_langmuir_hinshelwood(
-            conc_mol_m3=conc_mol_m3,
-            temperature_K=temperature_K,
-            k0=k0,
-            ea_J_mol=ea_J_mol,
-            reaction_order_matrix=reaction_order_matrix,
-            K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
-            Ea_K_J_mol=(
-                Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
-            ),
-            m_inhibition=(
-                m_inhibition if m_inhibition is not None else np.ones(k0.size)
-            ),
-            k_T_precomputed=pre.get("k_T"),
-            K_ads_T_precomputed=pre.get("K_ads_T"),
-        )
-    if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+    if kinetic_model == KINETIC_MODEL_POWER_LAW and reversible_enabled:
         return calc_rate_vector_reversible(
             conc_mol_m3=conc_mol_m3,
             temperature_K=temperature_K,
@@ -127,6 +112,54 @@ def _dispatch_rate_vector(
             ),
             k_fwd_T_precomputed=pre.get("k_T"),
             k_rev_T_precomputed=pre.get("k_rev_T"),
+        )
+
+    if (
+        kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD
+        and (not reversible_enabled)
+    ):
+        return calc_rate_vector_langmuir_hinshelwood(
+            conc_mol_m3=conc_mol_m3,
+            temperature_K=temperature_K,
+            k0=k0,
+            ea_J_mol=ea_J_mol,
+            reaction_order_matrix=reaction_order_matrix,
+            K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+            Ea_K_J_mol=(
+                Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+            ),
+            m_inhibition=(
+                m_inhibition if m_inhibition is not None else np.ones(k0.size)
+            ),
+            k_T_precomputed=pre.get("k_T"),
+            K_ads_T_precomputed=pre.get("K_ads_T"),
+        )
+    if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD and reversible_enabled:
+        return calc_rate_vector_langmuir_hinshelwood_reversible(
+            conc_mol_m3=conc_mol_m3,
+            temperature_K=temperature_K,
+            k0_fwd=k0,
+            ea_fwd_J_mol=ea_J_mol,
+            order_fwd_matrix=reaction_order_matrix,
+            k0_rev=k0_rev if k0_rev is not None else np.zeros(k0.size),
+            ea_rev_J_mol=(
+                ea_rev_J_mol if ea_rev_J_mol is not None else np.zeros(k0.size)
+            ),
+            order_rev_matrix=(
+                order_rev_matrix
+                if order_rev_matrix is not None
+                else np.zeros_like(reaction_order_matrix)
+            ),
+            K0_ads=K0_ads if K0_ads is not None else np.zeros(conc_mol_m3.size),
+            Ea_K_J_mol=(
+                Ea_K_J_mol if Ea_K_J_mol is not None else np.zeros(conc_mol_m3.size)
+            ),
+            m_inhibition=(
+                m_inhibition if m_inhibition is not None else np.ones(k0.size)
+            ),
+            k_fwd_T_precomputed=pre.get("k_T"),
+            k_rev_T_precomputed=pre.get("k_rev_T"),
+            K_ads_T_precomputed=pre.get("K_ads_T"),
         )
     # 默认回退到 power_law
     return calc_rate_vector_power_law(
@@ -170,6 +203,7 @@ def integrate_pfr_molar_flows(
     rtol: float,
     atol: float,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -223,6 +257,7 @@ def integrate_pfr_molar_flows(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -247,6 +282,7 @@ def integrate_pfr_molar_flows(
             conc_mol_m3,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -301,6 +337,7 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
     rtol: float,
     atol: float,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -369,6 +406,7 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -394,6 +432,7 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
             conc_mol_m3,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -445,6 +484,7 @@ def integrate_batch_reactor(
     rtol: float,
     atol: float,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -495,6 +535,7 @@ def integrate_batch_reactor(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -517,6 +558,7 @@ def integrate_batch_reactor(
             conc_safe,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -568,6 +610,7 @@ def solve_cstr_steady_state_concentrations(
     ea_J_mol: np.ndarray,
     reaction_order_matrix: np.ndarray,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
     m_inhibition: np.ndarray | None = None,
@@ -647,6 +690,7 @@ def solve_cstr_steady_state_concentrations(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -661,6 +705,7 @@ def solve_cstr_steady_state_concentrations(
             conc_safe,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -730,6 +775,7 @@ def integrate_cstr_profile(
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -845,6 +891,7 @@ def integrate_cstr_profile(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -867,6 +914,7 @@ def integrate_cstr_profile(
             conc_safe,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -943,6 +991,7 @@ def integrate_pfr_profile(
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -1040,6 +1089,7 @@ def integrate_pfr_profile(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -1064,6 +1114,7 @@ def integrate_pfr_profile(
             conc_mol_m3,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -1137,6 +1188,7 @@ def integrate_pfr_profile_gas_ideal_const_p(
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -1243,6 +1295,7 @@ def integrate_pfr_profile_gas_ideal_const_p(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -1268,6 +1321,7 @@ def integrate_pfr_profile_gas_ideal_const_p(
             conc_mol_m3,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -1338,6 +1392,7 @@ def integrate_batch_profile(
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
+    reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
     K0_ads: np.ndarray | None = None,
     Ea_K_J_mol: np.ndarray | None = None,
@@ -1418,6 +1473,7 @@ def integrate_batch_profile(
     _pre = _precompute_arrhenius(
         temperature_K,
         kinetic_model,
+        reversible_enabled,
         k0,
         ea_J_mol,
         K0_ads,
@@ -1440,6 +1496,7 @@ def integrate_batch_profile(
             conc_safe,
             temperature_K,
             kinetic_model,
+            reversible_enabled,
             k0,
             ea_J_mol,
             reaction_order_matrix,
@@ -1496,3 +1553,4 @@ def integrate_batch_profile(
         )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
+

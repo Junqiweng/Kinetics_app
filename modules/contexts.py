@@ -19,12 +19,14 @@ class SidebarState(TypedDict):
     reactor_type: str
     pfr_flow_model: str
     kinetic_model: str
+    reversible_enabled: bool
     solver_method: str
     rtol: float
     atol: float
 
 
 class ModelState(TypedDict, total=False):
+    reversible_enabled: bool
     species_text: str
     n_reactions: int
     species_names: list[str]
@@ -68,6 +70,7 @@ class BaseContext(TypedDict, total=False):
     reactor_type: str
     pfr_flow_model: str
     kinetic_model: str
+    reversible_enabled: bool
     solver_method: str
     rtol: float
     atol: float

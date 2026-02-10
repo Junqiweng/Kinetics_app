@@ -17,7 +17,7 @@
 - [A. 维度与索引约定（先读这段）](#a-维度与索引约定先读这段)
 - [B. 幂律（power_law）](#b-幂律power_law)
 - [C. Langmuir–Hinshelwood（langmuir_hinshelwood）](#c-langmuirhinshelwoodlangmuir_hinshelwood)
-- [D. 可逆反应（reversible）](#d-可逆反应reversible)
+- [D. 可逆选项（reversible_enabled）](#d-可逆选项reversible_enabled)
 - [E. 反应器方程（与 App 一致）](#e-反应器方程与-app-一致)
 - [F. 参数修改指南（UI 操作）](#f-参数修改指南ui-操作)
 - [G. 参数速查表（含默认边界与常见坑）](#g-参数速查表含默认边界与常见坑)
@@ -105,7 +105,7 @@ $$K_i(T)=K_{0,i}\exp\left(-\frac{E_{a,K,i}}{RT}\right)$$
 
 ---
 
-## D. 可逆反应（reversible）
+## D. 可逆选项（reversible_enabled）
 
 ### D1. 速率表达式
 
@@ -115,8 +115,9 @@ $$k_j^{\pm}(T)=k_{0,j}^{\pm}\exp\left(-\frac{E_{a,j}^{\pm}}{RT}\right)$$
 
 App 的 UI 设计原则：
 
+- 可逆是“基础模型（幂律 / L-H）”上的扩展开关，不再是独立模型
 - 正向与逆向参数**分开输入**、**分开勾选是否拟合**
-- 逆向参数区位于「① 反应与模型」的 `可逆反应 (逆反应) 参数` 展开框
+- 逆向参数区位于「① 反应与模型」的 `可逆反应 (逆反应) 参数` 展开框（需先启用可逆开关）
 
 ### D2. 什么时候需要开逆反应（经验判据）
 
@@ -230,7 +231,7 @@ $$\frac{dC_i}{dt} = \sum_j \nu_{i,j} r_j$$
 - `Eₐ,K [J/mol]` 允许为负；拟合前在「③」设置 `Ea_K Min/Max`
 - `m` 先固定（例如 1），待幂律部分拟合稳定后再放开
 
-### F4. 可逆参数区（仅当动力学为 `reversible`）
+### F4. 可逆参数区（仅当启用 `reversible_enabled`）
 
 位置：`① 反应与模型` → `可逆反应 (逆反应) 参数`
 

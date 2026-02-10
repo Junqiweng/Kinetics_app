@@ -48,6 +48,12 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         st.session_state["cfg_pfr_flow_model"] = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
     if kinetic_model_cfg in KINETIC_MODELS:
         st.session_state["cfg_kinetic_model"] = kinetic_model_cfg
+    if "reversible_enabled" in config:
+        st.session_state["cfg_reversible_enabled"] = bool(
+            config.get("reversible_enabled", False)
+        )
+    else:
+        st.session_state["cfg_reversible_enabled"] = False
     if solver_method_cfg in ["LSODA", "RK45", "BDF", "Radau"]:
         st.session_state["cfg_solver_method"] = solver_method_cfg
 
@@ -98,6 +104,12 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         "K0_ads_max",
         "Ea_K_min",
         "Ea_K_max",
+        "k0_rev_min",
+        "k0_rev_max",
+        "ea_rev_min_J_mol",
+        "ea_rev_max_J_mol",
+        "order_rev_min",
+        "order_rev_max",
         "diff_step_rel",
         "max_nfev",
         "use_x_scale_jac",

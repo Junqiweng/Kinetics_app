@@ -47,6 +47,7 @@ from .constants import (
     PERSIST_DIR_NAME,
     KINETIC_MODELS,
     KINETIC_MODEL_POWER_LAW,
+    KINETIC_MODEL_REVERSIBLE,
     OUTPUT_MODE_FOUT,
     OUTPUT_MODES_BATCH,
     OUTPUT_MODES_FLOW,
@@ -120,11 +121,33 @@ def _convert_from_serializable(obj: Any) -> Any:
     return obj
 
 
+def _normalize_config_kinetic_schema(config: dict) -> dict:
+    """
+    规范化动力学配置结构（兼容旧版 reversible 模型）。
+
+    规则：
+    - 旧版 kinetic_model="reversible" -> kinetic_model="power_law" + reversible_enabled=True
+    - 缺失 reversible_enabled -> 补 False
+    """
+    if not isinstance(config, dict):
+        return config
+
+    kinetic_model = str(config.get("kinetic_model", "")).strip()
+    if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+        config["kinetic_model"] = KINETIC_MODEL_POWER_LAW
+        config["reversible_enabled"] = True
+    elif "reversible_enabled" not in config:
+        config["reversible_enabled"] = False
+
+    return config
+
+
 def collect_config(
     # --- 基础设置 ---
     reactor_type: str,
     pfr_flow_model: str,
     kinetic_model: str,
+    reversible_enabled: bool,
     solver_method: str,
     rtol: float,
     atol: float,
@@ -205,6 +228,7 @@ def collect_config(
         "pfr_flow_model": str(pfr_flow_model).strip()
         or PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": kinetic_model,
+        "reversible_enabled": bool(reversible_enabled),
         "solver_method": solver_method,
         "rtol": rtol,
         "atol": atol,
@@ -290,7 +314,8 @@ def import_config_from_json(json_str: str) -> dict:
     从 JSON 字符串导入配置字典。
     """
     config = json.loads(json_str)
-    return _convert_from_serializable(config)
+    config = _convert_from_serializable(config)
+    return _normalize_config_kinetic_schema(config)
 
 
 def auto_save_config(config: dict, session_id: str | None = None) -> tuple[bool, str]:
@@ -322,7 +347,9 @@ def auto_load_config(session_id: str | None = None) -> tuple[dict | None, str]:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-        return _convert_from_serializable(config), "OK"
+        config = _convert_from_serializable(config)
+        config = _normalize_config_kinetic_schema(config)
+        return config, "OK"
     except Exception as exc:
         return None, f"自动加载失败: {exc}"
 
@@ -354,6 +381,7 @@ def get_default_config() -> dict:
         "reactor_type": REACTOR_TYPE_PFR,
         "pfr_flow_model": PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": KINETIC_MODEL_POWER_LAW,
+        "reversible_enabled": False,
         "solver_method": "LSODA",
         "rtol": DEFAULT_RTOL,
         "atol": DEFAULT_ATOL,
@@ -396,6 +424,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
     返回:
         (is_valid, error_message)
     """
+    _normalize_config_kinetic_schema(config)
 
     def _parse_species_text(species_text: str) -> list[str]:
         parts = [p.strip() for p in str(species_text).split(",")]
@@ -551,7 +580,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if not ok:
         return ok, msg
 
-    for bool_key in ["use_x_scale_jac", "use_multi_start"]:
+    for bool_key in ["use_x_scale_jac", "use_multi_start", "reversible_enabled"]:
         if bool_key in config and not isinstance(config[bool_key], (bool, np.bool_)):
             return False, f"{bool_key} 必须为布尔值（true/false）"
 
@@ -667,7 +696,8 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if not ok:
             return ok, msg
 
-    if config["kinetic_model"] == "reversible":
+    reversible_enabled = bool(config.get("reversible_enabled", False))
+    if reversible_enabled:
         ok, msg = _check_array_shape("k0_rev", (n_reactions,), float)
         if not ok:
             return ok, msg
@@ -746,7 +776,7 @@ def validate_config(config: dict) -> tuple[bool, str]:
             return False, f"ea_min_J_mol ({ea_min}) 必须小于 ea_max_J_mol ({ea_max})"
 
     # 验证拟合参数边界（针对可逆反应模型）
-    if config["kinetic_model"] == "reversible":
+    if reversible_enabled:
         if "k0_rev_min" in config and "k0_rev_max" in config:
             try:
                 k0_rev_min = float(config["k0_rev_min"])

@@ -29,6 +29,7 @@ from modules.constants import (
     EPSILON_FLOW_RATE,
     R_GAS_J_MOL_K,
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
+    KINETIC_MODEL_POWER_LAW,
     KINETIC_MODEL_REVERSIBLE,
     OUTPUT_MODE_COUT,
     OUTPUT_MODE_FOUT,
@@ -52,6 +53,7 @@ from modules.constants import (
 def _compute_reactor_profile(
     reactor_type: str,
     kinetic_model: str,
+    reversible_enabled: bool,
     pfr_flow_model: str,
     output_mode: str,
     row_data_dict: dict,
@@ -107,6 +109,7 @@ def _compute_reactor_profile(
                     atol=atol,
                     n_points=n_points,
                     kinetic_model=kinetic_model,
+                    reversible_enabled=bool(reversible_enabled),
                     max_step_fraction=max_step_fraction,
                     K0_ads=fitted_params.get("K0_ads", None),
                     Ea_K_J_mol=fitted_params.get("Ea_K", None),
@@ -142,6 +145,7 @@ def _compute_reactor_profile(
                 atol=atol,
                 n_points=n_points,
                 kinetic_model=kinetic_model,
+                reversible_enabled=bool(reversible_enabled),
                 max_step_fraction=max_step_fraction,
                 K0_ads=fitted_params.get("K0_ads", None),
                 Ea_K_J_mol=fitted_params.get("Ea_K", None),
@@ -188,6 +192,7 @@ def _compute_reactor_profile(
             atol=atol,
             n_points=n_points,
             kinetic_model=kinetic_model,
+            reversible_enabled=bool(reversible_enabled),
             max_step_fraction=max_step_fraction,
             K0_ads=fitted_params.get("K0_ads", None),
             Ea_K_J_mol=fitted_params.get("Ea_K", None),
@@ -225,6 +230,7 @@ def _compute_reactor_profile(
             atol=atol,
             n_points=n_points,
             kinetic_model=kinetic_model,
+            reversible_enabled=bool(reversible_enabled),
             max_step_fraction=max_step_fraction,
             K0_ads=fitted_params.get("K0_ads", None),
             Ea_K_J_mol=fitted_params.get("Ea_K", None),
@@ -260,6 +266,7 @@ def render_fit_results(
     atol = ctx["atol"]
     reactor_type = ctx["reactor_type"]
     kinetic_model = ctx["kinetic_model"]
+    reversible_enabled = bool(ctx.get("reversible_enabled", False))
     output_mode = ctx["output_mode"]
     # --- 结果展示（优化版）---
     if "fit_results" in st.session_state:
@@ -302,6 +309,12 @@ def render_fit_results(
         )
         reactor_type_fit = res.get("reactor_type", reactor_type)
         kinetic_model_fit = res.get("kinetic_model", kinetic_model)
+        reversible_enabled_fit = bool(
+            res.get("reversible_enabled", reversible_enabled)
+        )
+        if str(kinetic_model_fit).strip() == KINETIC_MODEL_REVERSIBLE:
+            kinetic_model_fit = KINETIC_MODEL_POWER_LAW
+            reversible_enabled_fit = True
         output_mode_fit = res.get("output_mode", output_mode)
         # 奇偶校验图的候选物种会在 tab_parity 中根据“验证量（浓度/转化率）”动态判定
         parity_species_candidates = list(species_names_fit)
@@ -409,7 +422,7 @@ def render_fit_results(
                             height=UI_PARAM_TABLE_HEIGHT_PX,
                         )
 
-            if kinetic_model_fit == KINETIC_MODEL_REVERSIBLE:
+            if bool(reversible_enabled_fit):
                 st.markdown("#### 可逆反应参数（逆反应）")
                 if (
                     fitted_params.get("k0_rev", None) is not None
@@ -616,6 +629,7 @@ def render_fit_results(
                     atol=float(atol_fit),
                     reactor_type=reactor_type_fit,
                     kinetic_model=kinetic_model_fit,
+                    reversible_enabled=bool(reversible_enabled_fit),
                     pfr_flow_model=str(pfr_flow_model_fit),
                     max_step_fraction=float(max_step_fraction_fit),
                     validation_mode=str(compare_validation_mode),
@@ -1203,6 +1217,7 @@ def render_fit_results(
                 profile_result = _compute_reactor_profile(
                     reactor_type=reactor_type_fit,
                     kinetic_model=kinetic_model_fit,
+                    reversible_enabled=bool(reversible_enabled_fit),
                     pfr_flow_model=pfr_flow_model_fit,
                     output_mode=output_mode_fit,
                     row_data_dict=row_data_dict,

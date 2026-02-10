@@ -24,7 +24,7 @@ Kinetics_app 是一个基于 **Streamlit** 的网页工具，用于：
 
 - **PFR（平推流）**、**CSTR（连续搅拌釜）**与**BSTR（间歇搅拌釜）**反应器的动力学参数拟合与模拟
 - 多物种、多反应（任意 $\nu$ 矩阵）
-- 动力学模型：幂律（power-law）、Langmuir–Hinshelwood（L-H）、可逆反应（reversible）
+- 动力学模型：幂律（power-law）或 Langmuir–Hinshelwood（L-H），并可选启用可逆扩展（`reversible_enabled`）
 - 拟合参数可选择：$k_0$、$E_a$、反应级数 $n$；L-H 的 $K_0$、$E_{a,K}$、抑制指数 $m$；可逆的逆向参数
 
 ### 1.1 支持与不支持（重要）
@@ -181,14 +181,14 @@ $$K_i(T)=K_{0,i}\exp\left(-\frac{E_{a,K,i}}{RT}\right)$$
 - 吸附部分：每个物种一个 $K_{0,i}$ 与 $E_{a,K,i}$
 - 抑制指数：每个反应一个 $m_j$
 
-### 5.6 可逆模型（reversible）
+### 5.6 可逆扩展（reversible_enabled）
 
 $$r_j=k_j^+(T)\prod_i C_i^{n_{i,j}^+}-k_j^-(T)\prod_i C_i^{n_{i,j}^-}$$
 
 App 中：
 
 - 正反应：$k_0,E_a,n$
-- 逆反应：$k_0^-,E_a^-,n^-$（在“可逆反应(逆反应)参数”里）
+- 逆反应：$k_0^-,E_a^-,n^-$（在“可逆反应(逆反应)参数”里，需先启用 `reversible_enabled`）
 
 ---
 

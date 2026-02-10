@@ -47,6 +47,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
     atol = ctx["atol"]
     reactor_type = ctx["reactor_type"]
     kinetic_model = ctx["kinetic_model"]
+    reversible_enabled = bool(ctx.get("reversible_enabled", False))
     pfr_flow_model = ctx["pfr_flow_model"]
     _request_start_fitting = ctx["request_start_fitting"]
     _request_stop_fitting = ctx["request_stop_fitting"]
@@ -254,7 +255,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
                     f"待拟合参数: {int(n_fit_params)} 个",
                     f"目标物种: {target_species_text}",
                     f"反应器/流动模型: {reactor_label}",
-                    f"动力学模型: {ui_text.map_label(ui_text.KINETIC_MODEL_LABELS, str(kinetic_model))}",
+                    f"动力学模型: {ui_text.kinetic_model_display_text(str(kinetic_model), bool(reversible_enabled))}",
                     f"残差定义: {residual_type}",
                     (
                         f"数值求解: {solver_label}, "
@@ -298,6 +299,7 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
                 "atol": atol,
                 "reactor_type": reactor_type,
                 "kinetic_model": kinetic_model,
+                "reversible_enabled": bool(reversible_enabled),
                 "pfr_flow_model": str(pfr_flow_model),
                 "use_ms": use_ms,
                 "n_starts": n_starts,

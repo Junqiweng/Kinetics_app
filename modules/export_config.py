@@ -62,6 +62,7 @@ def build_export_config_from_ctx(
         reactor_type=ctx["reactor_type"],
         pfr_flow_model=str(ctx["pfr_flow_model"]),
         kinetic_model=ctx["kinetic_model"],
+        reversible_enabled=bool(ctx["reversible_enabled"]),
         solver_method=ctx["solver_method"],
         rtol=float(ctx["rtol"]),
         atol=float(ctx["atol"]),

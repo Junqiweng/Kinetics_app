@@ -192,6 +192,87 @@ def calc_rate_vector_langmuir_hinshelwood(
     return rate_vector
 
 
+def calc_rate_vector_langmuir_hinshelwood_reversible(
+    conc_mol_m3: np.ndarray,
+    temperature_K: float,
+    k0_fwd: np.ndarray,
+    ea_fwd_J_mol: np.ndarray,
+    order_fwd_matrix: np.ndarray,
+    k0_rev: np.ndarray,
+    ea_rev_J_mol: np.ndarray,
+    order_rev_matrix: np.ndarray,
+    K0_ads: np.ndarray,
+    Ea_K_J_mol: np.ndarray,
+    m_inhibition: np.ndarray,
+    *,
+    k_fwd_T_precomputed: np.ndarray | None = None,
+    k_rev_T_precomputed: np.ndarray | None = None,
+    K_ads_T_precomputed: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    L-H 可逆动力学速率计算（共享分母）。
+
+    r_j = (r_j^+ - r_j^-) / (1 + Σ_i K_i(T) * C_i)^m_j
+    """
+    conc_mol_m3 = safe_nonnegative(conc_mol_m3)
+
+    if k_fwd_T_precomputed is not None:
+        k_fwd_T = k_fwd_T_precomputed
+    else:
+        k_fwd_T = k0_fwd * np.exp(-ea_fwd_J_mol / (R_GAS_J_MOL_K * temperature_K))
+        if not np.all(np.isfinite(k_fwd_T)):
+            raise FloatingPointError(
+                "langmuir_hinshelwood_reversible: Arrhenius 计算得到 NaN/Inf（k_fwd_T）"
+            )
+
+    if k_rev_T_precomputed is not None:
+        k_rev_T = k_rev_T_precomputed
+    else:
+        k_rev_T = k0_rev * np.exp(-ea_rev_J_mol / (R_GAS_J_MOL_K * temperature_K))
+        if not np.all(np.isfinite(k_rev_T)):
+            raise FloatingPointError(
+                "langmuir_hinshelwood_reversible: Arrhenius 计算得到 NaN/Inf（k_rev_T）"
+            )
+
+    if K_ads_T_precomputed is not None:
+        K_ads_T = K_ads_T_precomputed
+    else:
+        K_ads_T = K0_ads * np.exp(-Ea_K_J_mol / (R_GAS_J_MOL_K * temperature_K))
+        if not np.all(np.isfinite(K_ads_T)):
+            raise FloatingPointError(
+                "langmuir_hinshelwood_reversible: Arrhenius 计算得到 NaN/Inf（K_ads_T）"
+            )
+
+    denominator_base = 1.0 + np.sum(K_ads_T * conc_mol_m3)
+    if not np.isfinite(denominator_base):
+        raise FloatingPointError(
+            "langmuir_hinshelwood_reversible: 分母基底得到 NaN/Inf（denominator_base）"
+        )
+
+    conc_product_fwd = _vectorized_concentration_product(
+        conc_mol_m3, order_fwd_matrix, label="langmuir_hinshelwood_reversible_fwd"
+    )
+    rate_fwd = k_fwd_T * conc_product_fwd
+
+    conc_product_rev = _vectorized_concentration_product(
+        conc_mol_m3, order_rev_matrix, label="langmuir_hinshelwood_reversible_rev"
+    )
+    rate_rev = k_rev_T * conc_product_rev
+    net_rate_numerator = rate_fwd - rate_rev
+
+    m_active_mask = np.abs(m_inhibition) >= FLOAT_EQUALITY_TOLERANCE
+    denominator = np.where(m_active_mask, denominator_base**m_inhibition, 1.0)
+    if not np.all(np.isfinite(denominator)):
+        bad_idx = int(np.argwhere(~np.isfinite(denominator))[0, 0])
+        raise FloatingPointError(
+            f"langmuir_hinshelwood_reversible: 分母非有限（reaction={bad_idx}）"
+        )
+
+    rate_vector = net_rate_numerator / np.maximum(denominator, EPSILON_DENOMINATOR)
+    _assert_finite_rate_vector(rate_vector, "langmuir_hinshelwood_reversible")
+    return rate_vector
+
+
 def calc_rate_vector_reversible(
     conc_mol_m3: np.ndarray,
     temperature_K: float,

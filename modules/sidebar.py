@@ -112,6 +112,13 @@ def render_sidebar(ctx: dict) -> dict:
                 key="cfg_kinetic_model",
                 disabled=global_disabled,
             )
+            reversible_enabled = st.checkbox(
+                "启用可逆反应",
+                value=bool(get_cfg("reversible_enabled", False)),
+                key="cfg_reversible_enabled",
+                disabled=global_disabled,
+                help="可逆反应作为动力学扩展选项，可与幂律或 Langmuir-Hinshelwood 联合使用。",
+            )
 
             st.markdown("#### 求解器")
             solver_method_options = ["LSODA", "RK45", "BDF", "Radau"]
@@ -188,6 +195,7 @@ def render_sidebar(ctx: dict) -> dict:
         "reactor_type": reactor_type,
         "pfr_flow_model": pfr_flow_model,
         "kinetic_model": kinetic_model,
+        "reversible_enabled": bool(reversible_enabled),
         "solver_method": solver_method,
         "rtol": rtol,
         "atol": atol,

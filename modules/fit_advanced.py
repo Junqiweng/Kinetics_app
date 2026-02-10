@@ -36,7 +36,6 @@ from modules.constants import (
     UI_MAX_NFEV_STEP,
     UI_MAX_STEP_FRACTION_STEP,
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
-    KINETIC_MODEL_REVERSIBLE,
 )
 
 
@@ -44,6 +43,7 @@ def render_fit_advanced(ctx: dict) -> dict:
     get_cfg = ctx["get_cfg"]
     export_config_placeholder = ctx["export_config_placeholder"]
     kinetic_model = ctx["kinetic_model"]
+    reversible_enabled = bool(ctx.get("reversible_enabled", False))
     output_mode = ctx["output_mode"]
     output_species_list = ctx["output_species_list"]
 
@@ -142,7 +142,7 @@ def render_fit_advanced(ctx: dict) -> dict:
         ea_rev_max_J_mol = float(get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
         order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
         order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
-        if kinetic_model == KINETIC_MODEL_REVERSIBLE:
+        if reversible_enabled:
             st.markdown("**1.3 可逆反应边界设置（逆反应）**")
             col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
             with col_rev_b1:

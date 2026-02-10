@@ -25,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from modules import config_manager
 from modules import export_config
 from modules.config_state import (
+    _apply_imported_config_to_widget_state,
     _clear_state_for_imported_config,
     _clear_state_for_reset_default,
 )
@@ -121,10 +122,38 @@ def test_invalid_export_config_returns_error() -> None:
     )
 
 
+def test_reversible_config_migration() -> None:
+    _reset_session_state()
+    legacy_cfg = {
+        "version": "1.0",
+        "reactor_type": "PFR",
+        "kinetic_model": "reversible",
+        "species_text": "A,B",
+        "n_reactions": 1,
+    }
+    ok, msg = config_manager.validate_config(legacy_cfg)
+    _assert_true(ok, f"旧版 reversible 配置应可自动迁移并通过校验：{msg}")
+    _assert_true(
+        str(legacy_cfg.get("kinetic_model")) == "power_law",
+        "旧版 reversible 配置应自动迁移为 power_law",
+    )
+    _assert_true(
+        bool(legacy_cfg.get("reversible_enabled", False)),
+        "旧版 reversible 配置应自动补充 reversible_enabled=True",
+    )
+
+    _apply_imported_config_to_widget_state(legacy_cfg)
+    _assert_true(
+        bool(st.session_state.get("cfg_reversible_enabled", False)),
+        "导入迁移后的旧配置时，cfg_reversible_enabled 应为 True",
+    )
+
+
 def main() -> None:
     test_import_keeps_csv_data()
     test_reset_clears_csv_data()
     test_invalid_export_config_returns_error()
+    test_reversible_config_migration()
     print("REGRESSION_STATE_VALIDATE: OK")
 
 
