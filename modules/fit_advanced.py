@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import streamlit as st
 
 import modules.ui_components as ui_comp
@@ -44,6 +46,27 @@ def render_fit_advanced(ctx: dict) -> dict:
     kinetic_model = ctx["kinetic_model"]
     output_mode = ctx["output_mode"]
     output_species_list = ctx["output_species_list"]
+
+    def _safe_float(value, fallback: float) -> float:
+        try:
+            x = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return float(fallback)
+        if not math.isfinite(x):
+            return float(fallback)
+        return float(x)
+
+    def _safe_float_min(value, fallback: float, lower: float) -> float:
+        x = _safe_float(value, fallback)
+        return float(max(float(lower), x))
+
+    def _safe_int_min(value, fallback: int, lower: int) -> int:
+        try:
+            x = int(value)
+        except (TypeError, ValueError, OverflowError):
+            x = int(fallback)
+        return int(max(int(lower), int(x)))
+
     with st.expander("高级设置与边界 (点击展开)", expanded=False):
 
         st.markdown("**1. 基础边界设置**")
@@ -159,83 +182,108 @@ def render_fit_advanced(ctx: dict) -> dict:
         st.divider()
         st.markdown("**2. 算法与鲁棒性**")
 
-        # 第一行：主要迭代参数
-        col_iter1, col_iter2, col_iter3 = st.columns(3)
-        with col_iter1:
-            max_nfev = int(
-                st.number_input(
-                    "最大迭代次数（max_nfev）",
-                    value=int(get_cfg("max_nfev", DEFAULT_MAX_NFEV)),
-                    step=UI_MAX_NFEV_STEP,
-                    key="cfg_max_nfev",
-                    help="提示：每次外层迭代中，数值差分 Jacobian 需要多次模型调用，因此显示的总调用次数通常大于该值。",
+        with st.container(border=True):
+            st.caption("求解器与差分参数")
+            col_iter1, col_iter2, col_iter3 = st.columns(3)
+            with col_iter1:
+                max_nfev = int(
+                    st.number_input(
+                        "最大迭代次数（max_nfev）",
+                        value=_safe_int_min(
+                            get_cfg("max_nfev", DEFAULT_MAX_NFEV), DEFAULT_MAX_NFEV, 1
+                        ),
+                        min_value=1,
+                        step=UI_MAX_NFEV_STEP,
+                        key="cfg_max_nfev",
+                        help="提示：每次外层迭代中，数值差分 Jacobian 需要多次模型调用，因此显示的总调用次数通常大于该值。",
+                    )
                 )
-            )
-        with col_iter2:
-            diff_step_rel = ui_comp.smart_number_input(
-                "差分步长（diff_step）",
-                value=get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL),
-                key="cfg_diff_step_rel",
-                help="用于 least_squares 的数值差分 Jacobian 相对步长；拟合停滞时可适当调大，拟合过粗时可适当调小。",
-            )
-        with col_iter3:
-            max_step_fraction = ui_comp.smart_number_input(
-                "最大步长比例（max_step_fraction）",
-                value=float(get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)),
-                min_value=0.0,
-                max_value=10.0,
-                step=UI_MAX_STEP_FRACTION_STEP,
-                key="cfg_max_step_fraction",
-                help="用于 solve_ivp 的积分步长上限：max_step = fraction × 总时间/总体积；0 表示不限制。",
-            )
-
-        # 第二行：Multi-start 相关选项
-        col_ms1, col_ms2, col_ms3 = st.columns(3)
-        with col_ms1:
-            use_ms = st.checkbox(
-                "多起点搜索（Multi-start）",
-                value=bool(get_cfg("use_multi_start", True)),
-                key="cfg_use_multi_start",
-            )
-        with col_ms2:
-            n_starts = int(
-                st.number_input(
-                    "起点数量（n_starts）",
-                    value=get_cfg("n_starts", DEFAULT_N_STARTS),
-                    min_value=1,
-                    step=1,
-                    key="cfg_n_starts",
-                    help="仅在启用多起点搜索且 n_starts > 1 时生效。",
+            with col_iter2:
+                diff_step_rel = ui_comp.smart_number_input(
+                    "差分步长（diff_step）",
+                    value=_safe_float_min(
+                        get_cfg("diff_step_rel", DEFAULT_DIFF_STEP_REL),
+                        DEFAULT_DIFF_STEP_REL,
+                        1e-15,
+                    ),
+                    min_value=1e-15,
+                    key="cfg_diff_step_rel",
+                    help="用于 least_squares 的数值差分 Jacobian 相对步长；拟合停滞时可适当调大，拟合过粗时可适当调小。",
                 )
-            )
-        with col_ms3:
-            max_nfev_coarse = int(
-                st.number_input(
-                    "粗拟合迭代上限（max_nfev_coarse）",
-                    value=get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE),
-                    step=50,
-                    key="cfg_max_nfev_coarse",
-                    help="仅在启用多起点搜索时，用于每个起点的粗拟合阶段。",
+            with col_iter3:
+                max_step_fraction = ui_comp.smart_number_input(
+                    "最大步长比例（max_step_fraction）",
+                    value=_safe_float_min(
+                        get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION),
+                        DEFAULT_MAX_STEP_FRACTION,
+                        0.0,
+                    ),
+                    min_value=0.0,
+                    max_value=10.0,
+                    step=UI_MAX_STEP_FRACTION_STEP,
+                    key="cfg_max_step_fraction",
+                    help="用于 solve_ivp 的积分步长上限：max_step = fraction × 总时间/总体积；0 表示不限制。",
                 )
-            )
-
-        # 第三行：其他选项
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
             use_x_scale_jac = st.checkbox(
                 "启用雅可比尺度归一（x_scale='jac'）",
                 value=get_cfg("use_x_scale_jac", True),
                 key="cfg_use_x_scale_jac",
             )
-        with col_opt2:
-            random_seed = int(
-                st.number_input(
-                    "随机种子（random_seed）",
-                    value=get_cfg("random_seed", DEFAULT_RANDOM_SEED),
-                    step=1,
-                    key="cfg_random_seed",
-                )
+
+        with st.container(border=True):
+            st.caption("多起点搜索（Multi-start）参数")
+            use_ms = st.checkbox(
+                "启用多起点搜索（Multi-start）",
+                value=bool(get_cfg("use_multi_start", True)),
+                key="cfg_use_multi_start",
             )
+            disable_ms_fields = not bool(use_ms)
+            col_ms1, col_ms2, col_ms3 = st.columns(3)
+            with col_ms1:
+                n_starts = int(
+                    st.number_input(
+                        "起点数量（n_starts）",
+                        value=_safe_int_min(
+                            get_cfg("n_starts", DEFAULT_N_STARTS), DEFAULT_N_STARTS, 1
+                        ),
+                        min_value=1,
+                        step=1,
+                        key="cfg_n_starts",
+                        help="仅在启用多起点搜索且 n_starts > 1 时生效。",
+                        disabled=disable_ms_fields,
+                    )
+                )
+            with col_ms2:
+                max_nfev_coarse = int(
+                    st.number_input(
+                        "粗拟合迭代上限（max_nfev_coarse）",
+                        value=_safe_int_min(
+                            get_cfg("max_nfev_coarse", DEFAULT_MAX_NFEV_COARSE),
+                            DEFAULT_MAX_NFEV_COARSE,
+                            1,
+                        ),
+                        min_value=1,
+                        step=50,
+                        key="cfg_max_nfev_coarse",
+                        help="仅在启用多起点搜索时，用于每个起点的粗拟合阶段。",
+                        disabled=disable_ms_fields,
+                    )
+                )
+            with col_ms3:
+                random_seed = int(
+                    st.number_input(
+                        "随机种子（random_seed）",
+                        value=_safe_int_min(
+                            get_cfg("random_seed", DEFAULT_RANDOM_SEED),
+                            DEFAULT_RANDOM_SEED,
+                            0,
+                        ),
+                        min_value=0,
+                        step=1,
+                        key="cfg_random_seed",
+                        disabled=disable_ms_fields,
+                    )
+                )
 
         st.divider()
         st.markdown("**3. 目标函数设置**")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 
 import streamlit as st
 
@@ -22,6 +23,16 @@ from modules.constants import (
 def render_sidebar(ctx: dict) -> dict:
     get_cfg = ctx["get_cfg"]
     show_help_dialog = ctx["show_help_dialog"]
+
+    def _safe_positive_tolerance(value, fallback: float, lower: float = 1e-15) -> float:
+        try:
+            x = float(value)
+        except (TypeError, ValueError, OverflowError):
+            x = float(fallback)
+        if not math.isfinite(x):
+            x = float(fallback)
+        return float(max(float(lower), x))
+
     # ========= 侧边栏 =========
     export_config_placeholder = None
     with st.sidebar:
@@ -103,12 +114,14 @@ def render_sidebar(ctx: dict) -> dict:
             )
 
             st.markdown("#### 求解器")
+            solver_method_options = ["LSODA", "RK45", "BDF", "Radau"]
+            solver_method_default = str(get_cfg("solver_method", "LSODA")).strip()
+            if solver_method_default not in solver_method_options:
+                solver_method_default = "LSODA"
             solver_method = st.selectbox(
                 "求解方法（Method）",
-                ["LSODA", "RK45", "BDF", "Radau"],
-                index=["LSODA", "RK45", "BDF", "Radau"].index(
-                    get_cfg("solver_method", "LSODA")
-                ),
+                solver_method_options,
+                index=solver_method_options.index(solver_method_default),
                 format_func=lambda x: ui_text.map_label(
                     ui_text.SOLVER_METHOD_LABELS, str(x)
                 ),
@@ -118,14 +131,16 @@ def render_sidebar(ctx: dict) -> dict:
             col_tol1, col_tol2 = st.columns(2)
             rtol = col_tol1.number_input(
                 "rtol",
-                value=get_cfg("rtol", DEFAULT_RTOL),
+                value=_safe_positive_tolerance(get_cfg("rtol", DEFAULT_RTOL), DEFAULT_RTOL),
+                min_value=1e-15,
                 format=UI_TOLERANCE_FORMAT_STREAMLIT,
                 key="cfg_rtol",
                 disabled=global_disabled,
             )
             atol = col_tol2.number_input(
                 "atol",
-                value=get_cfg("atol", DEFAULT_ATOL),
+                value=_safe_positive_tolerance(get_cfg("atol", DEFAULT_ATOL), DEFAULT_ATOL),
+                min_value=1e-15,
                 format=UI_TOLERANCE_FORMAT_STREAMLIT,
                 key="cfg_atol",
                 disabled=global_disabled,

@@ -109,6 +109,21 @@ def cleanup_old_sessions(max_age_hours: int = DEFAULT_MAX_AGE_HOURS) -> int:
             except Exception:
                 # 忽略单个目录的删除错误（例如权限问题或并发删除）
                 pass
+
+        # 向后兼容清理：历史版本可能在根目录写入 ls_cfg_chunks_*.json 分片缓存文件。
+        for item in os.listdir(_PERSIST_BASE_DIR):
+            item_path = os.path.join(_PERSIST_BASE_DIR, item)
+            if not os.path.isfile(item_path):
+                continue
+            if not (item.startswith("ls_cfg_chunks_") and item.endswith(".json")):
+                continue
+            try:
+                mtime = os.path.getmtime(item_path)
+                age_seconds = current_time - mtime
+                if age_seconds > max_age_seconds:
+                    os.remove(item_path)
+            except Exception:
+                pass
     except Exception:
         # 忽略整体错误
         pass

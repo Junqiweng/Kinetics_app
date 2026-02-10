@@ -283,6 +283,8 @@ def integrate_pfr_molar_flows(
         return molar_flow_inlet_mol_s.copy(), False, str(message)
 
     molar_flow_outlet = solution.y[:, -1]
+    if not np.all(np.isfinite(molar_flow_outlet)):
+        return molar_flow_inlet_mol_s.copy(), False, "solve_ivp 输出包含 NaN/Inf"
     return molar_flow_outlet, True, "OK"
 
 
@@ -426,6 +428,8 @@ def integrate_pfr_molar_flows_gas_ideal_const_p(
         return molar_flow_inlet_mol_s.copy(), False, str(message)
 
     molar_flow_outlet = solution.y[:, -1]
+    if not np.all(np.isfinite(molar_flow_outlet)):
+        return molar_flow_inlet_mol_s.copy(), False, "solve_ivp 输出包含 NaN/Inf"
     return molar_flow_outlet, True, "OK"
 
 
@@ -549,6 +553,8 @@ def integrate_batch_reactor(
         return conc_initial_mol_m3.copy(), False, str(message)
 
     conc_final = solution.y[:, -1]
+    if not np.all(np.isfinite(conc_final)):
+        return conc_initial_mol_m3.copy(), False, "solve_ivp 输出包含 NaN/Inf"
     return conc_final, True, "OK"
 
 
@@ -912,6 +918,14 @@ def integrate_cstr_profile(
             str(message),
         )
 
+    if (not np.all(np.isfinite(solution.t))) or (not np.all(np.isfinite(solution.y))):
+        return (
+            time_grid_s,
+            conc_inlet_mol_m3.astype(float)[:, None],
+            False,
+            "solve_ivp 输出包含 NaN/Inf",
+        )
+
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
 
 
@@ -1096,6 +1110,14 @@ def integrate_pfr_profile(
             molar_flow_inlet_mol_s.astype(float)[:, None],
             False,
             str(message),
+        )
+
+    if (not np.all(np.isfinite(solution.t))) or (not np.all(np.isfinite(solution.y))):
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            "solve_ivp 输出包含 NaN/Inf",
         )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
@@ -1292,6 +1314,14 @@ def integrate_pfr_profile_gas_ideal_const_p(
             str(message),
         )
 
+    if (not np.all(np.isfinite(solution.t))) or (not np.all(np.isfinite(solution.y))):
+        return (
+            volume_grid_m3,
+            molar_flow_inlet_mol_s.astype(float)[:, None],
+            False,
+            "solve_ivp 输出包含 NaN/Inf",
+        )
+
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
 
 
@@ -1455,6 +1485,14 @@ def integrate_batch_profile(
             conc_initial_mol_m3.astype(float)[:, None],
             False,
             str(message),
+        )
+
+    if (not np.all(np.isfinite(solution.t))) or (not np.all(np.isfinite(solution.y))):
+        return (
+            time_grid_s,
+            conc_initial_mol_m3.astype(float)[:, None],
+            False,
+            "solve_ivp 输出包含 NaN/Inf",
         )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"

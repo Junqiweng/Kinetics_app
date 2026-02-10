@@ -82,15 +82,18 @@ def _get_persist_base_dir() -> str:
 
 def _get_ls_cfg_chunk_cache_path(session_id: str) -> str:
     """
-    返回用于聚合 ls_chunk 分片的临时文件路径。
+    返回用于聚合 ls_chunk 分片的临时文件路径（按会话目录隔离）。
 
     设计目标：
     - 允许整页刷新导致的 Streamlit session 变化（st.session_state 清空）仍可继续累积分片
-    - 文件名使用哈希，避免将 session_id 直接暴露在文件名中
+    - 缓存文件置于会话目录内，便于复用现有 TTL 清理策略
     """
-    sid = str(session_id).strip()
-    sid_hash = hashlib.sha256(sid.encode("utf-8")).hexdigest()[:16]
-    return os.path.join(_get_persist_base_dir(), f"ls_cfg_chunks_{sid_hash}.json")
+    normalized_sid = _normalize_uuid_string(session_id)
+    if normalized_sid is None:
+        raise ValueError("无效的 session_id，无法构建分片缓存路径")
+    session_dir = os.path.join(_get_persist_base_dir(), normalized_sid)
+    os.makedirs(session_dir, exist_ok=True)
+    return os.path.join(session_dir, "ls_cfg_chunks.json")
 
 
 def _read_json_file_silent(file_path: str) -> dict | None:
@@ -391,11 +394,12 @@ def inject_config_loader_script() -> None:
             #
             # 说明：文件仅用于“分片回传的聚合”，最终配置仍由 localStorage 持久化。
             session_id = get_current_session_id() or _as_str_first(sid_from_url).strip()
-            if not session_id:
+            normalized_sid = _normalize_uuid_string(session_id)
+            if normalized_sid is None:
                 # 如果该次运行还未拿到 sid（通常会在下一次 reload 带上），不处理以避免写入错误键。
                 return
 
-            cache_path = _get_ls_cfg_chunk_cache_path(session_id)
+            cache_path = _get_ls_cfg_chunk_cache_path(normalized_sid)
 
             # 优先用“临时文件”聚合分片；若文件系统不可用，则回退到 st.session_state（仅同一 session 有效）。
             use_file_cache = True
@@ -445,8 +449,9 @@ def inject_config_loader_script() -> None:
             _inject_cleanup_and_mark_loaded()
             try:
                 session_id = get_current_session_id() or _as_str_first(sid_from_url).strip()
-                if session_id:
-                    _remove_file_silent(_get_ls_cfg_chunk_cache_path(session_id))
+                normalized_sid = _normalize_uuid_string(session_id)
+                if normalized_sid is not None:
+                    _remove_file_silent(_get_ls_cfg_chunk_cache_path(normalized_sid))
             except Exception:
                 pass
             return

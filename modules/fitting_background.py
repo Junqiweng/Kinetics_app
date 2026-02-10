@@ -365,13 +365,13 @@ def _run_fitting_job(
     ):
         pfr_flow_model = PFR_FLOW_MODEL_LIQUID_CONST_VDOT
 
-    use_ms = job_inputs["use_ms"]
-    n_starts = job_inputs["n_starts"]
-    random_seed = job_inputs["random_seed"]
-    max_nfev = job_inputs["max_nfev"]
-    max_nfev_coarse = job_inputs["max_nfev_coarse"]
-    diff_step_rel = job_inputs["diff_step_rel"]
-    use_x_scale_jac = job_inputs["use_x_scale_jac"]
+    use_ms = bool(job_inputs["use_ms"])
+    n_starts = int(job_inputs["n_starts"])
+    random_seed = int(job_inputs["random_seed"])
+    max_nfev = int(job_inputs["max_nfev"])
+    max_nfev_coarse = int(job_inputs["max_nfev_coarse"])
+    diff_step_rel = float(job_inputs["diff_step_rel"])
+    use_x_scale_jac = bool(job_inputs["use_x_scale_jac"])
 
     k0_min = job_inputs["k0_min"]
     k0_max = job_inputs["k0_max"]
@@ -397,6 +397,24 @@ def _run_fitting_job(
         job_inputs.get("max_step_fraction", DEFAULT_MAX_STEP_FRACTION)
     )
     residual_type = str(job_inputs.get("residual_type", "绝对残差"))
+
+    # 拟合前硬校验：避免无效数值设置进入后台线程后“失败罚项看似拟合成功”。
+    if (not np.isfinite(float(rtol))) or (float(rtol) <= 0.0):
+        raise ValueError("rtol 必须为正且有限。")
+    if (not np.isfinite(float(atol))) or (float(atol) <= 0.0):
+        raise ValueError("atol 必须为正且有限。")
+    if (not np.isfinite(float(diff_step_rel))) or (float(diff_step_rel) <= 0.0):
+        raise ValueError("diff_step_rel 必须为正且有限。")
+    if int(max_nfev) < 1:
+        raise ValueError("max_nfev 必须 >= 1。")
+    if int(n_starts) < 1:
+        raise ValueError("n_starts 必须 >= 1。")
+    if int(use_ms) and int(n_starts) > 1:
+        if int(max_nfev_coarse) < 1:
+            raise ValueError("max_nfev_coarse 必须 >= 1（多起点模式）。")
+        if int(random_seed) < 0:
+            raise ValueError("random_seed 必须为非负整数（多起点模式）。")
+
     if stop_event.is_set():
         raise FittingStoppedError("Stopped by user")
 
@@ -733,6 +751,8 @@ def _run_fitting_job(
     best_cost_so_far = float("inf")
     last_ui_update_s = time.time()
     n_params_fit: int | None = None
+    valid_points_last_eval = 0
+    max_valid_points_seen = 0
 
     def emit_stage_progress(row_index: int | None = None) -> None:
         nonlocal last_ui_update_s
@@ -769,6 +789,7 @@ def _run_fitting_job(
 
     def residual_func_wrapper(x: np.ndarray) -> np.ndarray:
         nonlocal stage_nfev, best_cost_so_far, last_ui_update_s, n_params_fit
+        nonlocal valid_points_last_eval, max_valid_points_seen
         if stop_event.is_set():
             raise FittingStoppedError("Stopped by user")
 
@@ -800,6 +821,7 @@ def _run_fitting_job(
 
         residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
         model_eval_cache: dict = {}
+        valid_points_this_eval = 0
         for row_index, row in enumerate(data_rows):
             if stop_event.is_set():
                 raise FittingStoppedError("Stopped by user")
@@ -852,6 +874,8 @@ def _run_fitting_job(
                     )
                     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                         rel_residual = diff / denominator
+                    valid_mask = np.isfinite(rel_residual)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
                     invalid_mask = ~np.isfinite(rel_residual)
                     if np.any(invalid_mask):
                         rel_residual[invalid_mask] = residual_penalty_value
@@ -861,13 +885,17 @@ def _run_fitting_job(
                     denominator = np.abs(measured_row) + residual_epsilon
                     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                         pct_residual = 100.0 * (diff / denominator)
+                    valid_mask = np.isfinite(pct_residual)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
                     invalid_mask = ~np.isfinite(pct_residual)
                     if np.any(invalid_mask):
                         pct_residual[invalid_mask] = residual_penalty_value
                     residual_array[base : base + n_outputs] = pct_residual
                 else:
                     # 默认：绝对残差 r = y_pred - y_meas
-                    if not bool(np.all(np.isfinite(diff))):
+                    valid_mask = np.isfinite(diff)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
+                    if not bool(np.all(valid_mask)):
                         residual_array[base : base + n_outputs] = residual_penalty_value
                     else:
                         residual_array[base : base + n_outputs] = diff
@@ -880,6 +908,9 @@ def _run_fitting_job(
             cost_now = float(0.5 * np.sum(residual_array**2))
             if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
                 best_cost_so_far = cost_now
+        valid_points_last_eval = int(valid_points_this_eval)
+        if valid_points_last_eval > int(max_valid_points_seen):
+            max_valid_points_seen = int(valid_points_last_eval)
 
         now_s = time.time()
         if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
@@ -897,6 +928,12 @@ def _run_fitting_job(
     initial_cost = float(0.5 * np.sum(initial_residuals**2))
     set_metric("initial_cost", initial_cost)
     timeline_add("✅", f"初始目标函数值 Φ: {initial_cost:.4e}")
+
+    if int(valid_points_last_eval) <= 0:
+        raise ValueError(
+            "没有任何有效预测点（N_valid=0），已阻断拟合。"
+            " 请检查：求解器容限（rtol/atol）、入口流量/浓度、输出模式与工况是否匹配。"
+        )
 
     n_fit_params_total = int(np.asarray(param_vector).size)
     if (n_data_rows <= 0) or (n_outputs <= 0) or (n_fit_params_total <= 0):
@@ -1082,6 +1119,11 @@ def _run_fitting_job(
     if int(getattr(final_res, "status", 0)) == 0:
         timeline_add(
             "⚠️", "达到最大迭代次数上限，拟合提前停止（可增大最大迭代次数 max_nfev）。"
+        )
+
+    if int(max_valid_points_seen) <= 0:
+        raise ValueError(
+            "拟合全过程没有任何有效预测点（N_valid=0），结果无效并已阻断。"
         )
 
     final_phi = float(final_res.cost)

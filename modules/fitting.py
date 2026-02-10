@@ -526,22 +526,24 @@ def _predict_outputs_for_row(
                 float(R_GAS_J_MOL_K) * float(temperature_K), EPSILON_CONCENTRATION
             )
             total_flow = float(np.sum(molar_flow_outlet))
+            if (output_mode in (OUTPUT_MODE_XOUT, OUTPUT_MODE_COUT)) and (
+                total_flow < EPSILON_FLOW_RATE
+            ):
+                return (
+                    np.zeros(len(output_species_list), dtype=float),
+                    False,
+                    "总摩尔流率过低，无法计算 xout/Cout（请检查入口流量与工况）",
+                )
 
             output_values = np.zeros(len(output_species_list), dtype=float)
             for out_i, idx in enumerate(output_species_indices):
                 if output_mode == OUTPUT_MODE_FOUT:
                     output_values[out_i] = molar_flow_outlet[idx]
                 elif output_mode == OUTPUT_MODE_XOUT:
-                    if total_flow < EPSILON_FLOW_RATE:
-                        output_values[out_i] = np.nan
-                    else:
-                        output_values[out_i] = molar_flow_outlet[idx] / total_flow
+                    output_values[out_i] = molar_flow_outlet[idx] / total_flow
                 elif output_mode == OUTPUT_MODE_COUT:
-                    if total_flow < EPSILON_FLOW_RATE:
-                        output_values[out_i] = np.nan
-                    else:
-                        y_i = molar_flow_outlet[idx] / total_flow
-                        output_values[out_i] = float(y_i) * float(conc_total_mol_m3)
+                    y_i = molar_flow_outlet[idx] / total_flow
+                    output_values[out_i] = float(y_i) * float(conc_total_mol_m3)
                 else:
                     return (
                         np.zeros(len(output_species_list), dtype=float),
@@ -652,9 +654,12 @@ def _predict_outputs_for_row(
                     # 摩尔组成 y_i = F_i / Σ F_j
                     total_flow = np.sum(molar_flow_outlet)
                     if total_flow < EPSILON_FLOW_RATE:
-                        output_values[out_i] = np.nan
-                    else:
-                        output_values[out_i] = molar_flow_outlet[idx] / total_flow
+                        return (
+                            np.zeros(len(output_species_list), dtype=float),
+                            False,
+                            "总摩尔流率过低，无法计算 xout（请检查入口流量与工况）",
+                        )
+                    output_values[out_i] = molar_flow_outlet[idx] / total_flow
                 else:
                     return (
                         np.zeros(len(output_species_list), dtype=float),
@@ -752,9 +757,12 @@ def _predict_outputs_for_row(
                 # 摩尔组成 y_i = F_i / Σ F_j = C_i / Σ C_j (体积流量可约掉)
                 total_conc = np.sum(conc_outlet)
                 if total_conc < EPSILON_CONCENTRATION:
-                    output_values[out_i] = np.nan
-                else:
-                    output_values[out_i] = conc_outlet[idx] / total_conc
+                    return (
+                        np.zeros(len(output_species_list), dtype=float),
+                        False,
+                        "总浓度过低，无法计算 xout（请检查入口浓度与工况）",
+                    )
+                output_values[out_i] = conc_outlet[idx] / total_conc
             else:
                 return (
                     np.zeros(len(output_species_list), dtype=float),
@@ -854,6 +862,13 @@ def _predict_outputs_for_row(
             np.zeros(len(output_species_list), dtype=float),
             False,
             f"未知反应器类型: {reactor_type}",
+        )
+
+    if not bool(np.all(np.isfinite(output_values))):
+        return (
+            np.zeros(len(output_species_list), dtype=float),
+            False,
+            "模型输出包含 NaN/Inf（请检查工况、输入数据与求解器设置）",
         )
 
     return output_values, True, "OK"

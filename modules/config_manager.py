@@ -354,7 +354,7 @@ def get_default_config() -> dict:
         "reactor_type": REACTOR_TYPE_PFR,
         "pfr_flow_model": PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
         "kinetic_model": KINETIC_MODEL_POWER_LAW,
-        "solver_method": "RK45",
+        "solver_method": "LSODA",
         "rtol": DEFAULT_RTOL,
         "atol": DEFAULT_ATOL,
         "max_step_fraction": DEFAULT_MAX_STEP_FRACTION,
