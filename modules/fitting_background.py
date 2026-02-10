@@ -734,6 +734,39 @@ def _run_fitting_job(
     last_ui_update_s = time.time()
     n_params_fit: int | None = None
 
+    def emit_stage_progress(row_index: int | None = None) -> None:
+        nonlocal last_ui_update_s
+        calls_per_iteration_est = int(max(int(n_params_fit or 0) + 1, 1))
+        call_budget_est = int(max(int(stage_max_nfev), 1)) * calls_per_iteration_est
+
+        if row_index is None:
+            call_progress_est = float(stage_nfev)
+            call_progress_text = str(int(stage_nfev))
+            row_progress_text = ""
+        else:
+            row_frac = float(row_index + 1) / float(max(int(n_data_rows), 1))
+            call_progress_est = float(max(int(stage_nfev) - 1, 0)) + row_frac
+            call_progress_text = f"{call_progress_est:.1f}"
+            row_progress_text = f" | 数据行 {int(row_index) + 1}/{int(n_data_rows)}"
+
+        frac = float(call_progress_est) / float(max(call_budget_est, 1))
+        frac = float(np.clip(frac, 0.0, 1.0))
+        set_progress(stage_base_progress + stage_span_progress * frac)
+
+        if np.isfinite(best_cost_so_far):
+            set_status(
+                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
+                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
+                f"{row_progress_text} | best Φ≈{best_cost_so_far:.3e}"
+            )
+        else:
+            set_status(
+                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
+                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
+                f"{row_progress_text}"
+            )
+        last_ui_update_s = time.time()
+
     def residual_func_wrapper(x: np.ndarray) -> np.ndarray:
         nonlocal stage_nfev, best_cost_so_far, last_ui_update_s, n_params_fit
         if stop_event.is_set():
@@ -839,6 +872,10 @@ def _run_fitting_job(
                     else:
                         residual_array[base : base + n_outputs] = diff
 
+            now_s = time.time()
+            if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
+                emit_stage_progress(row_index=row_index)
+
         if residual_array.size > 0:
             cost_now = float(0.5 * np.sum(residual_array**2))
             if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
@@ -846,22 +883,7 @@ def _run_fitting_job(
 
         now_s = time.time()
         if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
-            calls_per_iteration_est = int(max(int(n_params_fit or 0) + 1, 1))
-            call_budget_est = int(max(int(stage_max_nfev), 1)) * calls_per_iteration_est
-            frac = float(stage_nfev) / float(max(call_budget_est, 1))
-            frac = float(np.clip(frac, 0.0, 1.0))
-            set_progress(stage_base_progress + stage_span_progress * frac)
-            if np.isfinite(best_cost_so_far):
-                set_status(
-                    f"{stage_label} | 调用≈{int(stage_nfev)}/{int(call_budget_est)} "
-                    f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit)}) | best Φ≈{best_cost_so_far:.3e}"
-                )
-            else:
-                set_status(
-                    f"{stage_label} | 调用≈{int(stage_nfev)}/{int(call_budget_est)} "
-                    f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit)})"
-                )
-            last_ui_update_s = now_s
+            emit_stage_progress(row_index=None)
 
         return residual_array
 
