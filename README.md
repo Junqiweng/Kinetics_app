@@ -104,6 +104,15 @@ streamlit run main.py
 
 运行后，浏览器会自动打开应用界面（默认地址：http://localhost:8501）。
 
+### Windows 一键启动
+
+仓库根目录提供了可双击的启动脚本：`Start_Kinetics_App.bat`。
+
+- Windows 用户可直接双击 `Start_Kinetics_App.bat`
+- 脚本会优先使用项目里的 `.venv`；如果没有，则回退系统里的 Python
+- 若依赖尚未安装，脚本会自动执行 `pip install -r requirements.txt`
+- 启动后若浏览器未自动打开，可手动访问 `http://localhost:8501`
+
 ## 快速验证（推荐先跑通一次）
 
 1) 生成/更新 PFR 示例数据（仓库默认不提交生成后的 CSV，需本地生成一次）：
