@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import datetime as _dt
+import difflib
 import hashlib
 import html as html_lib
-import difflib
 import queue
 import threading
 import time
@@ -16,6 +17,11 @@ import streamlit as st
 from scipy.optimize import least_squares
 
 from . import fitting
+from .fit_state import (
+    build_fit_state_snapshot,
+    build_fit_result_state_snapshot,
+    serialize_params_snapshot,
+)
 from .constants import (
     CSV_CLOSE_MATCHES_CUTOFF,
     CSV_CLOSE_MATCHES_MAX,
@@ -51,6 +57,84 @@ from .constants import (
 
 class FittingStoppedError(Exception):
     pass
+
+
+def _append_fit_history_entry(fit_results: dict | None) -> None:
+    """将一次完成的拟合结果写入当前会话历史。"""
+    if not isinstance(fit_results, dict):
+        return
+
+    if "fitting_history" not in st.session_state:
+        st.session_state["fitting_history"] = []
+
+    fit_history = st.session_state["fitting_history"]
+    fit_id = int(len(fit_history) + 1)
+    phi_value = float(fit_results.get("phi_final", fit_results.get("cost", 0.0)))
+    history_entry = {
+        "fit_id": fit_id,
+        "time": _dt.datetime.now().strftime("%H:%M:%S"),
+        "phi": phi_value,
+        "kinetic_model": str(fit_results.get("kinetic_model", "")),
+        "reactor_type": str(fit_results.get("reactor_type", "")),
+        "residual_type": str(fit_results.get("residual_type", "")),
+        "n_params": int(fit_results.get("n_fit_params", 0)),
+        "skipped": bool(fit_results.get("fit_skipped", False)),
+        "output_mode": str(fit_results.get("output_mode", "")),
+        "output_species": [str(x) for x in fit_results.get("output_species", [])],
+        "species_names": [str(x) for x in fit_results.get("species_names", [])],
+        "state_snapshot": build_fit_result_state_snapshot(fit_results),
+        "params_snapshot": serialize_params_snapshot(fit_results.get("params", {})),
+    }
+    fit_history.append(history_entry)
+
+
+def _build_actionable_error_message(error_str: str) -> str:
+    """将技术性错误信息转换为包含可操作建议的用户友好提示。"""
+    msg = f"拟合失败: {error_str}"
+    lower = error_str.lower()
+
+    suggestions: list[str] = []
+
+    # ODE 积分相关
+    if any(kw in lower for kw in ["ode", "solve_ivp", "integration", "积分", "step size", "too small", "max_step"]):
+        suggestions.append("切换求解器为 BDF 或 Radau（适合刚性问题）")
+        suggestions.append("减小 rtol/atol（如 1e-8 / 1e-10）")
+        suggestions.append("减小 max_step_fraction（如 0.01）限制步长")
+        suggestions.append("检查初始参数 k₀、Eₐ 的量级是否合理")
+
+    # 优化未收敛
+    if any(kw in lower for kw in ["max_nfev", "maximum number of function", "未收敛", "not converge"]):
+        suggestions.append("增大 max_nfev（如 5000 或 10000）")
+        suggestions.append("开启多起点拟合（Multi-start）")
+        suggestions.append("检查参数边界是否过窄或过宽")
+
+    # 多起点失败
+    if any(kw in lower for kw in ["multi-start", "多起点", "未获得有效结果"]):
+        suggestions.append("增加起点数量（n_starts）")
+        suggestions.append("放宽参数边界范围")
+        suggestions.append("检查数据是否有异常值或 NaN")
+
+    # 矩阵/数值问题
+    if any(kw in lower for kw in ["singular", "nan", "inf", "overflow", "underflow", "finite"]):
+        suggestions.append("检查初始参数量级（k₀ 过大/过小均可导致数值溢出）")
+        suggestions.append("尝试使用参数缩放（勾选 x_scale='jac'）")
+        suggestions.append("检查化学计量数矩阵和反应级数是否正确")
+
+    # 边界相关
+    if any(kw in lower for kw in ["bound", "边界", "lower", "upper", "infeasible"]):
+        suggestions.append("检查参数边界设置：上界应大于下界")
+        suggestions.append("确保初始猜测值在边界范围内")
+
+    # 数据相关
+    if any(kw in lower for kw in ["column", "列", "csv", "dataframe", "key error"]):
+        suggestions.append("检查 CSV 文件列名是否与模板一致")
+        suggestions.append("确保所选目标物种在数据中有对应的测量列")
+
+    if suggestions:
+        advice = "\n\n**建议操作：**\n" + "\n".join(f"  {i+1}. {s}" for i, s in enumerate(suggestions))
+        msg += advice
+
+    return msg
 
 
 def _get_fitting_executor() -> ThreadPoolExecutor:
@@ -98,6 +182,8 @@ def _drain_fitting_progress_queue() -> None:
                 st.session_state["fitting_metrics"][metric_name] = metric_value
         elif msg_type == "ms_summary":
             st.session_state["fitting_ms_summary"] = str(msg_value)
+        elif msg_type == "ms_results_log":
+            st.session_state["fitting_ms_results_log"] = msg_value
         elif msg_type == "final_summary":
             st.session_state["fitting_final_summary"] = str(msg_value)
 
@@ -135,6 +221,7 @@ def _reset_fitting_progress_ui_state() -> None:
     st.session_state["fitting_timeline"] = []
     st.session_state["fitting_metrics"] = {}
     st.session_state["fitting_ms_summary"] = ""
+    st.session_state["fitting_ms_results_log"] = []
     st.session_state["fitting_final_summary"] = ""
 
 
@@ -174,8 +261,9 @@ def _render_fitting_progress_panel() -> None:
     timeline = st.session_state.get("fitting_timeline", [])
     ms_summary = str(st.session_state.get("fitting_ms_summary", "")).strip()
     final_summary = str(st.session_state.get("fitting_final_summary", "")).strip()
+    fitting_history = st.session_state.get("fitting_history", [])
 
-    if not (job_summary or timeline or ms_summary or final_summary):
+    if not (job_summary or timeline or ms_summary or final_summary or fitting_history):
         return
 
     with st.expander("拟合任务概览与摘要（点击展开）", expanded=False):
@@ -203,6 +291,21 @@ def _render_fitting_progress_panel() -> None:
                 st.markdown("#### 多起点（Multi-start）摘要")
                 _render_summary_lines(ms_summary)
 
+                # 多起点对比表
+                ms_log = st.session_state.get("fitting_ms_results_log", None)
+                if isinstance(ms_log, list) and ms_log:
+                    st.markdown("**各起点结果对比**")
+                    df_ms = pd.DataFrame(ms_log)
+                    df_ms = df_ms.rename(columns={
+                        "start": "起点",
+                        "cost": "Φ (cost)",
+                        "nfev": "函数评估次数",
+                        "status": "收敛状态",
+                        "is_best": "最佳",
+                    })
+                    df_ms = df_ms.sort_values("Φ (cost)")
+                    st.dataframe(df_ms, width="stretch", hide_index=True)
+
         if final_summary:
             st.write("")
             with st.container(border=True):
@@ -211,6 +314,30 @@ def _render_fitting_progress_panel() -> None:
                 )
                 st.markdown("#### 拟合摘要")
                 _render_summary_lines(final_summary)
+
+        if fitting_history and len(fitting_history) > 1:
+            st.write("")
+            with st.container(border=True):
+                st.markdown(
+                    '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
+                )
+                st.markdown("#### 拟合历史（本次会话）")
+                df_hist = pd.DataFrame(fitting_history)
+                df_hist = df_hist.drop(
+                    columns=["state_snapshot", "params_snapshot"],
+                    errors="ignore",
+                )
+                df_hist = df_hist.rename(columns={
+                    "fit_id": "拟合 #",
+                    "time": "时间",
+                    "phi": "Φ (cost)",
+                    "kinetic_model": "动力学模型",
+                    "reactor_type": "反应器",
+                    "residual_type": "残差类型",
+                    "n_params": "拟合参数数",
+                    "skipped": "跳过",
+                })
+                st.dataframe(df_hist, width="stretch", hide_index=True)
 
 
 def _finalize_finished_fitting_future() -> None:
@@ -244,6 +371,9 @@ def _finalize_finished_fitting_future() -> None:
 
         phi_value = float(fit_results.get("phi_final", fit_results.get("cost", 0.0)))
         phi_text = f"{phi_value:.3e}"
+
+        _append_fit_history_entry(fit_results)
+
         st.session_state["fitting_timeline"].append(
             ("✅", f"拟合完成，最终 Φ: {phi_text}")
         )
@@ -259,9 +389,10 @@ def _finalize_finished_fitting_future() -> None:
     except Exception as exc:
         st.session_state["fitting_status"] = "拟合失败。"
         st.session_state["fitting_timeline"].append(("❌", f"拟合失败: {exc}"))
+        error_text = _build_actionable_error_message(str(exc))
         st.session_state["fit_notice"] = {
             "kind": "error",
-            "text": f"Fitting Error: {exc}",
+            "text": error_text,
         }
 
 
@@ -378,6 +509,9 @@ def _run_fitting_job(
     max_nfev_coarse = int(job_inputs["max_nfev_coarse"])
     diff_step_rel = float(job_inputs["diff_step_rel"])
     use_x_scale_jac = bool(job_inputs["use_x_scale_jac"])
+    use_log_k0_fit = bool(job_inputs.get("use_log_k0_fit", False))
+    use_log_k0_rev_fit = bool(job_inputs.get("use_log_k0_rev_fit", False))
+    use_log_K0_ads_fit = bool(job_inputs.get("use_log_K0_ads_fit", False))
 
     k0_min = job_inputs["k0_min"]
     k0_max = job_inputs["k0_max"]
@@ -446,6 +580,9 @@ def _run_fitting_job(
         fit_k0_rev_flags,
         fit_ea_rev_flags,
         fit_order_rev_flags_matrix,
+        use_log_k0_fit=use_log_k0_fit,
+        use_log_k0_rev_fit=use_log_k0_rev_fit,
+        use_log_K0_ads_fit=use_log_K0_ads_fit,
     )
 
     lb, ub = fitting._build_bounds(
@@ -479,6 +616,9 @@ def _run_fitting_job(
         ea_rev_max_J_mol,
         ord_rev_min,
         ord_rev_max,
+        use_log_k0_fit=use_log_k0_fit,
+        use_log_k0_rev_fit=use_log_k0_rev_fit,
+        use_log_K0_ads_fit=use_log_K0_ads_fit,
     )
 
     output_column_names = []
@@ -823,6 +963,9 @@ def _run_fitting_job(
             fit_k0_rev_flags,
             fit_ea_rev_flags,
             fit_order_rev_flags_matrix,
+            use_log_k0_fit=use_log_k0_fit,
+            use_log_k0_rev_fit=use_log_k0_rev_fit,
+            use_log_K0_ads_fit=use_log_K0_ads_fit,
         )
 
         residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
@@ -988,6 +1131,53 @@ def _run_fitting_job(
             fit_k0_rev_flags,
             fit_ea_rev_flags,
             fit_order_rev_flags_matrix,
+            use_log_k0_fit=use_log_k0_fit,
+            use_log_k0_rev_fit=use_log_k0_rev_fit,
+            use_log_K0_ads_fit=use_log_K0_ads_fit,
+        )
+        fit_state_snapshot = build_fit_state_snapshot(
+            data_df=data_df,
+            species_names=species_names,
+            output_mode=str(output_mode),
+            output_species_list=list(output_species_list),
+            stoich_matrix=stoich_matrix,
+            solver_method=str(solver_method),
+            rtol=float(rtol),
+            atol=float(atol),
+            reactor_type=str(reactor_type),
+            kinetic_model=str(kinetic_model),
+            reversible_enabled=bool(reversible_enabled),
+            pfr_flow_model=str(pfr_flow_model),
+            max_step_fraction=float(max_step_fraction),
+            residual_type=str(residual_type),
+            use_log_k0_fit=bool(use_log_k0_fit),
+            use_log_k0_rev_fit=bool(use_log_k0_rev_fit),
+            use_log_K0_ads_fit=bool(use_log_K0_ads_fit),
+            fit_k0_flags=fit_k0_flags,
+            fit_ea_flags=fit_ea_flags,
+            fit_order_flags_matrix=fit_order_flags_matrix,
+            fit_K0_ads_flags=fit_K0_ads_flags,
+            fit_Ea_K_flags=fit_Ea_K_flags,
+            fit_m_flags=fit_m_flags,
+            fit_k0_rev_flags=fit_k0_rev_flags,
+            fit_ea_rev_flags=fit_ea_rev_flags,
+            fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
+            k0_min=float(k0_min),
+            k0_max=float(k0_max),
+            ea_min=float(ea_min),
+            ea_max=float(ea_max),
+            ord_min=float(ord_min),
+            ord_max=float(ord_max),
+            K0_ads_min=float(K0_ads_min),
+            K0_ads_max=float(K0_ads_max),
+            Ea_K_min=float(Ea_K_min),
+            Ea_K_max=float(Ea_K_max),
+            k0_rev_min=float(k0_rev_min),
+            k0_rev_max=float(k0_rev_max),
+            ea_rev_min_J_mol=float(ea_rev_min_J_mol),
+            ea_rev_max_J_mol=float(ea_rev_max_J_mol),
+            order_rev_min=float(ord_rev_min),
+            order_rev_max=float(ord_rev_max),
         )
 
         return {
@@ -1006,6 +1196,11 @@ def _run_fitting_job(
             "kinetic_model": kinetic_model,
             "reversible_enabled": bool(reversible_enabled),
             "pfr_flow_model": str(pfr_flow_model),
+            "use_log_k0_fit": bool(use_log_k0_fit),
+            "use_log_k0_rev_fit": bool(use_log_k0_rev_fit),
+            "use_log_K0_ads_fit": bool(use_log_K0_ads_fit),
+            "fit_flags_hash": str(fit_state_snapshot.get("fit_flags_hash", "")),
+            "fit_bounds_hash": str(fit_state_snapshot.get("fit_bounds_hash", "")),
             # 向后兼容的键名
             "initial_cost": float(initial_cost),
             "cost": float(initial_cost),
@@ -1013,6 +1208,7 @@ def _run_fitting_job(
             "phi_initial": float(initial_cost),
             "phi_final": float(initial_cost),
             "residual_type": str(residual_type),
+            "n_fit_params": int(n_fit_params_total),
             "fit_skipped": True,
             "fit_skipped_reason": str(skip_reason),
         }
@@ -1038,6 +1234,8 @@ def _run_fitting_job(
             rand_vec = np.clip(lhs_scaled[i], lb, ub)
             starts.append(rand_vec)
 
+        ms_results_log: list[dict] = []  # 记录每个起点的结果
+
         for start_index, x0 in enumerate(starts):
             if stop_event.is_set():
                 raise FittingStoppedError("Stopped by user")
@@ -1059,12 +1257,27 @@ def _run_fitting_job(
                 max_nfev=max_nfev_coarse,
                 x_scale="jac" if use_x_scale_jac else 1.0,
             )
+            ms_results_log.append({
+                "start": start_index + 1,
+                "cost": float(res.cost),
+                "nfev": int(res.nfev),
+                "status": str(res.message),
+                "is_best": False,
+            })
             if best_res is None or res.cost < best_res.cost:
                 best_res = res
                 best_start_index = int(start_index + 1)
 
         if best_res is None:
             raise RuntimeError("多起点（Multi-start）执行失败：未获得有效结果。")
+
+        # 标记最佳起点
+        for entry in ms_results_log:
+            if entry["start"] == best_start_index:
+                entry["is_best"] = True
+
+        # 保存多起点对比数据到 session_state
+        progress_queue.put(("ms_results_log", ms_results_log))
 
         if stop_event.is_set():
             raise FittingStoppedError("Stopped by user")
@@ -1177,6 +1390,53 @@ def _run_fitting_job(
         fit_k0_rev_flags,
         fit_ea_rev_flags,
         fit_order_rev_flags_matrix,
+        use_log_k0_fit=use_log_k0_fit,
+        use_log_k0_rev_fit=use_log_k0_rev_fit,
+        use_log_K0_ads_fit=use_log_K0_ads_fit,
+    )
+    fit_state_snapshot = build_fit_state_snapshot(
+        data_df=data_df,
+        species_names=species_names,
+        output_mode=str(output_mode),
+        output_species_list=list(output_species_list),
+        stoich_matrix=stoich_matrix,
+        solver_method=str(solver_method),
+        rtol=float(rtol),
+        atol=float(atol),
+        reactor_type=str(reactor_type),
+        kinetic_model=str(kinetic_model),
+        reversible_enabled=bool(reversible_enabled),
+        pfr_flow_model=str(pfr_flow_model),
+        max_step_fraction=float(max_step_fraction),
+        residual_type=str(residual_type),
+        use_log_k0_fit=bool(use_log_k0_fit),
+        use_log_k0_rev_fit=bool(use_log_k0_rev_fit),
+        use_log_K0_ads_fit=bool(use_log_K0_ads_fit),
+        fit_k0_flags=fit_k0_flags,
+        fit_ea_flags=fit_ea_flags,
+        fit_order_flags_matrix=fit_order_flags_matrix,
+        fit_K0_ads_flags=fit_K0_ads_flags,
+        fit_Ea_K_flags=fit_Ea_K_flags,
+        fit_m_flags=fit_m_flags,
+        fit_k0_rev_flags=fit_k0_rev_flags,
+        fit_ea_rev_flags=fit_ea_rev_flags,
+        fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
+        k0_min=float(k0_min),
+        k0_max=float(k0_max),
+        ea_min=float(ea_min),
+        ea_max=float(ea_max),
+        ord_min=float(ord_min),
+        ord_max=float(ord_max),
+        K0_ads_min=float(K0_ads_min),
+        K0_ads_max=float(K0_ads_max),
+        Ea_K_min=float(Ea_K_min),
+        Ea_K_max=float(Ea_K_max),
+        k0_rev_min=float(k0_rev_min),
+        k0_rev_max=float(k0_rev_max),
+        ea_rev_min_J_mol=float(ea_rev_min_J_mol),
+        ea_rev_max_J_mol=float(ea_rev_max_J_mol),
+        order_rev_min=float(ord_rev_min),
+        order_rev_max=float(ord_rev_max),
     )
 
     set_status("拟合完成。")
@@ -1198,6 +1458,11 @@ def _run_fitting_job(
         "kinetic_model": kinetic_model,
         "reversible_enabled": bool(reversible_enabled),
         "pfr_flow_model": str(pfr_flow_model),
+        "use_log_k0_fit": bool(use_log_k0_fit),
+        "use_log_k0_rev_fit": bool(use_log_k0_rev_fit),
+        "use_log_K0_ads_fit": bool(use_log_K0_ads_fit),
+        "fit_flags_hash": str(fit_state_snapshot.get("fit_flags_hash", "")),
+        "fit_bounds_hash": str(fit_state_snapshot.get("fit_bounds_hash", "")),
         # 向后兼容的键名
         "initial_cost": float(initial_cost),
         "cost": float(final_res.cost),
@@ -1205,4 +1470,5 @@ def _run_fitting_job(
         "phi_initial": float(initial_cost),
         "phi_final": float(final_res.cost),
         "residual_type": str(residual_type),
+        "n_fit_params": int(n_fit_params_total),
     }

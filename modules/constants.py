@@ -65,6 +65,9 @@ DEFAULT_MAX_NFEV = 3000  # least_squares 最大迭代次数 [-]
 DEFAULT_N_STARTS = 10  # multi-start 起点数量 [-]
 DEFAULT_MAX_NFEV_COARSE = 300  # multi-start 粗略阶段最大迭代次数 [-]
 DEFAULT_RANDOM_SEED = 42  # 随机种子 [-]
+DEFAULT_USE_LOG_K0_FIT = True  # k0 默认启用对数空间拟合
+DEFAULT_USE_LOG_K0_REV_FIT = True  # k0_rev 默认启用对数空间拟合
+DEFAULT_USE_LOG_K0_ADS_FIT = True  # K0_ads 默认启用对数空间拟合
 
 # ========== 反应器稳态/剖面计算默认值 ==========
 # CSTR 稳态用 least_squares 的默认参数

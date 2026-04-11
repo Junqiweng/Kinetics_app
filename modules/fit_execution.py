@@ -7,6 +7,12 @@ import streamlit as st
 
 import modules.ui_text as ui_text
 from modules.config_state import _warn_once
+from modules.fit_setup import derive_effective_fit_flags
+from modules.fit_state import (
+    build_fit_result_state_snapshot,
+    build_fit_state_snapshot,
+    describe_fit_state_differences,
+)
 from modules.fitting_background import (
     _count_fitted_parameters,
     _drain_fitting_progress_queue,
@@ -52,6 +58,18 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
     _request_start_fitting = ctx["request_start_fitting"]
     _request_stop_fitting = ctx["request_stop_fitting"]
 
+    effective_fit_flags = derive_effective_fit_flags(
+        ctx,
+        str(kinetic_model),
+        bool(reversible_enabled),
+    )
+    fit_K0_ads_flags = effective_fit_flags["fit_K0_ads_flags"]
+    fit_Ea_K_flags = effective_fit_flags["fit_Ea_K_flags"]
+    fit_m_flags = effective_fit_flags["fit_m_flags"]
+    fit_k0_rev_flags = effective_fit_flags["fit_k0_rev_flags"]
+    fit_ea_rev_flags = effective_fit_flags["fit_ea_rev_flags"]
+    fit_order_rev_flags_matrix = effective_fit_flags["fit_order_rev_flags_matrix"]
+
     k0_min = float(fit_advanced_state["k0_min"])
     k0_max = float(fit_advanced_state["k0_max"])
     ea_min = float(fit_advanced_state["ea_min"])
@@ -75,6 +93,9 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
     n_starts = int(fit_advanced_state["n_starts"])
     max_nfev_coarse = int(fit_advanced_state["max_nfev_coarse"])
     use_x_scale_jac = bool(fit_advanced_state["use_x_scale_jac"])
+    use_log_k0_fit = bool(fit_advanced_state["use_log_k0_fit"])
+    use_log_k0_rev_fit = bool(fit_advanced_state["use_log_k0_rev_fit"])
+    use_log_K0_ads_fit = bool(fit_advanced_state["use_log_K0_ads_fit"])
     random_seed = int(fit_advanced_state["random_seed"])
     residual_type = str(fit_advanced_state["residual_type"])
     _drain_fitting_progress_queue()
@@ -160,14 +181,79 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
             elif notice_kind == "error":
                 st.error(notice_text)
 
+    fit_results_cached = st.session_state.get("fit_results", None)
+    stale_reasons: list[str] = []
+    if isinstance(fit_results_cached, dict):
+        active_data_df = st.session_state.get("data_df_cached", None)
+        if active_data_df is None:
+            active_data_df = data_df
+        current_state = build_fit_state_snapshot(
+            data_df=active_data_df,
+            species_names=species_names,
+            output_mode=str(output_mode),
+            output_species_list=list(output_species_list),
+            stoich_matrix=stoich_matrix,
+            solver_method=str(solver_method),
+            rtol=float(rtol),
+            atol=float(atol),
+            reactor_type=str(reactor_type),
+            kinetic_model=str(kinetic_model),
+            reversible_enabled=bool(reversible_enabled),
+            pfr_flow_model=str(pfr_flow_model),
+            max_step_fraction=float(max_step_fraction),
+            residual_type=str(residual_type),
+            use_log_k0_fit=bool(use_log_k0_fit),
+            use_log_k0_rev_fit=bool(use_log_k0_rev_fit),
+            use_log_K0_ads_fit=bool(use_log_K0_ads_fit),
+            fit_k0_flags=fit_k0_flags,
+            fit_ea_flags=fit_ea_flags,
+            fit_order_flags_matrix=fit_order_flags_matrix,
+            fit_K0_ads_flags=fit_K0_ads_flags,
+            fit_Ea_K_flags=fit_Ea_K_flags,
+            fit_m_flags=fit_m_flags,
+            fit_k0_rev_flags=fit_k0_rev_flags,
+            fit_ea_rev_flags=fit_ea_rev_flags,
+            fit_order_rev_flags_matrix=fit_order_rev_flags_matrix,
+            k0_min=float(k0_min),
+            k0_max=float(k0_max),
+            ea_min=float(ea_min),
+            ea_max=float(ea_max),
+            ord_min=float(ord_min),
+            ord_max=float(ord_max),
+            K0_ads_min=float(K0_ads_min),
+            K0_ads_max=float(K0_ads_max),
+            Ea_K_min=float(Ea_K_min),
+            Ea_K_max=float(Ea_K_max),
+            k0_rev_min=float(k0_rev_min),
+            k0_rev_max=float(k0_rev_max),
+            ea_rev_min_J_mol=float(ea_rev_min_J_mol),
+            ea_rev_max_J_mol=float(ea_rev_max_J_mol),
+            order_rev_min=float(order_rev_min),
+            order_rev_max=float(order_rev_max),
+        )
+        stale_reasons = describe_fit_state_differences(
+            current_state,
+            build_fit_result_state_snapshot(fit_results_cached),
+        )
+    st.session_state["fit_results_stale_reasons"] = list(stale_reasons)
+    if stale_reasons:
+        st.warning(
+            "当前缓存的拟合结果已过期，建议重新拟合后再判断参数或误差表现。"
+        )
+        for reason in stale_reasons:
+            st.markdown(f"- {reason}")
+
     if clear_btn and (not fitting_running):
         for key in [
             "fit_results",
             "fit_compare_long_df",
+            "fit_results_stale_reasons",
             "fitting_timeline",
             "fitting_metrics",
             "fitting_ms_summary",
+            "fitting_ms_results_log",
             "fitting_final_summary",
+            "fitting_history",
         ]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -266,6 +352,12 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
                         f"max_nfev={int(max_nfev)}, diff_step={float(diff_step_rel):.1e}, "
                         f"x_scale={'jac' if bool(use_x_scale_jac) else '1.0'}"
                     ),
+                    (
+                        "对数拟合: "
+                        f"k₀={'开' if bool(use_log_k0_fit) else '关'}, "
+                        f"k₀,rev={'开' if bool(use_log_k0_rev_fit) else '关'}, "
+                        f"K₀,ads={'开' if bool(use_log_K0_ads_fit) else '关'}"
+                    ),
                     f"多起点策略: {ms_text}",
                 ],
             }
@@ -308,6 +400,9 @@ def render_fit_actions(ctx: dict, fit_advanced_state: dict) -> dict:
                 "max_nfev_coarse": max_nfev_coarse,
                 "diff_step_rel": diff_step_rel,
                 "use_x_scale_jac": use_x_scale_jac,
+                "use_log_k0_fit": use_log_k0_fit,
+                "use_log_k0_rev_fit": use_log_k0_rev_fit,
+                "use_log_K0_ads_fit": use_log_K0_ads_fit,
                 "k0_min": k0_min,
                 "k0_max": k0_max,
                 "ea_min": ea_min,

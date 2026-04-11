@@ -19,7 +19,11 @@ from modules.config_state import (
     _clear_state_for_imported_config,
     _clear_state_for_reset_default,
 )
-from modules.fitting_background import FittingStoppedError, _drain_fitting_progress_queue
+from modules.fitting_background import (
+    FittingStoppedError,
+    _append_fit_history_entry,
+    _drain_fitting_progress_queue,
+)
 from modules.plot_helpers import _configure_matplotlib_chinese_font
 from modules.constants import (
     DEFAULT_SESSION_MAX_AGE_HOURS,
@@ -473,6 +477,7 @@ def bootstrap_app_state() -> dict:
                 int(st.session_state.get("fit_results_version", 0)) + 1
             )
             st.session_state["fitting_status"] = "拟合完成。"
+            _append_fit_history_entry(fit_results)
             phi_value = float(
                 fit_results.get("phi_final", fit_results.get("cost", 0.0))
             )
@@ -679,4 +684,3 @@ def bootstrap_app_state() -> dict:
         "get_cfg": get_cfg,
         "show_help_dialog": _show_help_dialog,
     }
-

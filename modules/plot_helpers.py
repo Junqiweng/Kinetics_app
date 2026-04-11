@@ -188,6 +188,7 @@ def _plot_reference_series(
     y_values: np.ndarray,
     label: str,
     color: str,
+    linestyle: str = "-",
 ) -> None:
     ax.plot(
         x_values,
@@ -195,4 +196,5 @@ def _plot_reference_series(
         color=color,
         linewidth=2.2,
         label=label,
+        linestyle=linestyle,
     )

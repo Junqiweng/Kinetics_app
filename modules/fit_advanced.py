@@ -35,6 +35,9 @@ from modules.constants import (
     DEFAULT_ORDER_REV_MIN,
     UI_MAX_NFEV_STEP,
     UI_MAX_STEP_FRACTION_STEP,
+    DEFAULT_USE_LOG_K0_ADS_FIT,
+    DEFAULT_USE_LOG_K0_FIT,
+    DEFAULT_USE_LOG_K0_REV_FIT,
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
 )
 
@@ -67,74 +70,18 @@ def render_fit_advanced(ctx: dict) -> dict:
             x = int(fallback)
         return int(max(int(lower), int(x)))
 
-    with st.expander("高级设置与边界 (点击展开)", expanded=False):
+    k0_min = float(get_cfg("k0_min", DEFAULT_K0_MIN))
+    k0_max = float(get_cfg("k0_max", DEFAULT_K0_MAX))
+    ea_min = float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL))
+    ea_max = float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL))
+    ord_min = float(get_cfg("order_min", DEFAULT_ORDER_MIN))
+    ord_max = float(get_cfg("order_max", DEFAULT_ORDER_MAX))
+    K0_ads_min = float(get_cfg("K0_ads_min", DEFAULT_K0_ADS_MIN))
+    K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
+    Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
+    Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
 
-        st.markdown("**1. 基础边界设置**")
-        col_b1, col_b2, col_b3 = st.columns(3)
-        with col_b1:
-            k0_min = ui_comp.smart_number_input(
-                "k₀ 下限（k0_min）",
-                value=float(get_cfg("k0_min", DEFAULT_K0_MIN)),
-                key="cfg_k0_min",
-            )
-            k0_max = ui_comp.smart_number_input(
-                "k₀ 上限（k0_max）",
-                value=float(get_cfg("k0_max", DEFAULT_K0_MAX)),
-                key="cfg_k0_max",
-            )
-        with col_b2:
-            ea_min = ui_comp.smart_number_input(
-                "Eₐ 下限（ea_min_J_mol）",
-                value=float(get_cfg("ea_min_J_mol", DEFAULT_EA_MIN_J_MOL)),
-                key="cfg_ea_min_J_mol",
-            )
-            ea_max = ui_comp.smart_number_input(
-                "Eₐ 上限（ea_max_J_mol）",
-                value=float(get_cfg("ea_max_J_mol", DEFAULT_EA_MAX_J_MOL)),
-                key="cfg_ea_max_J_mol",
-            )
-        with col_b3:
-            ord_min = ui_comp.smart_number_input(
-                "反应级数下限（order_min）",
-                value=float(get_cfg("order_min", DEFAULT_ORDER_MIN)),
-                key="cfg_order_min",
-            )
-            ord_max = ui_comp.smart_number_input(
-                "反应级数上限（order_max）",
-                value=float(get_cfg("order_max", DEFAULT_ORDER_MAX)),
-                key="cfg_order_max",
-            )
-
-        K0_ads_min = float(get_cfg("K0_ads_min", DEFAULT_K0_ADS_MIN))
-        K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
-        Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
-        Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
-        if kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
-            st.markdown("**1.2 L-H 边界设置**")
-            col_lh_b1, col_lh_b2 = st.columns(2)
-            with col_lh_b1:
-                K0_ads_min = ui_comp.smart_number_input(
-                    "K₀,ads 下限（K0_ads_min）",
-                    value=K0_ads_min,
-                    key="cfg_K0_ads_min",
-                )
-                K0_ads_max = ui_comp.smart_number_input(
-                    "K₀,ads 上限（K0_ads_max）",
-                    value=K0_ads_max,
-                    key="cfg_K0_ads_max",
-                )
-            with col_lh_b2:
-                Ea_K_min = ui_comp.smart_number_input(
-                    "Eₐ,K 下限（Ea_K_min）",
-                    value=Ea_K_min,
-                    key="cfg_Ea_K_min",
-                )
-                Ea_K_max = ui_comp.smart_number_input(
-                    "Eₐ,K 上限（Ea_K_max）",
-                    value=Ea_K_max,
-                    key="cfg_Ea_K_max",
-                )
-
+    with st.expander("高级设置 (点击展开)", expanded=False):
         # 可逆反应边界（逆反应）
         k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
         k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
@@ -143,7 +90,7 @@ def render_fit_advanced(ctx: dict) -> dict:
         order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
         order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
         if reversible_enabled:
-            st.markdown("**1.3 可逆反应边界设置（逆反应）**")
+            st.markdown("**1. 可逆反应边界设置（逆反应）**")
             col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
             with col_rev_b1:
                 k0_rev_min = ui_comp.smart_number_input(
@@ -224,10 +171,35 @@ def render_fit_advanced(ctx: dict) -> dict:
                     key="cfg_max_step_fraction",
                     help="用于 solve_ivp 的积分步长上限：max_step = fraction × 总时间/总体积；0 表示不限制。",
                 )
-            use_x_scale_jac = st.checkbox(
+            col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
+            use_x_scale_jac = col_opt1.checkbox(
                 "启用雅可比尺度归一（x_scale='jac'）",
                 value=get_cfg("use_x_scale_jac", True),
                 key="cfg_use_x_scale_jac",
+            )
+            use_log_k0_fit = col_opt2.checkbox(
+                "k₀ 用 log 拟合",
+                value=bool(get_cfg("use_log_k0_fit", DEFAULT_USE_LOG_K0_FIT)),
+                key="cfg_use_log_k0_fit",
+                help="启用后，优化器在 log 空间中拟合 k₀，但模型计算仍使用线性空间的 k₀。",
+            )
+            use_log_k0_rev_fit = col_opt3.checkbox(
+                "k₀,rev 用 log 拟合",
+                value=bool(
+                    get_cfg("use_log_k0_rev_fit", DEFAULT_USE_LOG_K0_REV_FIT)
+                ),
+                key="cfg_use_log_k0_rev_fit",
+                disabled=(not reversible_enabled),
+                help="仅对启用可逆反应后参与拟合的 k₀,rev 生效。",
+            )
+            use_log_K0_ads_fit = col_opt4.checkbox(
+                "K₀,ads 用 log 拟合",
+                value=bool(
+                    get_cfg("use_log_K0_ads_fit", DEFAULT_USE_LOG_K0_ADS_FIT)
+                ),
+                key="cfg_use_log_K0_ads_fit",
+                disabled=(kinetic_model != KINETIC_MODEL_LANGMUIR_HINSHELWOOD),
+                help="仅对 L-H 模型下参与拟合的 K₀,ads 生效；启用时对应初值和下界必须 > 0。",
             )
 
         with st.container(border=True):
@@ -366,6 +338,9 @@ def render_fit_advanced(ctx: dict) -> dict:
                 "diff_step_rel": float(diff_step_rel),
                 "max_nfev": int(max_nfev),
                 "use_x_scale_jac": bool(use_x_scale_jac),
+                "use_log_k0_fit": bool(use_log_k0_fit),
+                "use_log_k0_rev_fit": bool(use_log_k0_rev_fit),
+                "use_log_K0_ads_fit": bool(use_log_K0_ads_fit),
                 "use_multi_start": bool(use_ms),
                 "n_starts": int(n_starts),
                 "max_nfev_coarse": int(max_nfev_coarse),
@@ -406,6 +381,9 @@ def render_fit_advanced(ctx: dict) -> dict:
         "n_starts": int(n_starts),
         "max_nfev_coarse": int(max_nfev_coarse),
         "use_x_scale_jac": bool(use_x_scale_jac),
+        "use_log_k0_fit": bool(use_log_k0_fit),
+        "use_log_k0_rev_fit": bool(use_log_k0_rev_fit),
+        "use_log_K0_ads_fit": bool(use_log_K0_ads_fit),
         "random_seed": int(random_seed),
         "residual_type": str(residual_type),
     }

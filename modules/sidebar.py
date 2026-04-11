@@ -42,9 +42,15 @@ def render_sidebar(ctx: dict) -> dict:
             st.markdown(
                 '<div class="kinetics-card-marker"></div>', unsafe_allow_html=True
             )
-            help_btn = st.button("使用帮助", width="stretch")
-            if help_btn:
-                show_help_dialog()
+            col_help, col_new = st.columns(2)
+            with col_help:
+                help_btn = st.button("使用帮助", width="stretch")
+                if help_btn:
+                    show_help_dialog()
+            with col_new:
+                if st.button("新建项目", width="stretch", disabled=global_disabled):
+                    st.session_state["pending_reset_to_default"] = True
+                    st.rerun()
 
         with st.container(border=True):
             st.markdown(
@@ -120,7 +126,7 @@ def render_sidebar(ctx: dict) -> dict:
                 help="可逆反应作为动力学扩展选项，可与幂律或 Langmuir-Hinshelwood 联合使用。",
             )
 
-            st.markdown("#### 求解器")
+        with st.expander("求解器设置", expanded=False):
             solver_method_options = ["LSODA", "RK45", "BDF", "Radau"]
             solver_method_default = str(get_cfg("solver_method", "LSODA")).strip()
             if solver_method_default not in solver_method_options:
@@ -178,12 +184,43 @@ def render_sidebar(ctx: dict) -> dict:
                         if not is_valid:
                             st.error(f"导入配置失败（配置校验未通过）：{error_message}")
                         else:
+                            # 生成变更摘要
+                            old_cfg = st.session_state.get("imported_config", {})
+                            if isinstance(old_cfg, dict):
+                                diff_keys = []
+                                compare_keys = [
+                                    "reactor_type", "kinetic_model", "reversible_enabled",
+                                    "solver_method", "rtol", "atol",
+                                    "species_text", "n_reactions", "output_mode",
+                                ]
+                                for ck in compare_keys:
+                                    old_val = old_cfg.get(ck, None)
+                                    new_val = cfg.get(ck, None)
+                                    if old_val != new_val and new_val is not None:
+                                        diff_keys.append(f"**{ck}**: {old_val} → {new_val}")
+                                # 数组类型的 key 只报"已变更"
+                                for ak in ["k0_guess", "ea_guess_J_mol", "stoich_matrix", "order_guess"]:
+                                    old_v = old_cfg.get(ak, None)
+                                    new_v = cfg.get(ak, None)
+                                    if new_v is not None and str(old_v) != str(new_v):
+                                        diff_keys.append(f"**{ak}**: 已变更")
+                                if diff_keys:
+                                    st.session_state["config_import_diff"] = diff_keys
+                                else:
+                                    st.session_state["config_import_diff"] = ["无明显差异"]
                             st.session_state["imported_config_digest"] = file_digest
                             st.session_state["pending_imported_config"] = cfg
                             st.success("导入成功！正在应用配置并刷新页面...")
                             st.rerun()
                 except Exception as exc:
                     st.error(f"导入配置失败（JSON/编码错误）：{exc}")
+
+            # 显示上次导入的变更摘要
+            config_diff = st.session_state.pop("config_import_diff", None)
+            if isinstance(config_diff, list) and config_diff:
+                st.markdown("**导入变更摘要：**")
+                for item in config_diff:
+                    st.markdown(f"- {item}")
 
             export_config_placeholder = st.empty()
 

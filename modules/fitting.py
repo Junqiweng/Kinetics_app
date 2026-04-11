@@ -61,6 +61,51 @@ def _row_get_value(row: object, key: str, default) -> object:
     return default
 
 
+def _pack_positive_parameter_slice(
+    values: np.ndarray,
+    fit_flags: np.ndarray,
+    *,
+    use_log_fit: bool,
+    param_label: str,
+) -> np.ndarray:
+    selected_values = np.asarray(values, dtype=float)[np.asarray(fit_flags, dtype=bool)]
+    if selected_values.size == 0:
+        return np.array([], dtype=float)
+    if use_log_fit:
+        if np.any(selected_values <= 0.0):
+            raise ValueError(
+                f"{param_label} 启用对数拟合时，被选中拟合的初值必须全部 > 0。"
+            )
+        return np.log(selected_values)
+    return selected_values.astype(float)
+
+
+def _append_positive_parameter_bounds(
+    lower_parts: list[np.ndarray],
+    upper_parts: list[np.ndarray],
+    n_values: int,
+    lower_value: float,
+    upper_value: float,
+    *,
+    use_log_fit: bool,
+    param_label: str,
+) -> None:
+    if n_values <= 0:
+        return
+    lower_value = float(lower_value)
+    upper_value = float(upper_value)
+    if use_log_fit:
+        if lower_value <= 0.0 or upper_value <= 0.0:
+            raise ValueError(
+                f"{param_label} 启用对数拟合时，上下界必须全部 > 0。"
+            )
+        lower_parts.append(np.full(n_values, np.log(lower_value), dtype=float))
+        upper_parts.append(np.full(n_values, np.log(upper_value), dtype=float))
+        return
+    lower_parts.append(np.full(n_values, lower_value, dtype=float))
+    upper_parts.append(np.full(n_values, upper_value, dtype=float))
+
+
 def _pack_parameters(
     k0_guess: np.ndarray,
     ea_guess_J_mol: np.ndarray,
@@ -82,6 +127,9 @@ def _pack_parameters(
     fit_k0_rev_flags: np.ndarray | None = None,
     fit_ea_rev_flags: np.ndarray | None = None,
     fit_order_rev_flags_matrix: np.ndarray | None = None,
+    use_log_k0_fit: bool = False,
+    use_log_k0_rev_fit: bool = False,
+    use_log_K0_ads_fit: bool = False,
 ) -> np.ndarray:
     """
     将所有需要拟合的参数打包成一个向量。
@@ -91,7 +139,14 @@ def _pack_parameters(
 
     # 1. k0 (正反应)
     if np.any(fit_k0_flags):
-        parts.append(k0_guess[fit_k0_flags])
+        parts.append(
+            _pack_positive_parameter_slice(
+                k0_guess,
+                fit_k0_flags,
+                use_log_fit=bool(use_log_k0_fit),
+                param_label="k₀",
+            )
+        )
 
     # 2. Ea (正反应)
     if np.any(fit_ea_flags):
@@ -104,7 +159,14 @@ def _pack_parameters(
 
     # 4. K0_ads（L-H）
     if fit_K0_ads_flags is not None and np.any(fit_K0_ads_flags):
-        parts.append(K0_ads_guess[fit_K0_ads_flags])
+        parts.append(
+            _pack_positive_parameter_slice(
+                K0_ads_guess,
+                fit_K0_ads_flags,
+                use_log_fit=bool(use_log_K0_ads_fit),
+                param_label="K₀,ads",
+            )
+        )
 
     # 5. Ea_K（L-H）
     if fit_Ea_K_flags is not None and np.any(fit_Ea_K_flags):
@@ -116,7 +178,14 @@ def _pack_parameters(
 
     # 7. k0_rev (可逆)
     if fit_k0_rev_flags is not None and np.any(fit_k0_rev_flags):
-        parts.append(k0_rev_guess[fit_k0_rev_flags])
+        parts.append(
+            _pack_positive_parameter_slice(
+                k0_rev_guess,
+                fit_k0_rev_flags,
+                use_log_fit=bool(use_log_k0_rev_fit),
+                param_label="k₀,rev",
+            )
+        )
 
     # 8. Ea_rev (可逆)
     if fit_ea_rev_flags is not None and np.any(fit_ea_rev_flags):
@@ -155,6 +224,9 @@ def _unpack_parameters(
     fit_k0_rev_flags: np.ndarray | None = None,
     fit_ea_rev_flags: np.ndarray | None = None,
     fit_order_rev_flags_matrix: np.ndarray | None = None,
+    use_log_k0_fit: bool = False,
+    use_log_k0_rev_fit: bool = False,
+    use_log_K0_ads_fit: bool = False,
 ) -> dict:
     """
     从参数向量中解包所有参数。
@@ -182,7 +254,10 @@ def _unpack_parameters(
     # 1. k0
     n_fit_k0 = int(np.sum(fit_k0_flags))
     if n_fit_k0 > 0:
-        k0[fit_k0_flags] = parameter_vector[index : index + n_fit_k0]
+        k0_values = parameter_vector[index : index + n_fit_k0]
+        if use_log_k0_fit:
+            k0_values = np.exp(k0_values)
+        k0[fit_k0_flags] = k0_values
         index += n_fit_k0
 
     # 2. Ea
@@ -205,7 +280,10 @@ def _unpack_parameters(
     if fit_K0_ads_flags is not None:
         n_fit_K0_ads = int(np.sum(fit_K0_ads_flags))
         if n_fit_K0_ads > 0:
-            K0_ads[fit_K0_ads_flags] = parameter_vector[index : index + n_fit_K0_ads]
+            K0_ads_values = parameter_vector[index : index + n_fit_K0_ads]
+            if use_log_K0_ads_fit:
+                K0_ads_values = np.exp(K0_ads_values)
+            K0_ads[fit_K0_ads_flags] = K0_ads_values
             index += n_fit_K0_ads
 
     # 5. Ea_K
@@ -226,7 +304,10 @@ def _unpack_parameters(
     if fit_k0_rev_flags is not None:
         n_fit_k0_rev = int(np.sum(fit_k0_rev_flags))
         if n_fit_k0_rev > 0:
-            k0_rev[fit_k0_rev_flags] = parameter_vector[index : index + n_fit_k0_rev]
+            k0_rev_values = parameter_vector[index : index + n_fit_k0_rev]
+            if use_log_k0_rev_fit:
+                k0_rev_values = np.exp(k0_rev_values)
+            k0_rev[fit_k0_rev_flags] = k0_rev_values
             index += n_fit_k0_rev
 
     # 8. Ea_rev
@@ -294,6 +375,9 @@ def _build_bounds(
     ea_rev_max: float = DEFAULT_EA_REV_MAX_J_MOL,
     order_rev_min: float = DEFAULT_ORDER_REV_MIN,
     order_rev_max: float = DEFAULT_ORDER_REV_MAX,
+    use_log_k0_fit: bool = False,
+    use_log_k0_rev_fit: bool = False,
+    use_log_K0_ads_fit: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     构建所有拟合参数的边界。
@@ -304,9 +388,15 @@ def _build_bounds(
 
     # 1. k0
     n_fit_k0 = int(np.sum(fit_k0_flags))
-    if n_fit_k0 > 0:
-        lower_parts.append(np.full(n_fit_k0, float(k0_min), dtype=float))
-        upper_parts.append(np.full(n_fit_k0, float(k0_max), dtype=float))
+    _append_positive_parameter_bounds(
+        lower_parts,
+        upper_parts,
+        n_fit_k0,
+        float(k0_min),
+        float(k0_max),
+        use_log_fit=bool(use_log_k0_fit),
+        param_label="k₀",
+    )
 
     # 2. Ea
     n_fit_ea = int(np.sum(fit_ea_flags))
@@ -323,9 +413,15 @@ def _build_bounds(
     # 4. K0_ads
     if fit_K0_ads_flags is not None:
         n_fit_K0_ads = int(np.sum(fit_K0_ads_flags))
-        if n_fit_K0_ads > 0:
-            lower_parts.append(np.full(n_fit_K0_ads, K0_ads_min, dtype=float))
-            upper_parts.append(np.full(n_fit_K0_ads, K0_ads_max, dtype=float))
+        _append_positive_parameter_bounds(
+            lower_parts,
+            upper_parts,
+            n_fit_K0_ads,
+            K0_ads_min,
+            K0_ads_max,
+            use_log_fit=bool(use_log_K0_ads_fit),
+            param_label="K₀,ads",
+        )
 
     # 5. Ea_K
     if fit_Ea_K_flags is not None:
@@ -344,9 +440,15 @@ def _build_bounds(
     # 7. k0_rev
     if fit_k0_rev_flags is not None:
         n_fit_k0_rev = int(np.sum(fit_k0_rev_flags))
-        if n_fit_k0_rev > 0:
-            lower_parts.append(np.full(n_fit_k0_rev, float(k0_rev_min), dtype=float))
-            upper_parts.append(np.full(n_fit_k0_rev, float(k0_rev_max), dtype=float))
+        _append_positive_parameter_bounds(
+            lower_parts,
+            upper_parts,
+            n_fit_k0_rev,
+            float(k0_rev_min),
+            float(k0_rev_max),
+            use_log_fit=bool(use_log_k0_rev_fit),
+            param_label="k₀,rev",
+        )
 
     # 8. Ea_rev
     if fit_ea_rev_flags is not None:

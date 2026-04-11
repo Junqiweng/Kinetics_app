@@ -27,6 +27,9 @@ from modules.constants import (
     DEFAULT_ORDER_REV_MAX,
     DEFAULT_ORDER_REV_MIN,
     DEFAULT_RANDOM_SEED,
+    DEFAULT_USE_LOG_K0_ADS_FIT,
+    DEFAULT_USE_LOG_K0_FIT,
+    DEFAULT_USE_LOG_K0_REV_FIT,
 )
 
 
@@ -197,6 +200,30 @@ def build_export_config_from_ctx(
         max_nfev=int(_pick_cfg(get_cfg, "max_nfev", DEFAULT_MAX_NFEV, advanced_overrides)),
         use_x_scale_jac=bool(
             _pick_cfg(get_cfg, "use_x_scale_jac", True, advanced_overrides)
+        ),
+        use_log_k0_fit=bool(
+            _pick_cfg(
+                get_cfg,
+                "use_log_k0_fit",
+                DEFAULT_USE_LOG_K0_FIT,
+                advanced_overrides,
+            )
+        ),
+        use_log_k0_rev_fit=bool(
+            _pick_cfg(
+                get_cfg,
+                "use_log_k0_rev_fit",
+                DEFAULT_USE_LOG_K0_REV_FIT,
+                advanced_overrides,
+            )
+        ),
+        use_log_K0_ads_fit=bool(
+            _pick_cfg(
+                get_cfg,
+                "use_log_K0_ads_fit",
+                DEFAULT_USE_LOG_K0_ADS_FIT,
+                advanced_overrides,
+            )
         ),
         use_multi_start=bool(
             _pick_cfg(get_cfg, "use_multi_start", True, advanced_overrides)

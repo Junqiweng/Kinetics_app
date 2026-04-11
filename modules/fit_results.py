@@ -17,6 +17,12 @@ from modules.data_utils import (
     _get_measurement_column_name,
     _get_output_unit_text,
 )
+from modules.fit_setup import derive_effective_fit_flags
+from modules.fit_state import (
+    build_fit_result_state_snapshot,
+    build_fit_state_snapshot,
+    describe_fit_state_differences,
+)
 from modules.plot_helpers import (
     _fit_plot_color,
     _plot_reference_series,
@@ -255,6 +261,216 @@ def _render_centered_pyplot(fig) -> None:
         st.pyplot(fig, width="content")
 
 
+def _flatten_params_snapshot(
+    params_snapshot: dict | None,
+    species_names: list[str],
+) -> pd.DataFrame:
+    if not isinstance(params_snapshot, dict):
+        return pd.DataFrame(columns=["parameter", "value"])
+
+    rows: list[dict[str, float | str]] = []
+
+    def add_vector(values, prefix: str, labels: list[str]) -> None:
+        if values is None:
+            return
+        arr = np.asarray(values, dtype=float).reshape(-1)
+        for idx, value in enumerate(arr):
+            label = labels[idx] if idx < len(labels) else str(idx + 1)
+            rows.append({"parameter": f"{prefix}[{label}]", "value": float(value)})
+
+    def add_matrix(values, prefix: str, row_labels: list[str], col_labels: list[str]) -> None:
+        if values is None:
+            return
+        arr = np.asarray(values, dtype=float)
+        if arr.ndim != 2:
+            arr = np.atleast_2d(arr)
+        for row_idx in range(arr.shape[0]):
+            row_label = row_labels[row_idx] if row_idx < len(row_labels) else str(row_idx + 1)
+            for col_idx in range(arr.shape[1]):
+                col_label = (
+                    col_labels[col_idx] if col_idx < len(col_labels) else str(col_idx + 1)
+                )
+                rows.append(
+                    {
+                        "parameter": f"{prefix}[{row_label},{col_label}]",
+                        "value": float(arr[row_idx, col_idx]),
+                    }
+                )
+
+    reaction_count = int(np.asarray(params_snapshot.get("k0", [])).size)
+    reaction_labels = [f"R{i+1}" for i in range(reaction_count)]
+
+    add_vector(params_snapshot.get("k0", None), "k0", reaction_labels)
+    add_vector(params_snapshot.get("ea_J_mol", None), "Ea", reaction_labels)
+    add_matrix(
+        params_snapshot.get("reaction_order_matrix", None),
+        "n",
+        reaction_labels,
+        list(species_names),
+    )
+    add_vector(params_snapshot.get("K0_ads", None), "K0_ads", list(species_names))
+    add_vector(params_snapshot.get("Ea_K", None), "Ea_K", list(species_names))
+    add_vector(params_snapshot.get("m_inhibition", None), "m", reaction_labels)
+    add_vector(params_snapshot.get("k0_rev", None), "k0_rev", reaction_labels)
+    add_vector(params_snapshot.get("ea_rev", None), "Ea_rev", reaction_labels)
+    add_matrix(
+        params_snapshot.get("order_rev", None),
+        "n_rev",
+        reaction_labels,
+        list(species_names),
+    )
+
+    if not rows:
+        return pd.DataFrame(columns=["parameter", "value"])
+    return pd.DataFrame(rows)
+
+
+def _format_history_option(history_entry: dict) -> str:
+    fit_id = int(history_entry.get("fit_id", 0))
+    time_text = str(history_entry.get("time", "")).strip()
+    phi_value = ui_comp.smart_float_to_str(float(history_entry.get("phi", np.nan)))
+    return f"#{fit_id} | {time_text} | Φ={phi_value}"
+
+
+def _map_parity_temperatures_by_row_index(
+    data_df: pd.DataFrame,
+    row_indices,
+) -> pd.Series:
+    if "T_K" not in data_df.columns:
+        return pd.Series(np.nan, index=pd.Index(row_indices))
+    t_k_by_label = pd.to_numeric(data_df["T_K"], errors="coerce")
+    row_index_labels = pd.Index(pd.Series(row_indices).tolist())
+    return t_k_by_label.reindex(row_index_labels)
+
+
+def _remap_species_vector(
+    values,
+    species_names_fit: list[str],
+    species_names_current: list[str],
+) -> list[float]:
+    arr = np.asarray(values, dtype=float).reshape(-1)
+    if arr.size != len(species_names_fit):
+        raise ValueError("历史结果中的物种参数长度与物种列表不一致。")
+    fit_name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+    return [float(arr[fit_name_to_index[name]]) for name in species_names_current]
+
+
+def _remap_species_matrix(
+    values,
+    species_names_fit: list[str],
+    species_names_current: list[str],
+    n_reactions_current: int,
+) -> list[list[float]]:
+    arr = np.asarray(values, dtype=float)
+    if arr.shape != (n_reactions_current, len(species_names_fit)):
+        raise ValueError("历史结果中的级数矩阵形状与当前模型不一致。")
+    fit_name_to_index = {name: i for i, name in enumerate(species_names_fit)}
+    remapped = arr[:, [fit_name_to_index[name] for name in species_names_current]]
+    return remapped.tolist()
+
+
+def _build_initial_guess_updates_from_fit_result(
+    fitted_params: dict | None,
+    *,
+    species_names_current: list[str],
+    species_names_fit: list[str],
+    stoich_matrix_current,
+    stoich_matrix_fit,
+    n_reactions_current: int,
+    kinetic_model_current: str,
+    kinetic_model_fit: str,
+    reversible_enabled_current: bool,
+    reversible_enabled_fit: bool,
+) -> tuple[dict | None, str]:
+    if not isinstance(fitted_params, dict):
+        return None, "当前拟合结果缺少参数快照。"
+
+    if str(kinetic_model_current) != str(kinetic_model_fit):
+        return None, "当前动力学模型与结果来源不一致。"
+    if bool(reversible_enabled_current) != bool(reversible_enabled_fit):
+        return None, "当前可逆反应设置与结果来源不一致。"
+
+    fit_species_names = [str(x) for x in species_names_fit]
+    current_species_names = [str(x) for x in species_names_current]
+    if len(fit_species_names) != len(current_species_names) or set(
+        fit_species_names
+    ) != set(current_species_names):
+        return None, "当前物种列表与结果来源不一致。"
+
+    stoich_current = np.asarray(stoich_matrix_current, dtype=float)
+    stoich_fit = np.asarray(stoich_matrix_fit, dtype=float)
+    if stoich_current.shape != stoich_fit.shape:
+        return None, "当前化学计量数矩阵与结果来源不一致。"
+
+    fit_name_to_index = {name: i for i, name in enumerate(fit_species_names)}
+    stoich_fit_aligned = stoich_fit[
+        [fit_name_to_index[name] for name in current_species_names], :
+    ]
+    if not np.allclose(stoich_current, stoich_fit_aligned, rtol=0.0, atol=1e-12):
+        return None, "当前化学计量数矩阵与结果来源不一致。"
+
+    k0_values = np.asarray(fitted_params.get("k0", []), dtype=float).reshape(-1)
+    ea_values = np.asarray(fitted_params.get("ea_J_mol", []), dtype=float).reshape(-1)
+    order_values = np.asarray(
+        fitted_params.get("reaction_order_matrix", []), dtype=float
+    )
+    if k0_values.size != n_reactions_current or ea_values.size != n_reactions_current:
+        return None, "当前反应数与结果来源不一致。"
+    if order_values.shape != (n_reactions_current, len(fit_species_names)):
+        return None, "历史结果中的反应级数矩阵与当前模型不一致。"
+
+    try:
+        config_updates = {
+            "k0_guess": k0_values.tolist(),
+            "ea_guess_J_mol": ea_values.tolist(),
+            "order_guess": _remap_species_matrix(
+                order_values,
+                fit_species_names,
+                current_species_names,
+                n_reactions_current,
+            ),
+        }
+
+        if fitted_params.get("K0_ads") is not None:
+            config_updates["K0_ads"] = _remap_species_vector(
+                fitted_params["K0_ads"],
+                fit_species_names,
+                current_species_names,
+            )
+        if fitted_params.get("Ea_K") is not None:
+            config_updates["Ea_K_J_mol"] = _remap_species_vector(
+                fitted_params["Ea_K"],
+                fit_species_names,
+                current_species_names,
+            )
+        if fitted_params.get("m_inhibition") is not None:
+            m_values = np.asarray(fitted_params["m_inhibition"], dtype=float).reshape(-1)
+            if m_values.size != n_reactions_current:
+                return None, "历史结果中的抑制指数与当前反应数不一致。"
+            config_updates["m_inhibition"] = m_values.tolist()
+        if fitted_params.get("k0_rev") is not None:
+            k0_rev_values = np.asarray(fitted_params["k0_rev"], dtype=float).reshape(-1)
+            if k0_rev_values.size != n_reactions_current:
+                return None, "历史结果中的逆反应 k0 与当前反应数不一致。"
+            config_updates["k0_rev"] = k0_rev_values.tolist()
+        if fitted_params.get("ea_rev") is not None:
+            ea_rev_values = np.asarray(fitted_params["ea_rev"], dtype=float).reshape(-1)
+            if ea_rev_values.size != n_reactions_current:
+                return None, "历史结果中的逆反应 Ea 与当前反应数不一致。"
+            config_updates["ea_rev_J_mol"] = ea_rev_values.tolist()
+        if fitted_params.get("order_rev") is not None:
+            config_updates["order_rev"] = _remap_species_matrix(
+                fitted_params["order_rev"],
+                fit_species_names,
+                current_species_names,
+                n_reactions_current,
+            )
+    except ValueError as exc:
+        return None, str(exc)
+
+    return config_updates, ""
+
+
 def render_fit_results(
     tab_fit_results_container, ctx: dict, fit_advanced_state: dict, runtime_state: dict
 ) -> dict:
@@ -268,6 +484,32 @@ def render_fit_results(
     kinetic_model = ctx["kinetic_model"]
     reversible_enabled = bool(ctx.get("reversible_enabled", False))
     output_mode = ctx["output_mode"]
+    n_reactions = int(ctx["n_reactions"])
+    residual_type_current = str(fit_advanced_state.get("residual_type", "绝对残差"))
+    effective_fit_flags = derive_effective_fit_flags(
+        ctx,
+        str(kinetic_model),
+        bool(reversible_enabled),
+    )
+    max_step_fraction_current = float(
+        fit_advanced_state.get(
+            "max_step_fraction",
+            get_cfg("max_step_fraction", DEFAULT_MAX_STEP_FRACTION),
+        )
+    )
+    use_log_k0_fit_current = bool(
+        fit_advanced_state.get("use_log_k0_fit", get_cfg("use_log_k0_fit", True))
+    )
+    use_log_k0_rev_fit_current = bool(
+        fit_advanced_state.get(
+            "use_log_k0_rev_fit", get_cfg("use_log_k0_rev_fit", True)
+        )
+    )
+    use_log_K0_ads_fit_current = bool(
+        fit_advanced_state.get(
+            "use_log_K0_ads_fit", get_cfg("use_log_K0_ads_fit", True)
+        )
+    )
     # --- 结果展示（优化版）---
     if "fit_results" in st.session_state:
         res = st.session_state["fit_results"]
@@ -286,16 +528,63 @@ def render_fit_results(
         else:
             df_fit = st.session_state.get("data_df_cached", pd.DataFrame())
 
-        # 若当前缓存数据与拟合时数据不一致，提示用户“当前上传数据已变化”
-        current_df = st.session_state.get("data_df_cached", pd.DataFrame())
-        if not current_df.empty and "data_hash" in res:
-            current_hash = hashlib.md5(
-                current_df.to_csv(index=False).encode()
-            ).hexdigest()
-            if current_hash != res["data_hash"]:
-                tab_fit_results_container.warning(
-                    "⚠️ 当前数据与拟合时使用的数据不一致（已上传新数据），结果可能不匹配。"
-                )
+        active_data_df = st.session_state.get("data_df_cached", None)
+        if active_data_df is None and isinstance(df_fit, pd.DataFrame):
+            active_data_df = df_fit
+
+        stale_reasons = describe_fit_state_differences(
+            build_fit_state_snapshot(
+                data_df=active_data_df,
+                species_names=species_names,
+                output_mode=str(output_mode),
+                output_species_list=list(ctx.get("output_species_list", [])),
+                stoich_matrix=stoich_matrix,
+                solver_method=str(solver_method),
+                rtol=float(rtol),
+                atol=float(atol),
+                reactor_type=str(reactor_type),
+                kinetic_model=str(kinetic_model),
+                reversible_enabled=bool(reversible_enabled),
+                pfr_flow_model=str(ctx.get("pfr_flow_model", "")),
+                max_step_fraction=float(max_step_fraction_current),
+                residual_type=str(residual_type_current),
+                use_log_k0_fit=bool(use_log_k0_fit_current),
+                use_log_k0_rev_fit=bool(use_log_k0_rev_fit_current),
+                use_log_K0_ads_fit=bool(use_log_K0_ads_fit_current),
+                fit_k0_flags=ctx["fit_k0_flags"],
+                fit_ea_flags=ctx["fit_ea_flags"],
+                fit_order_flags_matrix=ctx["fit_order_flags_matrix"],
+                fit_K0_ads_flags=effective_fit_flags["fit_K0_ads_flags"],
+                fit_Ea_K_flags=effective_fit_flags["fit_Ea_K_flags"],
+                fit_m_flags=effective_fit_flags["fit_m_flags"],
+                fit_k0_rev_flags=effective_fit_flags["fit_k0_rev_flags"],
+                fit_ea_rev_flags=effective_fit_flags["fit_ea_rev_flags"],
+                fit_order_rev_flags_matrix=effective_fit_flags["fit_order_rev_flags_matrix"],
+                k0_min=float(fit_advanced_state["k0_min"]),
+                k0_max=float(fit_advanced_state["k0_max"]),
+                ea_min=float(fit_advanced_state["ea_min"]),
+                ea_max=float(fit_advanced_state["ea_max"]),
+                ord_min=float(fit_advanced_state["ord_min"]),
+                ord_max=float(fit_advanced_state["ord_max"]),
+                K0_ads_min=float(fit_advanced_state["K0_ads_min"]),
+                K0_ads_max=float(fit_advanced_state["K0_ads_max"]),
+                Ea_K_min=float(fit_advanced_state["Ea_K_min"]),
+                Ea_K_max=float(fit_advanced_state["Ea_K_max"]),
+                k0_rev_min=float(fit_advanced_state["k0_rev_min"]),
+                k0_rev_max=float(fit_advanced_state["k0_rev_max"]),
+                ea_rev_min_J_mol=float(fit_advanced_state["ea_rev_min_J_mol"]),
+                ea_rev_max_J_mol=float(fit_advanced_state["ea_rev_max_J_mol"]),
+                order_rev_min=float(fit_advanced_state["order_rev_min"]),
+                order_rev_max=float(fit_advanced_state["order_rev_max"]),
+            ),
+            build_fit_result_state_snapshot(res),
+        )
+        if stale_reasons:
+            tab_fit_results_container.warning(
+                "当前显示的是历史拟合结果，和最新输入不一致。"
+            )
+            for reason in stale_reasons:
+                tab_fit_results_container.markdown(f"- {reason}")
         species_names_fit = res.get("species_names", species_names)
         stoich_matrix_fit = res.get("stoich_matrix", stoich_matrix)
         solver_method_fit = res.get("solver_method", solver_method)
@@ -452,6 +741,196 @@ def render_fit_results(
                         width="stretch",
                         height=UI_PARAM_TABLE_HEIGHT_PX,
                     )
+
+            # --- 「将拟合结果作为新初值」按钮 ---
+            st.divider()
+            reuse_updates, reuse_disabled_reason = _build_initial_guess_updates_from_fit_result(
+                fitted_params,
+                species_names_current=list(species_names),
+                species_names_fit=list(species_names_fit),
+                stoich_matrix_current=stoich_matrix,
+                stoich_matrix_fit=stoich_matrix_fit,
+                n_reactions_current=n_reactions,
+                kinetic_model_current=str(kinetic_model),
+                kinetic_model_fit=str(kinetic_model_fit),
+                reversible_enabled_current=bool(reversible_enabled),
+                reversible_enabled_fit=bool(reversible_enabled_fit),
+            )
+            reuse_button_help = (
+                "将上方拟合得到的参数填回当前拟合页的初值面板，作为下次拟合的初始猜测值。"
+            )
+            if reuse_disabled_reason:
+                reuse_button_help += f" 当前不可用：{reuse_disabled_reason}"
+            if st.button(
+                "📥 将拟合结果作为新初值",
+                help=reuse_button_help,
+                use_container_width=True,
+                disabled=(reuse_updates is None),
+            ):
+                st.session_state["pending_model_widget_updates"] = {
+                    "config_updates": reuse_updates,
+                    "reset_prefixes": [
+                        "base_params_",
+                        "base_orders_",
+                        "lh_ads_",
+                        "lh_m_",
+                        "rev_params_",
+                        "rev_orders_",
+                    ],
+                    "notice": "",
+                }
+                st.session_state["fit_notice"] = {
+                    "kind": "success",
+                    "text": "已将拟合结果写入当前拟合页的初值面板。",
+                }
+                st.rerun()
+            elif reuse_disabled_reason:
+                st.info(f"当前结果不能直接回填为新初值：{reuse_disabled_reason}")
+
+            fitting_history = st.session_state.get("fitting_history", [])
+            valid_history = [
+                entry for entry in fitting_history if isinstance(entry, dict)
+            ]
+            if len(valid_history) > 1:
+                st.divider()
+                st.markdown("#### 与历史拟合比较")
+
+                option_labels = [_format_history_option(entry) for entry in valid_history]
+                label_to_entry = {
+                    _format_history_option(entry): entry for entry in valid_history
+                }
+                default_base_idx = max(len(option_labels) - 2, 0)
+                default_compare_idx = len(option_labels) - 1
+                col_cmp1, col_cmp2 = st.columns(2)
+                base_label = col_cmp1.selectbox(
+                    "基准拟合",
+                    option_labels,
+                    index=default_base_idx,
+                    key="fit_history_compare_base",
+                )
+                compare_label = col_cmp2.selectbox(
+                    "对比拟合",
+                    option_labels,
+                    index=default_compare_idx,
+                    key="fit_history_compare_target",
+                )
+                base_entry = label_to_entry.get(base_label, {})
+                compare_entry = label_to_entry.get(compare_label, {})
+
+                if base_label == compare_label:
+                    st.info("请选择两次不同的拟合记录进行比较。")
+                else:
+                    state_diff = describe_fit_state_differences(
+                        compare_entry.get("state_snapshot", {}),
+                        base_entry.get("state_snapshot", {}),
+                    )
+                    if state_diff:
+                        st.warning("两次拟合的输入设置不完全一致，参数变化需要结合设置变化一起判断。")
+                        for reason in state_diff:
+                            st.markdown(f"- {reason}")
+
+                    phi_base = float(base_entry.get("phi", np.nan))
+                    phi_compare = float(compare_entry.get("phi", np.nan))
+                    if np.isfinite(phi_base) and abs(phi_base) > 1e-15:
+                        phi_delta_pct = (phi_compare - phi_base) / phi_base * 100.0
+                    else:
+                        phi_delta_pct = np.nan
+                    df_compare_summary = pd.DataFrame(
+                        [
+                            {
+                                "指标": "Φ (cost)",
+                                "基准": phi_base,
+                                "对比": phi_compare,
+                                "变化(%)": phi_delta_pct,
+                            },
+                            {
+                                "指标": "拟合参数数",
+                                "基准": float(base_entry.get("n_params", np.nan)),
+                                "对比": float(compare_entry.get("n_params", np.nan)),
+                                "变化(%)": np.nan,
+                            },
+                        ]
+                    )
+                    st.dataframe(
+                        ui_comp.format_dataframe_for_display(df_compare_summary),
+                        width="stretch",
+                        hide_index=True,
+                    )
+
+                    base_species_names = [
+                        str(x) for x in base_entry.get("species_names", [])
+                    ]
+                    compare_species_names = [
+                        str(x) for x in compare_entry.get("species_names", [])
+                    ]
+                    base_params_df = _flatten_params_snapshot(
+                        base_entry.get("params_snapshot", {}),
+                        base_species_names,
+                    )
+                    compare_params_df = _flatten_params_snapshot(
+                        compare_entry.get("params_snapshot", {}),
+                        compare_species_names,
+                    )
+
+                    if base_params_df.empty or compare_params_df.empty:
+                        st.info("历史记录缺少参数快照，当前无法比较参数变化。")
+                    else:
+                        merged_params = pd.merge(
+                            base_params_df,
+                            compare_params_df,
+                            on="parameter",
+                            how="outer",
+                            suffixes=("_base", "_compare"),
+                        )
+                        merged_params["delta_abs"] = (
+                            merged_params["value_compare"] - merged_params["value_base"]
+                        )
+                        merged_params["delta_pct"] = np.where(
+                            np.isfinite(merged_params["value_base"])
+                            & (np.abs(merged_params["value_base"]) > 1e-15),
+                            merged_params["delta_abs"]
+                            / merged_params["value_base"]
+                            * 100.0,
+                            np.nan,
+                        )
+                        show_changed_only = st.checkbox(
+                            "仅显示变化参数",
+                            value=True,
+                            key="fit_history_compare_changed_only",
+                        )
+                        if show_changed_only:
+                            same_mask = (
+                                np.isfinite(merged_params["value_base"])
+                                & np.isfinite(merged_params["value_compare"])
+                                & np.isclose(
+                                    merged_params["value_base"],
+                                    merged_params["value_compare"],
+                                    rtol=1e-10,
+                                    atol=1e-12,
+                                )
+                            )
+                            merged_params = merged_params[~same_mask].copy()
+                        if merged_params.empty:
+                            st.success("两次拟合的参数快照没有数值变化。")
+                        else:
+                            merged_params = merged_params.rename(
+                                columns={
+                                    "parameter": "参数",
+                                    "value_base": "基准值",
+                                    "value_compare": "对比值",
+                                    "delta_abs": "绝对变化",
+                                    "delta_pct": "相对变化(%)",
+                                }
+                            )
+                            st.dataframe(
+                                ui_comp.format_dataframe_for_display(merged_params),
+                                width="stretch",
+                                hide_index=True,
+                                height=min(
+                                    max(280, 36 * (len(merged_params) + 1)),
+                                    560,
+                                ),
+                            )
 
         @st.fragment
         def _parity_tab_fragment():
@@ -678,6 +1157,15 @@ def render_fit_results(
                             disabled=(not show_error_lines),
                         )
                     )
+                    # 按温度着色选项
+                    color_by_temp = False
+                    if "T_K" in df_fit.columns:
+                        color_by_temp = st.checkbox(
+                            "按温度着色",
+                            value=False,
+                            key="parity_color_by_temp",
+                            help="使用色温映射显示不同温度下的实验点，帮助识别温度相关的系统偏差。",
+                        )
 
                 st.divider()
 
@@ -685,6 +1173,12 @@ def render_fit_results(
                 df_ok = df_ok[
                     np.isfinite(df_ok["measured"]) & np.isfinite(df_ok["predicted"])
                 ]
+                # 合并温度列用于着色
+                if color_by_temp and "T_K" in df_fit.columns and "row_index" in df_ok.columns:
+                    df_ok["T_K"] = _map_parity_temperatures_by_row_index(
+                        df_fit,
+                        df_ok["row_index"],
+                    ).to_numpy(dtype=float)
                 if df_ok.empty:
                     st.error(
                         "所有实验点都无法成功预测（solve_ivp 失败或输入不合法）。\n"
@@ -872,17 +1366,33 @@ def render_fit_results(
                                 ax = axes[i // n_cols][i % n_cols]
                                 df_sp = df_ok[df_ok["species"] == species_name]
                                 series_color = _fit_plot_color(i)
-                                ax.scatter(
-                                    df_sp["measured"].to_numpy(dtype=float),
-                                    df_sp["predicted"].to_numpy(dtype=float),
-                                    s=44,
-                                    alpha=0.9,
-                                    facecolors=series_color,
-                                    edgecolors="#ffffff",
-                                    linewidths=0.9,
-                                    label=species_name,
-                                    zorder=3,
-                                )
+                                if color_by_temp and "T_K" in df_sp.columns:
+                                    t_vals = df_sp["T_K"].to_numpy(dtype=float)
+                                    sc = ax.scatter(
+                                        df_sp["measured"].to_numpy(dtype=float),
+                                        df_sp["predicted"].to_numpy(dtype=float),
+                                        s=44,
+                                        alpha=0.9,
+                                        c=t_vals,
+                                        cmap="coolwarm",
+                                        edgecolors="#ffffff",
+                                        linewidths=0.9,
+                                        label=species_name,
+                                        zorder=3,
+                                    )
+                                    plt.colorbar(sc, ax=ax, label="T [K]", shrink=0.8)
+                                else:
+                                    ax.scatter(
+                                        df_sp["measured"].to_numpy(dtype=float),
+                                        df_sp["predicted"].to_numpy(dtype=float),
+                                        s=44,
+                                        alpha=0.9,
+                                        facecolors=series_color,
+                                        edgecolors="#ffffff",
+                                        linewidths=0.9,
+                                        label=species_name,
+                                        zorder=3,
+                                    )
                                 min_v = float(
                                     np.nanmin(
                                         np.concatenate(
@@ -1161,12 +1671,17 @@ def render_fit_results(
                 st.warning("数据为空：无法生成剖面。")
             else:
                 row_indices = df_fit.index.tolist()
-                selected_row_index = st.selectbox(
-                    "选择一个实验点（按 DataFrame index）",
+                selected_row_indices = st.multiselect(
+                    "选择实验点（可多选以叠加对比）",
                     row_indices,
-                    index=0,
-                    key="profile_selected_row_index",
+                    default=[row_indices[0]] if row_indices else [],
+                    key="profile_selected_row_indices",
+                    help="选择多行可在同一张图上叠加不同工况的剖面曲线。",
                 )
+                if not selected_row_indices:
+                    st.info("请至少选择一个实验点。")
+                    return
+                selected_row_index = selected_row_indices[0]
                 profile_points = int(
                     st.number_input(
                         "剖面点数",
@@ -1184,6 +1699,7 @@ def render_fit_results(
                     key="profile_species",
                 )
 
+                multi_row_mode = len(selected_row_indices) > 1
                 row_sel = df_fit.loc[selected_row_index]
                 if reactor_type_fit == REACTOR_TYPE_PFR:
                     profile_kind_options = ["F (mol/s)", "C (mol/m^3)"]
@@ -1248,10 +1764,49 @@ def render_fit_results(
                         name: i for i, name in enumerate(species_names_fit)
                     }
 
+                    # --- 多行叠加模式：为每个选中的行计算剖面并叠加 ---
+                    all_row_profiles: list[tuple[int, np.ndarray, np.ndarray, dict]] = []
+                    # 第一行已经计算过
+                    all_row_profiles.append((selected_row_index, x_grid, profiles, row_data_dict))
+
+                    if multi_row_mode:
+                        for extra_row_idx in selected_row_indices[1:]:
+                            extra_row_sel = df_fit.loc[extra_row_idx]
+                            extra_row_data: dict[str, float] = {}
+                            for col in extra_row_sel.index:
+                                try:
+                                    extra_row_data[str(col)] = float(extra_row_sel.get(col, float("nan")))
+                                except (TypeError, ValueError):
+                                    continue
+                            extra_result = _compute_reactor_profile(
+                                reactor_type=reactor_type_fit,
+                                kinetic_model=kinetic_model_fit,
+                                reversible_enabled=bool(reversible_enabled_fit),
+                                pfr_flow_model=pfr_flow_model_fit,
+                                output_mode=output_mode_fit,
+                                row_data_dict=extra_row_data,
+                                species_names=tuple(species_names_fit),
+                                fitted_params_frozen=_freeze_params(fitted_params),
+                                stoich_matrix_tuple=tuple(tuple(r) for r in stoich_matrix_fit),
+                                solver_method=solver_method_fit,
+                                rtol=rtol_fit,
+                                atol=atol_fit,
+                                max_step_fraction=max_step_fraction_fit,
+                                n_points=profile_points,
+                            )
+                            if extra_result["ok"]:
+                                all_row_profiles.append((
+                                    extra_row_idx,
+                                    np.array(extra_result["x_grid"]),
+                                    np.array(extra_result["profiles"]),
+                                    extra_row_data,
+                                ))
+
                     fig_prof = None
                     try:
-                        fig_prof, ax_prof = plt.subplots(figsize=(4.6, 3.0))
+                        fig_prof, ax_prof = plt.subplots(figsize=(5.5 if multi_row_mode else 4.6, 3.5 if multi_row_mode else 3.0))
 
+                        profile_rows_for_export: list[dict[str, float | int | str]] = []
                         if x_label_key == "V_m3":
                             profile_df = pd.DataFrame({"V_m3": x_grid})
                             x_axis_label = ui_text.AXIS_LABEL_REACTOR_VOLUME
@@ -1259,54 +1814,79 @@ def render_fit_results(
                             profile_df = pd.DataFrame({"t_s": x_grid})
                             x_axis_label = ui_text.AXIS_LABEL_TIME
 
-                        for i, species_name in enumerate(profile_species):
-                            idx = name_to_index[species_name]
-                            series_color = _fit_plot_color(i)
+                        linestyles = ["-", "--", "-.", ":"]
+                        for row_plot_idx, (rid, xg, profs, rd) in enumerate(all_row_profiles):
+                            ls = linestyles[row_plot_idx % len(linestyles)]
+                            row_label_suffix = f" (row {rid})" if multi_row_mode else ""
+                            t_k_val = rd.get("T_K", None)
+                            if multi_row_mode and t_k_val is not None:
+                                row_label_suffix = f" ({t_k_val:.0f} K)"
 
-                            if (
-                                reactor_type_fit == REACTOR_TYPE_PFR
-                                and profile_kind.startswith("F")
-                            ):
-                                y = profiles[idx, :]
-                                profile_df[f"F_{species_name}_mol_s"] = y
-                            elif (
-                                reactor_type_fit == REACTOR_TYPE_PFR
-                                and not profile_kind.startswith("F")
-                            ):
+                            for i, species_name in enumerate(profile_species):
+                                idx = name_to_index[species_name]
+                                series_color = _fit_plot_color(i)
+
                                 if (
-                                    pfr_flow_model_fit
-                                    == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+                                    reactor_type_fit == REACTOR_TYPE_PFR
+                                    and profile_kind.startswith("F")
                                 ):
-                                    pressure_Pa = float(row_sel.get("P_Pa", np.nan))
-                                    temperature_K = float(row_sel.get("T_K", np.nan))
-                                    conc_total = float(pressure_Pa) / max(
-                                        float(R_GAS_J_MOL_K) * float(temperature_K),
-                                        EPSILON_CONCENTRATION,
-                                    )
-                                    total_flow = np.sum(profiles, axis=0)
-                                    y = (
-                                        profiles[idx, :]
-                                        / np.maximum(total_flow, EPSILON_FLOW_RATE)
-                                        * float(conc_total)
-                                    )
+                                    y = profs[idx, :]
+                                    if row_plot_idx == 0:
+                                        profile_df[f"F_{species_name}_mol_s"] = y
+                                elif (
+                                    reactor_type_fit == REACTOR_TYPE_PFR
+                                    and not profile_kind.startswith("F")
+                                ):
+                                    cur_row_sel = df_fit.loc[rid]
+                                    if (
+                                        pfr_flow_model_fit
+                                        == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+                                    ):
+                                        pressure_Pa = float(cur_row_sel.get("P_Pa", np.nan))
+                                        temperature_K = float(cur_row_sel.get("T_K", np.nan))
+                                        conc_total = float(pressure_Pa) / max(
+                                            float(R_GAS_J_MOL_K) * float(temperature_K),
+                                            EPSILON_CONCENTRATION,
+                                        )
+                                        total_flow = np.sum(profs, axis=0)
+                                        y = (
+                                            profs[idx, :]
+                                            / np.maximum(total_flow, EPSILON_FLOW_RATE)
+                                            * float(conc_total)
+                                        )
+                                    else:
+                                        vdot_m3_s = float(cur_row_sel.get("vdot_m3_s", np.nan))
+                                        y = profs[idx, :] / max(
+                                            vdot_m3_s, EPSILON_FLOW_RATE
+                                        )
+                                    if row_plot_idx == 0:
+                                        profile_df[f"C_{species_name}_mol_m3"] = y
                                 else:
-                                    vdot_m3_s = float(row_sel.get("vdot_m3_s", np.nan))
-                                    y = profiles[idx, :] / max(
-                                        vdot_m3_s, EPSILON_FLOW_RATE
-                                    )
-                                profile_df[f"C_{species_name}_mol_m3"] = y
-                            else:
-                                # CSTR / BSTR: 直接就是浓度剖面
-                                y = profiles[idx, :]
-                                profile_df[f"C_{species_name}_mol_m3"] = y
+                                    # CSTR / BSTR: 直接就是浓度剖面
+                                    y = profs[idx, :]
+                                    if row_plot_idx == 0:
+                                        profile_df[f"C_{species_name}_mol_m3"] = y
 
-                            _plot_reference_series(
-                                ax_prof,
-                                x_grid,
-                                y,
-                                label=species_name,
-                                color=series_color,
-                            )
+                                _plot_reference_series(
+                                    ax_prof,
+                                    xg,
+                                    y,
+                                    label=f"{species_name}{row_label_suffix}",
+                                    color=series_color,
+                                    linestyle=ls,
+                                )
+
+                                if multi_row_mode:
+                                    for x_value, y_value in zip(xg, y):
+                                        profile_rows_for_export.append(
+                                            {
+                                                "row_index": int(rid),
+                                                x_label_key: float(x_value),
+                                                "species": str(species_name),
+                                                "profile_kind": str(profile_kind),
+                                                "value": float(y_value),
+                                            }
+                                        )
 
                         if reactor_type_fit == REACTOR_TYPE_PFR:
                             y_axis_label = (
@@ -1323,9 +1903,14 @@ def render_fit_results(
                         _style_fit_legend(ax_prof)
                         _render_centered_pyplot(fig_prof)
 
+                        export_profile_df = (
+                            pd.DataFrame(profile_rows_for_export)
+                            if multi_row_mode
+                            else profile_df
+                        )
                         st.download_button(
                             "📥 下载剖面数据 CSV",
-                            profile_df.to_csv(index=False).encode("utf-8"),
+                            export_profile_df.to_csv(index=False).encode("utf-8"),
                             file_name="profile_data.csv",
                             mime="text/csv",
                         )
@@ -1401,4 +1986,52 @@ def render_fit_results(
                 )
             else:
                 st.info("先在「奇偶校验图」页生成对比数据后，再导出对比表。")
+
+            # --- 一键导出完整报告（HTML）---
+            st.divider()
+            st.markdown("#### 完整拟合报告")
+            if st.button("生成 HTML 报告", use_container_width=True):
+                report_lines = [
+                    "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+                    "<title>Kinetics Fitting Report</title>",
+                    "<style>body{font-family:sans-serif;max-width:900px;margin:0 auto;padding:20px}",
+                    "table{border-collapse:collapse;width:100%;margin:10px 0}",
+                    "th,td{border:1px solid #ddd;padding:6px 10px;text-align:right}",
+                    "th{background:#f5f5f7}</style></head><body>",
+                    f"<h1>{reactor_type_fit} 反应动力学拟合报告</h1>",
+                    f"<p><b>动力学模型</b>: {kinetic_model_fit}",
+                    f"{'（可逆）' if reversible_enabled_fit else ''}</p>",
+                    f"<p><b>目标函数 Φ</b>: {phi_text}</p>",
+                    "<h2>拟合参数</h2>",
+                    df_k0_ea.to_html(),
+                ]
+                if kinetic_model_fit == KINETIC_MODEL_LANGMUIR_HINSHELWOOD:
+                    if fitted_params.get("K0_ads") is not None:
+                        df_ads_export = pd.DataFrame({
+                            "K₀,ads": fitted_params["K0_ads"],
+                            "Eₐ,K [J/mol]": fitted_params.get("Ea_K", []),
+                        }, index=species_names_fit)
+                        report_lines.append("<h3>L-H 参数</h3>")
+                        report_lines.append(df_ads_export.to_html())
+                if reversible_enabled_fit and fitted_params.get("k0_rev") is not None:
+                    df_rev_export = pd.DataFrame({
+                        "k₀,rev": fitted_params["k0_rev"],
+                        "Eₐ,rev [J/mol]": fitted_params.get("ea_rev", []),
+                    }, index=reaction_names)
+                    report_lines.append("<h3>可逆反应参数</h3>")
+                    report_lines.append(df_rev_export.to_html())
+                report_lines.append("<h2>反应级数矩阵</h2>")
+                report_lines.append(df_orders.to_html())
+                if not df_long.empty:
+                    report_lines.append("<h2>预测 vs 实验对比</h2>")
+                    df_show = df_long.drop(columns=[c for c in ["ok", "message"] if c in df_long.columns], errors="ignore")
+                    report_lines.append(df_show.to_html(index=False))
+                report_lines.append("</body></html>")
+                report_html = "\n".join(report_lines)
+                st.download_button(
+                    "📥 下载完整报告 (HTML)",
+                    report_html.encode("utf-8"),
+                    file_name="fitting_report.html",
+                    mime="text/html",
+                )
     return {}

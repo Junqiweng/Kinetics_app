@@ -228,11 +228,11 @@ def render_param_table(
     )
 
     col_cfg = {
-        col1_name: st.column_config.TextColumn(col1_name, help=col1_help),
+        col1_name: st.column_config.TextColumn(col1_name, help=f"{col1_help}（支持科学计数法，如 1e6、2.5e-3）"),
         f"Fit_{col1_name}": st.column_config.CheckboxColumn(
             f"拟合 {col1_name.split(' ')[0]}", default=True
         ),
-        col2_name: st.column_config.TextColumn(col2_name, help=col2_help),
+        col2_name: st.column_config.TextColumn(col2_name, help=f"{col2_help}（支持科学计数法，如 1e6、2.5e-3）"),
         f"Fit_{col2_name}": st.column_config.CheckboxColumn(
             f"拟合 {col2_name.split(' ')[0]}", default=True
         ),

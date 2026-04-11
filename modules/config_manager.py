@@ -42,6 +42,9 @@ from .constants import (
     DEFAULT_ORDER_REV_MIN,
     DEFAULT_RANDOM_SEED,
     DEFAULT_RTOL,
+    DEFAULT_USE_LOG_K0_ADS_FIT,
+    DEFAULT_USE_LOG_K0_FIT,
+    DEFAULT_USE_LOG_K0_REV_FIT,
     PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
     PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     PERSIST_DIR_NAME,
@@ -207,6 +210,9 @@ def collect_config(
     diff_step_rel: float = DEFAULT_DIFF_STEP_REL,
     max_nfev: int = DEFAULT_MAX_NFEV,
     use_x_scale_jac: bool = True,
+    use_log_k0_fit: bool = DEFAULT_USE_LOG_K0_FIT,
+    use_log_k0_rev_fit: bool = DEFAULT_USE_LOG_K0_REV_FIT,
+    use_log_K0_ads_fit: bool = DEFAULT_USE_LOG_K0_ADS_FIT,
     use_multi_start: bool = True,
     n_starts: int = DEFAULT_N_STARTS,
     max_nfev_coarse: int = DEFAULT_MAX_NFEV_COARSE,
@@ -288,6 +294,9 @@ def collect_config(
         "diff_step_rel": diff_step_rel,
         "max_nfev": max_nfev,
         "use_x_scale_jac": use_x_scale_jac,
+        "use_log_k0_fit": use_log_k0_fit,
+        "use_log_k0_rev_fit": use_log_k0_rev_fit,
+        "use_log_K0_ads_fit": use_log_K0_ads_fit,
         "use_multi_start": use_multi_start,
         "n_starts": n_starts,
         "max_nfev_coarse": max_nfev_coarse,
@@ -410,6 +419,9 @@ def get_default_config() -> dict:
         "diff_step_rel": DEFAULT_DIFF_STEP_REL,
         "max_nfev": DEFAULT_MAX_NFEV,
         "use_x_scale_jac": True,
+        "use_log_k0_fit": DEFAULT_USE_LOG_K0_FIT,
+        "use_log_k0_rev_fit": DEFAULT_USE_LOG_K0_REV_FIT,
+        "use_log_K0_ads_fit": DEFAULT_USE_LOG_K0_ADS_FIT,
         "use_multi_start": True,
         "n_starts": DEFAULT_N_STARTS,
         "max_nfev_coarse": DEFAULT_MAX_NFEV_COARSE,
@@ -580,7 +592,14 @@ def validate_config(config: dict) -> tuple[bool, str]:
     if not ok:
         return ok, msg
 
-    for bool_key in ["use_x_scale_jac", "use_multi_start", "reversible_enabled"]:
+    for bool_key in [
+        "use_x_scale_jac",
+        "use_log_k0_fit",
+        "use_log_k0_rev_fit",
+        "use_log_K0_ads_fit",
+        "use_multi_start",
+        "reversible_enabled",
+    ]:
         if bool_key in config and not isinstance(config[bool_key], (bool, np.bool_)):
             return False, f"{bool_key} 必须为布尔值（true/false）"
 
@@ -660,6 +679,9 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("K0_ads", (n_species,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_shape("fit_K0_ads_flags", (n_species,), bool)
+        if not ok:
+            return ok, msg
         # K0_ads 允许为0（不参与吸附的物种），只需检查非负即可
         if "K0_ads" in config:
             try:
@@ -670,6 +692,13 @@ def validate_config(config: dict) -> tuple[bool, str]:
                 return False, "配置项 K0_ads 包含无效值（NaN 或 Inf）"
             if np.any(K0_ads_arr < 0):
                 return False, "配置项 K0_ads 必须全部为非负值"
+            if bool(config.get("use_log_K0_ads_fit", DEFAULT_USE_LOG_K0_ADS_FIT)):
+                fit_mask = np.asarray(
+                    config.get("fit_K0_ads_flags", np.zeros(n_species, dtype=bool)),
+                    dtype=bool,
+                )
+                if np.any(K0_ads_arr[fit_mask] <= 0.0):
+                    return False, "配置项 K0_ads：启用对数拟合时，被选中拟合的位置必须为正值（>0）"
 
         ok, msg = _check_array_shape("Ea_K_J_mol", (n_species,), float)
         if not ok:
@@ -678,9 +707,6 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if not ok:
             return ok, msg
 
-        ok, msg = _check_array_shape("fit_K0_ads_flags", (n_species,), bool)
-        if not ok:
-            return ok, msg
         ok, msg = _check_array_shape("fit_Ea_K_flags", (n_species,), bool)
         if not ok:
             return ok, msg
@@ -701,6 +727,9 @@ def validate_config(config: dict) -> tuple[bool, str]:
         ok, msg = _check_array_shape("k0_rev", (n_reactions,), float)
         if not ok:
             return ok, msg
+        ok, msg = _check_array_shape("fit_k0_rev_flags", (n_reactions,), bool)
+        if not ok:
+            return ok, msg
         # 说明：
         # - k0_rev 作为“逆反应初值”允许为 0（表示逆向贡献为 0 或暂不启用逆向）。
         # - 但若用户选择“拟合 k0_rev”，则对应反应的 k0_rev 必须严格为正，
@@ -714,6 +743,13 @@ def validate_config(config: dict) -> tuple[bool, str]:
                 return False, "配置项 k0_rev 包含无效值（NaN 或 Inf）"
             if np.any(k0_rev_arr < 0):
                 return False, "配置项 k0_rev 必须全部为非负值（允许为 0）"
+            if bool(config.get("use_log_k0_rev_fit", DEFAULT_USE_LOG_K0_REV_FIT)):
+                fit_mask = np.asarray(
+                    config.get("fit_k0_rev_flags", np.zeros(n_reactions, dtype=bool)),
+                    dtype=bool,
+                )
+                if np.any(k0_rev_arr[fit_mask] <= 0.0):
+                    return False, "配置项 k0_rev：启用对数拟合时，被选中拟合的位置必须为正值（>0）"
 
         ok, msg = _check_array_shape("ea_rev_J_mol", (n_reactions,), float)
         if not ok:
@@ -722,9 +758,6 @@ def validate_config(config: dict) -> tuple[bool, str]:
         if not ok:
             return ok, msg
 
-        ok, msg = _check_array_shape("fit_k0_rev_flags", (n_reactions,), bool)
-        if not ok:
-            return ok, msg
         ok, msg = _check_array_shape("fit_ea_rev_flags", (n_reactions,), bool)
         if not ok:
             return ok, msg
@@ -774,6 +807,25 @@ def validate_config(config: dict) -> tuple[bool, str]:
             return False, "ea_min_J_mol 或 ea_max_J_mol 包含无效值（NaN 或 Inf）"
         if ea_min >= ea_max:
             return False, f"ea_min_J_mol ({ea_min}) 必须小于 ea_max_J_mol ({ea_max})"
+
+    if config["kinetic_model"] == "langmuir_hinshelwood":
+        if "K0_ads_min" in config and "K0_ads_max" in config:
+            try:
+                K0_ads_min = float(config["K0_ads_min"])
+                K0_ads_max = float(config["K0_ads_max"])
+            except (ValueError, TypeError):
+                return False, "K0_ads_min 或 K0_ads_max 无法转换为数值"
+            if not (np.isfinite(K0_ads_min) and np.isfinite(K0_ads_max)):
+                return False, "K0_ads_min 或 K0_ads_max 包含无效值（NaN 或 Inf）"
+            if K0_ads_min >= K0_ads_max:
+                return False, f"K0_ads_min ({K0_ads_min}) 必须小于 K0_ads_max ({K0_ads_max})"
+            if bool(config.get("use_log_K0_ads_fit", DEFAULT_USE_LOG_K0_ADS_FIT)):
+                fit_mask = np.asarray(
+                    config.get("fit_K0_ads_flags", np.zeros(n_species, dtype=bool)),
+                    dtype=bool,
+                )
+                if np.any(fit_mask) and (K0_ads_min <= 0.0 or K0_ads_max <= 0.0):
+                    return False, "K0_ads 启用对数拟合且参与拟合时，K0_ads_min 与 K0_ads_max 必须都 > 0"
 
     # 验证拟合参数边界（针对可逆反应模型）
     if reversible_enabled:

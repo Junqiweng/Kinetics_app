@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re as _re
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -28,6 +30,125 @@ def _clean_species_names(species_text: str) -> list[str]:
         if n not in unique:
             unique.append(n)
     return unique
+
+
+def _parse_reaction_equation(equation: str, species_names: list[str]) -> np.ndarray | None:
+    """
+    解析单条反应方程式，返回一维计量数向量（长度=len(species_names)）。
+
+    支持格式：
+      "A → 2B"           # → 或 -> 作为分隔
+      "A + B → C + D"
+      "2A + 3B → C"
+      "A + 0.5B → 2C"    # 支持小数系数
+
+    返回 None 表示解析失败。
+    """
+    equation = equation.strip()
+    if not equation:
+        return None
+
+    # 分离反应物和产物
+    if "→" in equation:
+        parts = equation.split("→", 1)
+    elif "->" in equation:
+        parts = equation.split("->", 1)
+    elif "=" in equation:
+        parts = equation.split("=", 1)
+    else:
+        return None
+
+    if len(parts) != 2:
+        return None
+
+    species_names_sorted = sorted(
+        [str(name) for name in species_names], key=len, reverse=True
+    )
+
+    def _parse_side(side_str: str) -> dict[str, float] | None:
+        """解析方程一侧（如 '2A + 3B'），返回 {species: coefficient} 字典。"""
+        result: dict[str, float] = {}
+        rest = side_str.strip()
+        while rest:
+            matched = False
+            for name in species_names_sorted:
+                pattern = (
+                    r"^(?P<coeff>[+]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*"
+                    + _re.escape(name)
+                )
+                match = _re.match(pattern, rest)
+                if match is None:
+                    continue
+
+                coeff_str = str(match.group("coeff") or "").strip()
+                coeff = float(coeff_str) if coeff_str else 1.0
+                result[name] = result.get(name, 0.0) + coeff
+                rest = rest[match.end() :].lstrip()
+                matched = True
+                break
+
+            if not matched:
+                return None
+
+            if not rest:
+                break
+            if not rest.startswith("+"):
+                return None
+            rest = rest[1:].lstrip()
+        return result
+
+    reactants = _parse_side(parts[0])
+    products = _parse_side(parts[1])
+    if reactants is None or products is None:
+        return None
+
+    # 构建计量数向量
+    nu = np.zeros(len(species_names), dtype=float)
+    species_set = set(species_names)
+
+    for name, coeff in reactants.items():
+        if name not in species_set:
+            return None
+        idx = species_names.index(name)
+        nu[idx] -= coeff
+
+    for name, coeff in products.items():
+        if name not in species_set:
+            return None
+        idx = species_names.index(name)
+        nu[idx] += coeff
+
+    return nu
+
+
+def _parse_reaction_equations(
+    equations_text: str, species_names: list[str]
+) -> tuple[np.ndarray | None, list[str]]:
+    """
+    解析多条反应方程式（每行一条），返回 (stoich_matrix, errors)。
+
+    stoich_matrix: shape (n_species, n_reactions)，若有解析错误则返回 None。
+    errors: 每条无法解析的行的错误信息列表。
+    """
+    lines = [line.strip() for line in equations_text.strip().splitlines() if line.strip()]
+    if not lines:
+        return None, ["未输入任何反应方程式"]
+
+    errors: list[str] = []
+    columns: list[np.ndarray] = []
+    for i, line in enumerate(lines):
+        nu = _parse_reaction_equation(line, species_names)
+        if nu is None:
+            errors.append(f"第 {i+1} 行 \"{line}\"：无法解析（请检查格式和物种名称）")
+        else:
+            columns.append(nu)
+
+    if errors:
+        return None, errors
+
+    # shape: (n_species, n_reactions) — 每列是一个反应的计量数向量
+    stoich_matrix = np.column_stack(columns) if columns else None
+    return stoich_matrix, errors
 
 
 def _build_default_nu_table(species_names: list[str], n_reactions: int) -> pd.DataFrame:

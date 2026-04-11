@@ -5,6 +5,7 @@ import streamlit as st
 from modules.fit_advanced import render_fit_advanced
 from modules.fit_execution import render_fit_actions
 from modules.fit_results import render_fit_results
+from modules.fit_setup import render_fit_setup
 
 
 def render_fit_tab(tab_fit, ctx: dict) -> dict:
@@ -45,6 +46,8 @@ def render_fit_tab(tab_fit, ctx: dict) -> dict:
         fit_ctx["data_df"] = data_df
         fit_ctx["output_species_list"] = output_species_list
 
+        fit_setup_state = render_fit_setup(fit_ctx)
+        fit_ctx.update(fit_setup_state)
         fit_advanced_state = render_fit_advanced(fit_ctx)
         runtime_state = render_fit_actions(fit_ctx, fit_advanced_state)
 
@@ -58,4 +61,3 @@ def render_fit_tab(tab_fit, ctx: dict) -> dict:
         "data_df": data_df,
         "output_species_list": output_species_list,
     }
-

@@ -113,6 +113,9 @@ def _apply_imported_config_to_widget_state(config: dict) -> None:
         "diff_step_rel",
         "max_nfev",
         "use_x_scale_jac",
+        "use_log_k0_fit",
+        "use_log_k0_rev_fit",
+        "use_log_K0_ads_fit",
         "use_multi_start",
         "n_starts",
         "max_nfev_coarse",
@@ -167,7 +170,16 @@ def _clear_config_related_state(
     # 2) data_editor / expander 动态 key（否则“回到默认尺寸”时仍可能记住旧表格）
     for key in list(st.session_state.keys()):
         key_str = str(key)
-        if key_str.startswith("nu_") or key_str.startswith("lh_m_"):
+        if (
+            key_str.startswith("nu_")
+            or key_str.startswith("base_params_")
+            or key_str.startswith("base_orders_")
+            or key_str.startswith("lh_ads_")
+            or key_str.startswith("lh_m_")
+            or key_str.startswith("rev_params_")
+            or key_str.startswith("rev_orders_")
+            or key_str.startswith("data_editor_csv_")
+        ):
             keys_to_delete.append(key_str)
 
     # 3) 导入/导出与初始化标记
@@ -191,7 +203,14 @@ def _clear_config_related_state(
     # 5) CSV 数据缓存（仅 reset 场景清空）
     if not keep_csv_data:
         keys_to_delete.extend(
-            ["uploaded_csv_bytes", "uploaded_csv_name", "data_df_cached"]
+            [
+                "uploaded_csv_bytes",
+                "uploaded_csv_name",
+                "data_df_cached",
+                "_data_df_source_hash",
+                "_data_df_upload_token",
+                "_data_editor_csv_revision",
+            ]
         )
 
     # 6) 拟合结果缓存（避免“配置已变但结果仍是旧的”造成误解）
@@ -199,11 +218,14 @@ def _clear_config_related_state(
         [
             "fit_results",
             "fit_compare_long_df",
+            "fit_results_stale_reasons",
             "fitting_timeline",
             "fitting_metrics",
             "fitting_ms_summary",
+            "fitting_ms_results_log",
             "fitting_final_summary",
             "fitting_job_summary",
+            "fitting_history",
         ]
     )
 

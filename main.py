@@ -38,6 +38,19 @@ def main() -> None:
     else:
         st.caption(r"模型：$\frac{dC_i}{dt} = \sum_j \nu_{ij} r_j$")
 
+    # --- 工作流状态指示 ---
+    has_species = bool(st.session_state.get("cfg_species_text", "").strip())
+    has_data = st.session_state.get("data_df_cached") is not None
+    has_results = "fit_results" in st.session_state
+
+    step1_icon = "✅" if has_species else "⬜"
+    step2_icon = "✅" if has_data else "⬜"
+    step3_icon = "✅" if has_results else "⬜"
+
+    st.caption(
+        f"工作流进度：{step1_icon} 反应与模型 → {step2_icon} 实验数据 → {step3_icon} 拟合与结果"
+    )
+
     tab_model, tab_data, tab_fit = st.tabs(bootstrap_state["main_tab_labels"])
     bootstrap_state["restore_active_main_tab"]()
 
