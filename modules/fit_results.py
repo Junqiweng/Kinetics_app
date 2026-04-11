@@ -510,6 +510,16 @@ def render_fit_results(
             "use_log_K0_ads_fit", get_cfg("use_log_K0_ads_fit", True)
         )
     )
+    fitting_running = bool(runtime_state.get("fitting_running", False))
+
+    # 拟合进行中时不重绘上一轮完整结果，避免旧结果区的重型组件阻塞进度条刷新。
+    if fitting_running:
+        if "fit_results" in st.session_state:
+            tab_fit_results_container.info(
+                "当前正在重新拟合。为保证进度条刷新流畅，已暂时隐藏上一轮结果；拟合完成后会自动展示新结果。"
+            )
+        return {}
+
     # --- 结果展示（优化版）---
     if "fit_results" in st.session_state:
         res = st.session_state["fit_results"]
