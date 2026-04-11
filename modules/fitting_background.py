@@ -6,6 +6,7 @@ import datetime as _dt
 import difflib
 import hashlib
 import html as html_lib
+import os
 import queue
 import threading
 import time
@@ -584,6 +585,7 @@ def _run_fitting_job(
         use_log_k0_rev_fit=use_log_k0_rev_fit,
         use_log_K0_ads_fit=use_log_K0_ads_fit,
     )
+    n_fit_params_total = int(np.asarray(param_vector).size)
 
     lb, ub = fitting._build_bounds(
         k0_guess,
@@ -866,239 +868,10 @@ def _run_fitting_job(
         f"残差类型：{residual_type} — {residual_type_names.get(residual_type, '')}",
     )
 
-    data_rows = list(data_df.itertuples(index=False))
-    species_name_to_index = {name: i for i, name in enumerate(species_names)}
-    try:
-        output_species_indices = [
-            species_name_to_index[name] for name in output_species_list
-        ]
-    except Exception:
-        raise ValueError("输出物种不在物种列表中（请检查物种名是否匹配）")
-
-    if reactor_type == REACTOR_TYPE_PFR:
-        inlet_column_names = (
-            [f"F0_{name}_mol_s" for name in species_names]
-            if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
-            else (
-                [f"C0_{name}_mol_m3" for name in species_names]
-                if str(output_mode).startswith("C")
-                else [f"F0_{name}_mol_s" for name in species_names]
-            )
-        )
-    else:
-        inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
-
-    # --- 基于函数评估次数（nfev）的进度跟踪 ---
-    stage_label = "初始化"
-    stage_base_progress = 0.0
-    stage_span_progress = 0.05
-    stage_max_nfev = 1
-    stage_nfev = 0
-    best_cost_so_far = float("inf")
-    last_ui_update_s = time.time()
-    n_params_fit: int | None = None
-    valid_points_last_eval = 0
-    max_valid_points_seen = 0
-
-    def emit_stage_progress(row_index: int | None = None) -> None:
-        nonlocal last_ui_update_s
-        calls_per_iteration_est = int(max(int(n_params_fit or 0) + 1, 1))
-        call_budget_est = int(max(int(stage_max_nfev), 1)) * calls_per_iteration_est
-
-        if row_index is None:
-            call_progress_est = float(stage_nfev)
-            call_progress_text = str(int(stage_nfev))
-            row_progress_text = ""
-        else:
-            row_frac = float(row_index + 1) / float(max(int(n_data_rows), 1))
-            call_progress_est = float(max(int(stage_nfev) - 1, 0)) + row_frac
-            call_progress_text = f"{call_progress_est:.1f}"
-            row_progress_text = f" | 数据行 {int(row_index) + 1}/{int(n_data_rows)}"
-
-        frac = float(call_progress_est) / float(max(call_budget_est, 1))
-        frac = float(np.clip(frac, 0.0, 1.0))
-        set_progress(stage_base_progress + stage_span_progress * frac)
-
-        if np.isfinite(best_cost_so_far):
-            set_status(
-                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
-                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
-                f"{row_progress_text} | best Φ≈{best_cost_so_far:.3e}"
-            )
-        else:
-            set_status(
-                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
-                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
-                f"{row_progress_text}"
-            )
-        last_ui_update_s = time.time()
-
-    def residual_func_wrapper(x: np.ndarray) -> np.ndarray:
-        nonlocal stage_nfev, best_cost_so_far, last_ui_update_s, n_params_fit
-        nonlocal valid_points_last_eval, max_valid_points_seen
-        if stop_event.is_set():
-            raise FittingStoppedError("Stopped by user")
-
-        if n_params_fit is None:
-            n_params_fit = int(np.asarray(x).size)
-
-        stage_nfev += 1
-        p = fitting._unpack_parameters(
-            x,
-            k0_guess,
-            ea_guess_J_mol,
-            order_guess,
-            fit_k0_flags,
-            fit_ea_flags,
-            fit_order_flags_matrix,
-            K0_ads,
-            Ea_K_J_mol,
-            m_inhibition,
-            fit_K0_ads_flags,
-            fit_Ea_K_flags,
-            fit_m_flags,
-            k0_rev,
-            ea_rev_J_mol,
-            order_rev,
-            fit_k0_rev_flags,
-            fit_ea_rev_flags,
-            fit_order_rev_flags_matrix,
-            use_log_k0_fit=use_log_k0_fit,
-            use_log_k0_rev_fit=use_log_k0_rev_fit,
-            use_log_K0_ads_fit=use_log_K0_ads_fit,
-        )
-
-        residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
-        model_eval_cache: dict = {}
-        valid_points_this_eval = 0
-        for row_index, row in enumerate(data_rows):
-            if stop_event.is_set():
-                raise FittingStoppedError("Stopped by user")
-
-            pred, ok, _ = fitting._predict_outputs_for_row(
-                row,
-                species_names,
-                output_mode,
-                output_species_list,
-                stoich_matrix,
-                p["k0"],
-                p["ea_J_mol"],
-                p["reaction_order_matrix"],
-                solver_method,
-                rtol,
-                atol,
-                reactor_type,
-                kinetic_model,
-                reversible_enabled,
-                pfr_flow_model,
-                p["K0_ads"],
-                p["Ea_K"],
-                p["m_inhibition"],
-                p["k0_rev"],
-                p["ea_rev"],
-                p["order_rev"],
-                max_step_fraction=max_step_fraction,
-                name_to_index=species_name_to_index,
-                output_species_indices=output_species_indices,
-                inlet_column_names=inlet_column_names,
-                model_eval_cache=model_eval_cache,
-                stop_event=stop_event,
-            )
-            if stop_event.is_set():
-                raise FittingStoppedError("Stopped by user")
-
-            base = row_index * n_outputs
-            if not ok:
-                residual_array[base : base + n_outputs] = residual_penalty_value
-            else:
-                measured_row = measured_matrix[row_index, :]
-                diff = pred - measured_row
-
-                # 根据残差类型计算残差
-                if residual_type == "相对残差":
-                    # 相对残差: r = (y_pred - y_meas) / sign(y_meas)·max(|y_meas|, ε)
-                    # 说明：自动使用 epsilon，避免 y_meas≈0 时的除零问题。
-                    sign_measured = np.where(measured_row < 0.0, -1.0, 1.0)
-                    denominator = sign_measured * np.maximum(
-                        np.abs(measured_row), residual_epsilon
-                    )
-                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                        rel_residual = diff / denominator
-                    valid_mask = np.isfinite(rel_residual)
-                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
-                    invalid_mask = ~np.isfinite(rel_residual)
-                    if np.any(invalid_mask):
-                        rel_residual[invalid_mask] = residual_penalty_value
-                    residual_array[base : base + n_outputs] = rel_residual
-                elif residual_type == "百分比残差":
-                    # 百分比残差: r = 100 * (y_pred - y_meas) / (|y_meas| + epsilon)
-                    denominator = np.abs(measured_row) + residual_epsilon
-                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                        pct_residual = 100.0 * (diff / denominator)
-                    valid_mask = np.isfinite(pct_residual)
-                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
-                    invalid_mask = ~np.isfinite(pct_residual)
-                    if np.any(invalid_mask):
-                        pct_residual[invalid_mask] = residual_penalty_value
-                    residual_array[base : base + n_outputs] = pct_residual
-                else:
-                    # 默认：绝对残差 r = y_pred - y_meas
-                    valid_mask = np.isfinite(diff)
-                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
-                    if not bool(np.all(valid_mask)):
-                        residual_array[base : base + n_outputs] = residual_penalty_value
-                    else:
-                        residual_array[base : base + n_outputs] = diff
-
-            now_s = time.time()
-            if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
-                emit_stage_progress(row_index=row_index)
-
-        if residual_array.size > 0:
-            cost_now = float(0.5 * np.sum(residual_array**2))
-            if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
-                best_cost_so_far = cost_now
-        valid_points_last_eval = int(valid_points_this_eval)
-        if valid_points_last_eval > int(max_valid_points_seen):
-            max_valid_points_seen = int(valid_points_last_eval)
-
-        now_s = time.time()
-        if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
-            emit_stage_progress(row_index=None)
-
-        return residual_array
-
-    timeline_add("⏳", "阶段 1: 计算初始残差...")
-    stage_label = "初始残差"
-    stage_base_progress = 0.0
-    stage_span_progress = 0.05
-    stage_max_nfev = 1
-    stage_nfev = 0
-    initial_residuals = residual_func_wrapper(param_vector)
-    initial_cost = float(0.5 * np.sum(initial_residuals**2))
-    set_metric("initial_cost", initial_cost)
-    timeline_add("✅", f"初始目标函数值 Φ: {initial_cost:.4e}")
-
-    if int(valid_points_last_eval) <= 0:
-        raise ValueError(
-            "没有任何有效预测点（N_valid=0），已阻断拟合。"
-            " 请检查：求解器容限（rtol/atol）、入口流量/浓度、输出模式与工况是否匹配。"
-        )
-
-    n_fit_params_total = int(np.asarray(param_vector).size)
-    if (n_data_rows <= 0) or (n_outputs <= 0) or (n_fit_params_total <= 0):
-        if n_data_rows <= 0:
-            skip_reason = "未执行拟合：当前数据表没有任何数据行（N=0），已按初值计算。"
-        elif n_outputs <= 0:
-            skip_reason = (
-                "未执行拟合：未选择任何输出变量（N_outputs=0），已按初值计算。"
-            )
-        else:
-            skip_reason = (
-                "未执行拟合：未勾选任何待拟合参数（n_fit_params=0），已按初值计算。"
-            )
-
-        set_metric("final_phi", float(initial_cost))
+    def _build_skipped_fit_result(skip_reason: str, phi_value: float) -> dict:
+        phi_value = float(phi_value)
+        set_metric("initial_cost", phi_value)
+        set_metric("final_phi", phi_value)
         timeline_add("ℹ️", skip_reason)
         set_status("跳过拟合（直接使用初值计算）。")
         set_progress(1.0)
@@ -1106,7 +879,7 @@ def _run_fitting_job(
             f"目标函数定义：Φ(θ)=1/2·∑ r_i(θ)^2\n"
             f"残差定义：{residual_formula_for_summary}\n"
             f"执行结果：未执行 least_squares（{skip_reason}）\n"
-            f"目标函数值：Φ={initial_cost:.3e}\n"
+            f"目标函数值：Φ={phi_value:.3e}\n"
             f"失败罚项：typical_scale≈{typical_measured_scale:.3e}，penalty={residual_penalty_value:.3e}\n"
             f"ODE 步长限制：max_step_fraction={max_step_fraction:.3g}（0 表示不限制）"
         )
@@ -1201,17 +974,265 @@ def _run_fitting_job(
             "use_log_K0_ads_fit": bool(use_log_K0_ads_fit),
             "fit_flags_hash": str(fit_state_snapshot.get("fit_flags_hash", "")),
             "fit_bounds_hash": str(fit_state_snapshot.get("fit_bounds_hash", "")),
-            # 向后兼容的键名
-            "initial_cost": float(initial_cost),
-            "cost": float(initial_cost),
-            # 推荐使用的目标函数字段名
-            "phi_initial": float(initial_cost),
-            "phi_final": float(initial_cost),
+            "initial_cost": phi_value,
+            "cost": phi_value,
+            "phi_initial": phi_value,
+            "phi_final": phi_value,
             "residual_type": str(residual_type),
             "n_fit_params": int(n_fit_params_total),
             "fit_skipped": True,
             "fit_skipped_reason": str(skip_reason),
         }
+
+    if n_data_rows <= 0:
+        return _build_skipped_fit_result(
+            "未执行拟合：当前数据表没有任何数据行（N=0），已按初值计算。",
+            0.0,
+        )
+
+    if n_outputs <= 0:
+        return _build_skipped_fit_result(
+            "未执行拟合：未选择任何输出变量（N_outputs=0），已按初值计算。",
+            0.0,
+        )
+
+    data_rows = list(data_df.itertuples(index=False))
+    species_name_to_index = {name: i for i, name in enumerate(species_names)}
+    try:
+        output_species_indices = [
+            species_name_to_index[name] for name in output_species_list
+        ]
+    except Exception:
+        raise ValueError("输出物种不在物种列表中（请检查物种名是否匹配）")
+
+    if reactor_type == REACTOR_TYPE_PFR:
+        inlet_column_names = (
+            [f"F0_{name}_mol_s" for name in species_names]
+            if pfr_flow_model == PFR_FLOW_MODEL_GAS_IDEAL_CONST_P
+            else (
+                [f"C0_{name}_mol_m3" for name in species_names]
+                if str(output_mode).startswith("C")
+                else [f"F0_{name}_mol_s" for name in species_names]
+            )
+        )
+    else:
+        inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
+
+    # 行级并行：持久化线程池（避免每次残差调用重复创建线程）
+    # scipy.integrate.solve_ivp 在 C 层释放 GIL，多线程可真正并行
+    _n_row_workers = min(n_data_rows, os.cpu_count() or 4)
+    _row_executor = ThreadPoolExecutor(max_workers=_n_row_workers)
+
+    # 可变容差容器：允许粗拟合阶段使用放宽容差，精细拟合恢复原始容差
+    _active_tol = {"rtol": float(rtol), "atol": float(atol)}
+
+    # --- 基于函数评估次数（nfev）的进度跟踪 ---
+    stage_label = "初始化"
+    stage_base_progress = 0.0
+    stage_span_progress = 0.05
+    stage_max_nfev = 1
+    stage_nfev = 0
+    best_cost_so_far = float("inf")
+    last_ui_update_s = time.time()
+    n_params_fit: int | None = None
+    valid_points_last_eval = 0
+    max_valid_points_seen = 0
+
+    def emit_stage_progress(row_index: int | None = None) -> None:
+        nonlocal last_ui_update_s
+        calls_per_iteration_est = int(max(int(n_params_fit or 0) + 1, 1))
+        call_budget_est = int(max(int(stage_max_nfev), 1)) * calls_per_iteration_est
+
+        if row_index is None:
+            call_progress_est = float(stage_nfev)
+            call_progress_text = str(int(stage_nfev))
+            row_progress_text = ""
+        else:
+            row_frac = float(row_index + 1) / float(max(int(n_data_rows), 1))
+            call_progress_est = float(max(int(stage_nfev) - 1, 0)) + row_frac
+            call_progress_text = f"{call_progress_est:.1f}"
+            row_progress_text = f" | 数据行 {int(row_index) + 1}/{int(n_data_rows)}"
+
+        frac = float(call_progress_est) / float(max(call_budget_est, 1))
+        frac = float(np.clip(frac, 0.0, 1.0))
+        set_progress(stage_base_progress + stage_span_progress * frac)
+
+        if np.isfinite(best_cost_so_far):
+            set_status(
+                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
+                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
+                f"{row_progress_text} | best Φ≈{best_cost_so_far:.3e}"
+            )
+        else:
+            set_status(
+                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
+                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
+                f"{row_progress_text}"
+            )
+        last_ui_update_s = time.time()
+
+    def residual_func_wrapper(x: np.ndarray) -> np.ndarray:
+        nonlocal stage_nfev, best_cost_so_far, last_ui_update_s, n_params_fit
+        nonlocal valid_points_last_eval, max_valid_points_seen
+        if stop_event.is_set():
+            raise FittingStoppedError("Stopped by user")
+
+        if n_params_fit is None:
+            n_params_fit = int(np.asarray(x).size)
+
+        stage_nfev += 1
+        p = fitting._unpack_parameters(
+            x,
+            k0_guess,
+            ea_guess_J_mol,
+            order_guess,
+            fit_k0_flags,
+            fit_ea_flags,
+            fit_order_flags_matrix,
+            K0_ads,
+            Ea_K_J_mol,
+            m_inhibition,
+            fit_K0_ads_flags,
+            fit_Ea_K_flags,
+            fit_m_flags,
+            k0_rev,
+            ea_rev_J_mol,
+            order_rev,
+            fit_k0_rev_flags,
+            fit_ea_rev_flags,
+            fit_order_rev_flags_matrix,
+            use_log_k0_fit=use_log_k0_fit,
+            use_log_k0_rev_fit=use_log_k0_rev_fit,
+            use_log_K0_ads_fit=use_log_K0_ads_fit,
+        )
+
+        residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
+        valid_points_this_eval = 0
+
+        # 并行评估各数据行（solve_ivp 释放 GIL，_n_row_workers 线程真正并行执行）
+        # 每个线程持有独立的 local_cache，避免共享字典的竞争条件
+        def _eval_single_row(args: tuple) -> tuple:
+            row_index, row = args
+            if stop_event.is_set():
+                return row_index, None, False
+            local_cache: dict = {}
+            pred, ok, _ = fitting._predict_outputs_for_row(
+                row,
+                species_names,
+                output_mode,
+                output_species_list,
+                stoich_matrix,
+                p["k0"],
+                p["ea_J_mol"],
+                p["reaction_order_matrix"],
+                solver_method,
+                _active_tol["rtol"],
+                _active_tol["atol"],
+                reactor_type,
+                kinetic_model,
+                reversible_enabled,
+                pfr_flow_model,
+                p["K0_ads"],
+                p["Ea_K"],
+                p["m_inhibition"],
+                p["k0_rev"],
+                p["ea_rev"],
+                p["order_rev"],
+                max_step_fraction=max_step_fraction,
+                name_to_index=species_name_to_index,
+                output_species_indices=output_species_indices,
+                inlet_column_names=inlet_column_names,
+                model_eval_cache=local_cache,
+                stop_event=stop_event,
+            )
+            return row_index, pred, ok
+
+        row_results = list(_row_executor.map(_eval_single_row, enumerate(data_rows)))
+
+        if stop_event.is_set():
+            raise FittingStoppedError("Stopped by user")
+
+        for row_index, pred, ok in row_results:
+            base = row_index * n_outputs
+            if not ok or pred is None:
+                residual_array[base : base + n_outputs] = residual_penalty_value
+            else:
+                measured_row = measured_matrix[row_index, :]
+                diff = pred - measured_row
+
+                # 根据残差类型计算残差
+                if residual_type == "相对残差":
+                    # 相对残差: r = (y_pred - y_meas) / sign(y_meas)·max(|y_meas|, ε)
+                    # 说明：自动使用 epsilon，避免 y_meas≈0 时的除零问题。
+                    sign_measured = np.where(measured_row < 0.0, -1.0, 1.0)
+                    denominator = sign_measured * np.maximum(
+                        np.abs(measured_row), residual_epsilon
+                    )
+                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                        rel_residual = diff / denominator
+                    valid_mask = np.isfinite(rel_residual)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
+                    invalid_mask = ~np.isfinite(rel_residual)
+                    if np.any(invalid_mask):
+                        rel_residual[invalid_mask] = residual_penalty_value
+                    residual_array[base : base + n_outputs] = rel_residual
+                elif residual_type == "百分比残差":
+                    # 百分比残差: r = 100 * (y_pred - y_meas) / (|y_meas| + epsilon)
+                    denominator = np.abs(measured_row) + residual_epsilon
+                    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                        pct_residual = 100.0 * (diff / denominator)
+                    valid_mask = np.isfinite(pct_residual)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
+                    invalid_mask = ~np.isfinite(pct_residual)
+                    if np.any(invalid_mask):
+                        pct_residual[invalid_mask] = residual_penalty_value
+                    residual_array[base : base + n_outputs] = pct_residual
+                else:
+                    # 默认：绝对残差 r = y_pred - y_meas
+                    valid_mask = np.isfinite(diff)
+                    valid_points_this_eval += int(np.count_nonzero(valid_mask))
+                    if not bool(np.all(valid_mask)):
+                        residual_array[base : base + n_outputs] = residual_penalty_value
+                    else:
+                        residual_array[base : base + n_outputs] = diff
+
+        if residual_array.size > 0:
+            cost_now = float(0.5 * np.sum(residual_array**2))
+            if np.isfinite(cost_now) and (cost_now < best_cost_so_far):
+                best_cost_so_far = cost_now
+        valid_points_last_eval = int(valid_points_this_eval)
+        if valid_points_last_eval > int(max_valid_points_seen):
+            max_valid_points_seen = int(valid_points_last_eval)
+
+        now_s = time.time()
+        if (now_s - last_ui_update_s) >= FITTING_UI_UPDATE_INTERVAL_S:
+            emit_stage_progress(row_index=None)
+
+        return residual_array
+
+    timeline_add("⏳", "阶段 1: 计算初始残差...")
+    stage_label = "初始残差"
+    stage_base_progress = 0.0
+    stage_span_progress = 0.05
+    stage_max_nfev = 1
+    stage_nfev = 0
+    initial_residuals = residual_func_wrapper(param_vector)
+    initial_cost = float(0.5 * np.sum(initial_residuals**2))
+    set_metric("initial_cost", initial_cost)
+    timeline_add("✅", f"初始目标函数值 Φ: {initial_cost:.4e}")
+
+    if int(valid_points_last_eval) <= 0:
+        raise ValueError(
+            "没有任何有效预测点（N_valid=0），已阻断拟合。"
+            " 请检查：求解器容限（rtol/atol）、入口流量/浓度、输出模式与工况是否匹配。"
+        )
+
+    if n_fit_params_total <= 0:
+        _row_executor.shutdown(wait=False)
+        return _build_skipped_fit_result(
+            "未执行拟合：未勾选任何待拟合参数（n_fit_params=0），已按初值计算。",
+            initial_cost,
+        )
 
     set_status("开始 least_squares 拟合...")
     set_progress(0.05)
@@ -1221,6 +1242,9 @@ def _run_fitting_job(
 
     if use_ms and n_starts > 1:
         timeline_add("⏳", f"阶段 2: 多起点粗拟合 ({n_starts} 个起点)...")
+        # 粗拟合使用放宽 10 倍的 ODE 容差：目的仅为筛选最优起点，无需高精度
+        _active_tol["rtol"] = float(rtol) * 10.0
+        _active_tol["atol"] = float(atol) * 10.0
 
         # Latin Hypercube Sampling（LHS）替代纯随机：在高维空间中更均匀地覆盖参数区间
         from scipy.stats.qmc import LatinHypercube
@@ -1294,6 +1318,10 @@ def _run_fitting_job(
             f"最佳起点：{int(best_start_index)}/{int(n_starts)}\n"
             f"粗拟合最佳 Φ：{coarse_best_phi:.3e}"
         )
+
+        # 精细拟合恢复原始 ODE 容差，保证收敛精度
+        _active_tol["rtol"] = float(rtol)
+        _active_tol["atol"] = float(atol)
 
         set_status("使用最优起点做精细拟合...")
         set_progress(0.85)
@@ -1441,6 +1469,7 @@ def _run_fitting_job(
 
     set_status("拟合完成。")
     set_progress(1.0)
+    _row_executor.shutdown(wait=False)
 
     return {
         "params": fitted_params,

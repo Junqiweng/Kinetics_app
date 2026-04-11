@@ -10,11 +10,13 @@ import modules.ui_text as ui_text
 from modules.constants import (
     DEFAULT_ATOL,
     DEFAULT_RTOL,
+    KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
     KINETIC_MODELS,
     PFR_FLOW_MODEL_GAS_IDEAL_CONST_P,
     PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     REACTOR_TYPES,
     REACTOR_TYPE_BSTR,
+    REACTOR_TYPE_CSTR,
     REACTOR_TYPE_PFR,
     UI_TOLERANCE_FORMAT_STREAMLIT,
 )
@@ -141,6 +143,16 @@ def render_sidebar(ctx: dict) -> dict:
                 key="cfg_solver_method",
                 disabled=global_disabled,
             )
+            # 刚性系统智能提示：LHHW 模型或 CSTR 反应器通常产生刚性 ODE
+            _is_stiff_scenario = (
+                kinetic_model == KINETIC_MODEL_LANGMUIR_HINSHELWOOD
+                or reactor_type == REACTOR_TYPE_CSTR
+            )
+            if _is_stiff_scenario and solver_method in ("RK45", "RK23"):
+                st.caption(
+                    "建议：当前模型/反应器可能产生刚性 ODE，"
+                    "切换到 **LSODA** 或 **BDF** 可显著提升求解速度。"
+                )
             col_tol1, col_tol2 = st.columns(2)
             rtol = col_tol1.number_input(
                 "rtol",
