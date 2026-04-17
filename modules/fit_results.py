@@ -19,6 +19,7 @@ from modules.data_utils import (
     _get_output_unit_text,
 )
 from modules.fit_setup import derive_effective_fit_flags
+from modules.fitting_background import _format_rmse
 from modules.fit_state import (
     build_fit_result_state_snapshot,
     build_fit_state_snapshot,
@@ -585,9 +586,13 @@ def render_fit_results(
         residual_latex = residual_latex_map.get(
             residual_type_used, residual_latex_map["绝对残差"]
         )
-        tab_fit_results_container.markdown(
-            f"### 拟合结果 (目标函数 Φ: {phi_text}，残差类型：{residual_type_used})"
-        )
+        n_valid_points = int(res.get("n_valid_points", 0))
+        rmse_text = _format_rmse(phi_value, n_valid_points, residual_type_used)
+        header_line = f"### 拟合结果 · 目标函数 Φ={phi_text}"
+        if rmse_text:
+            header_line += f" · {rmse_text}"
+        tab_fit_results_container.markdown(header_line)
+        tab_fit_results_container.caption(f"残差类型：{residual_type_used}")
         tab_fit_results_container.latex(
             r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad "
             + residual_latex

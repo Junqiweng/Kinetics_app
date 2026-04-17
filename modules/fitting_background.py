@@ -6,6 +6,7 @@ import datetime as _dt
 import difflib
 import hashlib
 import html as html_lib
+import math
 import os
 import queue
 import sys
@@ -260,6 +261,41 @@ def _render_summary_lines(summary_text: str) -> None:
         st.write(f"• {line}")
 
 
+def _format_rmse(best_cost: float, n_valid: int, residual_type: str) -> str:
+    # cost = 0.5 * Σ r_i²  ⇒  RMSE = sqrt(2·cost / N_valid)
+    if (not np.isfinite(best_cost)) or int(n_valid) <= 0:
+        return ""
+    rmse = math.sqrt(2.0 * float(best_cost) / float(n_valid))
+    rtype = str(residual_type).strip()
+    if rtype == "百分比残差":
+        unit = "%"
+    elif rtype == "相对残差":
+        unit = "(相对)"
+    else:
+        unit = "mol/m³"
+    return f"RMSE≈{rmse:.3e} {unit}"
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds is None or (not np.isfinite(seconds)) or seconds < 0:
+        return "--:--"
+    s = int(round(float(seconds)))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m:02d}:{sec:02d}"
+
+
+def _estimate_eta(overall_pct: float, elapsed_s: float) -> float | None:
+    # 极早期（<2%）不估算，避免得到荒谬的剩余时间
+    if overall_pct is None or float(overall_pct) < 0.02:
+        return None
+    if float(overall_pct) >= 1.0:
+        return 0.0
+    return float(elapsed_s) * (1.0 - float(overall_pct)) / float(overall_pct)
+
+
 def _render_fitting_progress_panel() -> None:
     job_summary = st.session_state.get("fitting_job_summary", {})
     timeline = st.session_state.get("fitting_timeline", [])
@@ -434,6 +470,55 @@ def _render_fitting_live_progress() -> None:
         if status_text:
             st.caption(status_text)
 
+        metrics = st.session_state.get("fitting_metrics", {}) or {}
+        prog = metrics.get("fit_progress", None)
+        start_s = metrics.get("fit_start_time_s", None)
+        if isinstance(prog, dict):
+            with st.expander("查看详细指标", expanded=False):
+                elapsed = (time.time() - float(start_s)) if start_s else 0.0
+                eta = _estimate_eta(
+                    float(prog.get("overall_pct", 0.0) or 0.0), elapsed
+                )
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.write(f"**已用时间**：{_format_duration(elapsed)}")
+                    eta_text = (
+                        _format_duration(eta) if eta is not None else "估算中…"
+                    )
+                    st.write(f"**预计剩余**：{eta_text}")
+                    st.write(
+                        f"**已评估**：{int(prog.get('nfev_est', 0))} / 约 "
+                        f"{int(prog.get('call_budget_est', 0))} 组参数"
+                    )
+                    if prog.get("row_index") is not None:
+                        st.write(
+                            f"**当前数据行**：{int(prog['row_index']) + 1}"
+                            f" / {int(prog.get('n_data_rows', 1))}"
+                        )
+                with col_b:
+                    st.write(f"**max_iter 上限**：{int(prog.get('max_iter', 0))}")
+                    st.write(f"**拟合参数数 n**：{int(prog.get('n_params', 0))}")
+                    st.write(
+                        f"**残差类型**：{prog.get('residual_type', '-')}"
+                    )
+                    best_cost = float(prog.get("best_cost", float("inf")))
+                    rmse_txt = _format_rmse(
+                        best_cost,
+                        int(prog.get("max_valid_points_seen", 0)),
+                        str(prog.get("residual_type", "")),
+                    )
+                    if np.isfinite(best_cost):
+                        phi_line = f"**当前最佳 Φ**：{best_cost:.3e}"
+                        if rmse_txt:
+                            phi_line += f" · {rmse_txt}"
+                        st.write(phi_line)
+                    else:
+                        st.write("**当前最佳 Φ**：--")
+                st.caption(
+                    "注：“已评估 / 约 Y 组”的分母是最坏情况上限（max_iter × (n+1)），"
+                    "实际通常远不到。"
+                )
+
     _render_fitting_progress_panel()
 
     if not bool(st.session_state.get("fitting_auto_refresh", True)):
@@ -443,6 +528,11 @@ def _render_fitting_live_progress() -> None:
 def _run_fitting_job(
     job_inputs: dict, stop_event: threading.Event, progress_queue: queue.Queue
 ) -> dict:
+    fit_start_s = time.time()
+    progress_queue.put(
+        ("metric", {"name": "fit_start_time_s", "value": fit_start_s})
+    )
+
     def set_status(status_text: str) -> None:
         progress_queue.put(("status", status_text))
 
@@ -1117,30 +1207,41 @@ def _run_fitting_job(
 
         if row_index is None:
             call_progress_est = float(stage_nfev)
-            call_progress_text = str(int(stage_nfev))
-            row_progress_text = ""
         else:
             row_frac = float(row_index + 1) / float(max(int(n_data_rows), 1))
             call_progress_est = float(max(int(stage_nfev) - 1, 0)) + row_frac
-            call_progress_text = f"{call_progress_est:.1f}"
-            row_progress_text = f" | 数据行 {int(row_index) + 1}/{int(n_data_rows)}"
 
         frac = float(call_progress_est) / float(max(call_budget_est, 1))
         frac = float(np.clip(frac, 0.0, 1.0))
-        set_progress(stage_base_progress + stage_span_progress * frac)
+        overall_pct = stage_base_progress + stage_span_progress * frac
+        set_progress(overall_pct)
 
-        if np.isfinite(best_cost_so_far):
-            set_status(
-                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
-                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
-                f"{row_progress_text} | best Φ≈{best_cost_so_far:.3e}"
-            )
-        else:
-            set_status(
-                f"{stage_label} | 调用≈{call_progress_text}/{int(call_budget_est)} "
-                f"(max_iter={int(stage_max_nfev)}, n={int(n_params_fit or 0)})"
-                f"{row_progress_text}"
-            )
+        rmse_text = _format_rmse(
+            best_cost_so_far, int(max_valid_points_seen), residual_type
+        )
+        headline = f"{stage_label} · {int(round(overall_pct * 100))}%"
+        if rmse_text:
+            headline += f" · 当前最佳 {rmse_text}"
+        set_status(headline)
+
+        set_metric(
+            "fit_progress",
+            {
+                "stage_label": stage_label,
+                "overall_pct": float(overall_pct),
+                "stage_pct": float(frac),
+                "nfev_est": float(call_progress_est),
+                "call_budget_est": int(call_budget_est),
+                "max_iter": int(stage_max_nfev),
+                "n_params": int(n_params_fit or 0),
+                "n_data_rows": int(n_data_rows),
+                "row_index": row_index,
+                "best_cost": float(best_cost_so_far),
+                "max_valid_points_seen": int(max_valid_points_seen),
+                "residual_type": str(residual_type),
+            },
+        )
+
         last_ui_update_s = time.time()
 
     def residual_func_wrapper(x: np.ndarray) -> np.ndarray:
@@ -1671,4 +1772,5 @@ def _run_fitting_job(
         "phi_final": float(final_res.cost),
         "residual_type": str(residual_type),
         "n_fit_params": int(n_fit_params_total),
+        "n_valid_points": int(max_valid_points_seen),
     }
