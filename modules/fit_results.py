@@ -1226,15 +1226,15 @@ def render_fit_results(
                             "坐标范围设置（横纵一致 + 等比例）", expanded=False
                         ):
                             st.caption(
-                                "默认强制 x/y 等比例，以避免因为坐标拉伸导致对拟合优劣的误判。"
+                                "默认按每个物种的数据范围自适应，同时保持该子图 x/y 横纵一致。"
                             )
                             axis_scope = st.radio(
                                 "坐标范围作用域",
-                                ["所有子图一致（推荐）", "每个子图独立"],
+                                ["每个子图独立（自适应）", "所有子图一致"],
                                 index=0,
                                 horizontal=True,
-                                key="parity_axis_scope",
-                                help="所有子图一致：便于不同物种之间直接比较拟合质量；每个子图独立：可单独放大细节，但不同子图的点云“紧密程度”不可直接横向比较。",
+                                key="parity_axis_scope_v2",
+                                help="每个子图独立：按当前物种的数据范围自适应；所有子图一致：使用全局统一坐标，便于不同物种直接比较量级。",
                             )
                             axis_range_mode = st.radio(
                                 "范围来源",
@@ -1248,7 +1248,7 @@ def render_fit_results(
                                 f"全局自动范围（用于统一坐标时的默认值）：[{axis_min_auto:.6g}, {axis_max_auto:.6g}]"
                             )
 
-                            if axis_scope == "所有子图一致（推荐）":
+                            if axis_scope == "所有子图一致":
                                 if axis_range_mode == "自定义":
                                     col_ax1, col_ax2 = st.columns([1, 1])
                                     axis_min_user = float(

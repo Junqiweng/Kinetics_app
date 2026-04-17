@@ -1391,6 +1391,7 @@ def integrate_batch_profile(
     rtol: float,
     atol: float,
     n_points: int = DEFAULT_PROFILE_N_POINTS,
+    time_eval_s: np.ndarray | None = None,
     kinetic_model: str = KINETIC_MODEL_POWER_LAW,
     reversible_enabled: bool = False,
     max_step_fraction: float | None = DEFAULT_MAX_STEP_FRACTION,
@@ -1407,6 +1408,10 @@ def integrate_batch_profile(
     返回 BSTR 随时间剖面：
       time_grid_s: shape (n_points,)
       conc_profile_mol_m3: shape (n_species, n_points)
+
+    time_eval_s 可选：
+      - None：按 n_points 生成等间距时间网格，供剖面图使用；
+      - ndarray：按实验数据中的指定时间点输出，供拟合残差批量计算使用。
     """
     n_points = int(n_points)
     if n_points < 2:
@@ -1512,7 +1517,39 @@ def integrate_batch_profile(
         dC_dt = stoich_matrix @ rate_vector
         return dC_dt
 
-    time_grid_s = np.linspace(0.0, float(reaction_time_s), n_points, dtype=float)
+    if time_eval_s is None:
+        time_grid_s = np.linspace(0.0, float(reaction_time_s), n_points, dtype=float)
+    else:
+        # 拟合时希望在实验采样时刻精确返回模型值，避免先做密网格再插值。
+        # solve_ivp 要求 t_eval 单调且位于 t_span 内，因此这里统一做数值校验与排序去重。
+        time_grid_s = np.asarray(time_eval_s, dtype=float).reshape(-1)
+        if time_grid_s.size == 0:
+            return (
+                np.array([0.0]),
+                conc_initial_mol_m3.astype(float)[:, None],
+                False,
+                "time_eval_s 为空",
+            )
+        if not np.all(np.isfinite(time_grid_s)):
+            return (
+                np.array([0.0]),
+                conc_initial_mol_m3.astype(float)[:, None],
+                False,
+                "time_eval_s 包含 NaN/Inf",
+            )
+        lower_tol = -max(1e-12, 1e-12 * abs(float(reaction_time_s)))
+        upper_tol = float(reaction_time_s) + max(
+            1e-12, 1e-12 * abs(float(reaction_time_s))
+        )
+        if np.any(time_grid_s < lower_tol) or np.any(time_grid_s > upper_tol):
+            return (
+                np.array([0.0]),
+                conc_initial_mol_m3.astype(float)[:, None],
+                False,
+                "time_eval_s 超出积分时间范围",
+            )
+        time_grid_s = np.unique(np.clip(time_grid_s, 0.0, float(reaction_time_s)))
+
     max_step_value = _compute_max_step(float(reaction_time_s), max_step_fraction)
     try:
         solution = solve_ivp(
@@ -1553,4 +1590,3 @@ def integrate_batch_profile(
         )
 
     return solution.t.astype(float), solution.y.astype(float), True, "OK"
-

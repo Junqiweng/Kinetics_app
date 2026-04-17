@@ -157,6 +157,63 @@ def smoke_predict_bstr() -> None:
     _assert_finite_array(y, "BSTR y")
 
 
+def smoke_bstr_time_eval_matches_single_integrations() -> None:
+    species_names = ["A", "B"]
+    stoich_matrix = np.array([[-1.0], [1.0]], dtype=float)
+    k0 = np.array([1.0e6], dtype=float)
+    ea_J_mol = np.array([5.0e4], dtype=float)
+    reaction_order_matrix = np.array([[1.0, 0.0]], dtype=float)
+    conc_initial = np.array([2000.0, 0.0], dtype=float)
+    sample_times_s = np.array([30.0, 60.0, 120.0], dtype=float)
+
+    # 批量路径：一次积分到最大时间，并要求 solve_ivp 在实验采样时刻返回结果。
+    time_grid, conc_profile, ok, msg = reactors.integrate_batch_profile(
+        reaction_time_s=float(np.max(sample_times_s)),
+        temperature_K=350.0,
+        conc_initial_mol_m3=conc_initial,
+        stoich_matrix=stoich_matrix,
+        k0=k0,
+        ea_J_mol=ea_J_mol,
+        reaction_order_matrix=reaction_order_matrix,
+        solver_method="RK45",
+        rtol=1e-8,
+        atol=1e-12,
+        time_eval_s=sample_times_s,
+        kinetic_model=KINETIC_MODEL_POWER_LAW,
+        reversible_enabled=False,
+        max_step_fraction=0.0,
+    )
+    if not ok:
+        raise AssertionError(f"BSTR time_eval profile failed: {msg}")
+
+    # 逐点路径：每个时间点独立积分。二者应在 ODE 容限范围内一致。
+    for col_index, t_s in enumerate(time_grid):
+        conc_single, ok_single, msg_single = reactors.integrate_batch_reactor(
+            reaction_time_s=float(t_s),
+            temperature_K=350.0,
+            conc_initial_mol_m3=conc_initial,
+            stoich_matrix=stoich_matrix,
+            k0=k0,
+            ea_J_mol=ea_J_mol,
+            reaction_order_matrix=reaction_order_matrix,
+            solver_method="RK45",
+            rtol=1e-8,
+            atol=1e-12,
+            kinetic_model=KINETIC_MODEL_POWER_LAW,
+            reversible_enabled=False,
+            max_step_fraction=0.0,
+        )
+        if not ok_single:
+            raise AssertionError(f"BSTR single integration failed: {msg_single}")
+        if not np.allclose(
+            conc_profile[:, col_index], conc_single, rtol=2e-7, atol=1e-7
+        ):
+            raise AssertionError(
+                "BSTR time_eval profile mismatch: "
+                f"t={t_s}, profile={conc_profile[:, col_index]}, single={conc_single}"
+            )
+
+
 def smoke_validate_default_config() -> None:
     cfg = config_manager.get_default_config()
     ok, msg = config_manager.validate_config(cfg)
@@ -323,6 +380,7 @@ def main() -> None:
     smoke_power_reversible_formula_compatibility()
     smoke_predict_cstr()
     smoke_predict_bstr()
+    smoke_bstr_time_eval_matches_single_integrations()
 
     # 给一个更直观的成功标记（兼容某些终端不显示异常堆栈的场景）
     if not math.isfinite(1.0):

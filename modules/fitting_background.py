@@ -51,9 +51,11 @@ from .constants import (
     PFR_FLOW_MODEL_LIQUID_CONST_VDOT,
     KINETIC_MODEL_POWER_LAW,
     KINETIC_MODEL_REVERSIBLE,
+    REACTOR_TYPE_BSTR,
     REACTOR_TYPE_CSTR,
     REACTOR_TYPE_PFR,
 )
+from .reactors import integrate_batch_profile
 
 
 class FittingStoppedError(Exception):
@@ -1018,9 +1020,70 @@ def _run_fitting_job(
     else:
         inlet_column_names = [f"C0_{name}_mol_m3" for name in species_names]
 
+    bstr_time_series_groups: list[dict] | None = None
+    if reactor_type == REACTOR_TYPE_BSTR and str(output_mode).startswith("C"):
+        # BSTR validation 数据常见形式是：同一初始组成/温度下给出多个采样时间点。
+        # 原实现会对每一行都从 t=0 单独积分一次；这里按工况分组后，
+        # 每组只积分到最大时间，并在所有实验采样时刻直接取值。
+        group_map: dict[tuple, dict] = {}
+        can_group_bstr_rows = True
+        for row_index, row in enumerate(data_rows):
+            reaction_time_s = fitting._to_float_or_nan(
+                fitting._row_get_value(row, "t_s", np.nan)
+            )
+            temperature_K = fitting._to_float_or_nan(
+                fitting._row_get_value(row, "T_K", np.nan)
+            )
+
+            conc_initial = np.zeros(len(species_names), dtype=float)
+            for i, col in enumerate(inlet_column_names):
+                value = fitting._to_float_or_nan(
+                    fitting._row_get_value(row, col, np.nan)
+                )
+                if (not np.isfinite(value)) or (float(value) < 0.0):
+                    can_group_bstr_rows = False
+                    break
+                conc_initial[i] = float(value)
+
+            if (
+                (not can_group_bstr_rows)
+                or (not np.isfinite(reaction_time_s))
+                or (reaction_time_s < 0.0)
+                or (not np.isfinite(temperature_K))
+                or (temperature_K <= 0.0)
+            ):
+                can_group_bstr_rows = False
+                break
+
+            group_key = (float(temperature_K), tuple(conc_initial.tolist()))
+            if group_key not in group_map:
+                group_map[group_key] = {
+                    "temperature_K": float(temperature_K),
+                    "conc_initial": conc_initial.copy(),
+                    "items": [],
+                }
+            group_map[group_key]["items"].append(
+                (int(row_index), float(reaction_time_s))
+            )
+
+        if can_group_bstr_rows and group_map:
+            bstr_time_series_groups = list(group_map.values())
+            timeline_add(
+                "ℹ️",
+                (
+                    "BSTR 时间序列批量积分："
+                    f"{int(n_data_rows)} 行压缩为 {len(bstr_time_series_groups)} 组 ODE。"
+                ),
+            )
+
     # 行级并行：持久化线程池（避免每次残差调用重复创建线程）
     # scipy.integrate.solve_ivp 在 C 层释放 GIL，多线程可真正并行
-    _n_row_workers = min(n_data_rows, os.cpu_count() or 4)
+    _n_parallel_tasks = (
+        len(bstr_time_series_groups)
+        if bstr_time_series_groups is not None
+        else int(n_data_rows)
+    )
+    _n_row_workers = min(max(int(_n_parallel_tasks), 1), os.cpu_count() or 4)
     _row_executor = ThreadPoolExecutor(max_workers=_n_row_workers)
 
     # 可变容差容器：允许粗拟合阶段使用放宽容差，精细拟合恢复原始容差
@@ -1109,45 +1172,144 @@ def _run_fitting_job(
         residual_array = np.zeros(n_data_rows * n_outputs, dtype=float)
         valid_points_this_eval = 0
 
-        # 并行评估各数据行（solve_ivp 释放 GIL，_n_row_workers 线程真正并行执行）
-        # 每个线程持有独立的 local_cache，避免共享字典的竞争条件
-        def _eval_single_row(args: tuple) -> tuple:
-            row_index, row = args
-            if stop_event.is_set():
-                return row_index, None, False
-            local_cache: dict = {}
-            pred, ok, _ = fitting._predict_outputs_for_row(
-                row,
-                species_names,
-                output_mode,
-                output_species_list,
-                stoich_matrix,
-                p["k0"],
-                p["ea_J_mol"],
-                p["reaction_order_matrix"],
-                solver_method,
-                _active_tol["rtol"],
-                _active_tol["atol"],
-                reactor_type,
-                kinetic_model,
-                reversible_enabled,
-                pfr_flow_model,
-                p["K0_ads"],
-                p["Ea_K"],
-                p["m_inhibition"],
-                p["k0_rev"],
-                p["ea_rev"],
-                p["order_rev"],
-                max_step_fraction=max_step_fraction,
-                name_to_index=species_name_to_index,
-                output_species_indices=output_species_indices,
-                inlet_column_names=inlet_column_names,
-                model_eval_cache=local_cache,
-                stop_event=stop_event,
-            )
-            return row_index, pred, ok
+        if bstr_time_series_groups is not None:
+            # BSTR 批量路径：一组工况只做一次 solve_ivp，返回该组所有 t_s 的预测值。
+            def _eval_bstr_group(
+                group: dict,
+            ) -> list[tuple[int, np.ndarray | None, bool]]:
+                if stop_event.is_set():
+                    return [
+                        (int(row_index), None, False)
+                        for row_index, _ in group.get("items", [])
+                    ]
 
-        row_results = list(_row_executor.map(_eval_single_row, enumerate(data_rows)))
+                group_items = list(group.get("items", []))
+                reaction_times = np.asarray(
+                    [float(item[1]) for item in group_items], dtype=float
+                )
+                unique_times, inverse_indices = np.unique(
+                    reaction_times, return_inverse=True
+                )
+                max_time_s = float(np.max(unique_times)) if unique_times.size else 0.0
+
+                group_max_step_fraction = max_step_fraction
+                try:
+                    positive_times = unique_times[unique_times > 0.0]
+                    if (
+                        positive_times.size > 0
+                        and max_time_s > 0.0
+                        and max_step_fraction is not None
+                        and float(max_step_fraction) > 0.0
+                    ):
+                        # 原逐行积分中，最短时间点的 max_step 最严格。
+                        # 批量积分时沿用这个最严格步长，避免为了提速改变数值步长上限。
+                        group_max_step_fraction = (
+                            float(max_step_fraction)
+                            * float(np.min(positive_times))
+                            / float(max_time_s)
+                        )
+                except (ValueError, TypeError, FloatingPointError):
+                    group_max_step_fraction = max_step_fraction
+
+                time_grid_s, conc_profile, ok, _ = integrate_batch_profile(
+                    reaction_time_s=max_time_s,
+                    temperature_K=float(group["temperature_K"]),
+                    conc_initial_mol_m3=np.asarray(
+                        group["conc_initial"], dtype=float
+                    ),
+                    stoich_matrix=stoich_matrix,
+                    k0=p["k0"],
+                    ea_J_mol=p["ea_J_mol"],
+                    reaction_order_matrix=p["reaction_order_matrix"],
+                    solver_method=solver_method,
+                    rtol=_active_tol["rtol"],
+                    atol=_active_tol["atol"],
+                    time_eval_s=unique_times,
+                    kinetic_model=kinetic_model,
+                    reversible_enabled=reversible_enabled,
+                    max_step_fraction=group_max_step_fraction,
+                    K0_ads=p["K0_ads"],
+                    Ea_K_J_mol=p["Ea_K"],
+                    m_inhibition=p["m_inhibition"],
+                    k0_rev=p["k0_rev"],
+                    ea_rev_J_mol=p["ea_rev"],
+                    order_rev_matrix=p["order_rev"],
+                    stop_event=stop_event,
+                )
+
+                if (not ok) or conc_profile is None:
+                    return [
+                        (int(row_index), None, False)
+                        for row_index, _ in group_items
+                    ]
+
+                time_to_col = {
+                    float(t_value): int(col_index)
+                    for col_index, t_value in enumerate(np.asarray(time_grid_s))
+                }
+                group_results: list[tuple[int, np.ndarray | None, bool]] = []
+                for item_index, (row_index, _) in enumerate(group_items):
+                    time_value = float(unique_times[int(inverse_indices[item_index])])
+                    col_index = time_to_col.get(time_value, None)
+                    if col_index is None:
+                        group_results.append((int(row_index), None, False))
+                        continue
+
+                    conc_final = np.asarray(conc_profile[:, col_index], dtype=float)
+                    output_values = conc_final[
+                        np.asarray(output_species_indices, dtype=int)
+                    ]
+                    group_results.append((int(row_index), output_values, True))
+                return group_results
+
+            grouped_results = list(
+                _row_executor.map(_eval_bstr_group, bstr_time_series_groups)
+            )
+            row_results = [
+                item for group_result in grouped_results for item in group_result
+            ]
+        else:
+            # 常规路径：逐行评估各数据点（PFR/CSTR/BSTR 非时间序列均走这里）。
+            # 每个线程持有独立的 local_cache，避免共享字典的竞争条件。
+            def _eval_single_row(args: tuple) -> tuple:
+                row_index, row = args
+                if stop_event.is_set():
+                    return row_index, None, False
+                local_cache: dict = {}
+                pred, ok, _ = fitting._predict_outputs_for_row(
+                    row,
+                    species_names,
+                    output_mode,
+                    output_species_list,
+                    stoich_matrix,
+                    p["k0"],
+                    p["ea_J_mol"],
+                    p["reaction_order_matrix"],
+                    solver_method,
+                    _active_tol["rtol"],
+                    _active_tol["atol"],
+                    reactor_type,
+                    kinetic_model,
+                    reversible_enabled,
+                    pfr_flow_model,
+                    p["K0_ads"],
+                    p["Ea_K"],
+                    p["m_inhibition"],
+                    p["k0_rev"],
+                    p["ea_rev"],
+                    p["order_rev"],
+                    max_step_fraction=max_step_fraction,
+                    name_to_index=species_name_to_index,
+                    output_species_indices=output_species_indices,
+                    inlet_column_names=inlet_column_names,
+                    model_eval_cache=local_cache,
+                    stop_event=stop_event,
+                )
+                return row_index, pred, ok
+
+            row_results = list(
+                _row_executor.map(_eval_single_row, enumerate(data_rows))
+            )
 
         if stop_event.is_set():
             raise FittingStoppedError("Stopped by user")
