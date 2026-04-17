@@ -10,12 +10,18 @@ from modules.constants import (
     DEFAULT_EA_K_MIN_J_MOL,
     DEFAULT_EA_MAX_J_MOL,
     DEFAULT_EA_MIN_J_MOL,
+    DEFAULT_EA_REV_MAX_J_MOL,
+    DEFAULT_EA_REV_MIN_J_MOL,
     DEFAULT_K0_ADS_MAX,
     DEFAULT_K0_ADS_MIN,
     DEFAULT_K0_MAX,
     DEFAULT_K0_MIN,
+    DEFAULT_K0_REV_MAX,
+    DEFAULT_K0_REV_MIN,
     DEFAULT_ORDER_MAX,
     DEFAULT_ORDER_MIN,
+    DEFAULT_ORDER_REV_MAX,
+    DEFAULT_ORDER_REV_MIN,
     KINETIC_MODEL_LANGMUIR_HINSHELWOOD,
 )
 
@@ -437,6 +443,63 @@ def render_fit_setup(ctx: dict) -> dict:
                         state["fit_order_rev_flags_matrix"],
                     )
 
+                st.markdown("**逆反应边界设置**")
+                col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
+                with col_rev_b1:
+                    k0_rev_min = ui_comp.smart_number_input(
+                        "k₀,rev 下限（k0_rev_min）",
+                        value=float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN)),
+                        key="cfg_k0_rev_min",
+                    )
+                    k0_rev_max = ui_comp.smart_number_input(
+                        "k₀,rev 上限（k0_rev_max）",
+                        value=float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX)),
+                        key="cfg_k0_rev_max",
+                    )
+                with col_rev_b2:
+                    ea_rev_min_J_mol = ui_comp.smart_number_input(
+                        "Eₐ,rev 下限（ea_rev_min_J_mol）",
+                        value=float(
+                            get_cfg(
+                                "ea_rev_min_J_mol",
+                                DEFAULT_EA_REV_MIN_J_MOL,
+                            )
+                        ),
+                        key="cfg_ea_rev_min_J_mol",
+                    )
+                    ea_rev_max_J_mol = ui_comp.smart_number_input(
+                        "Eₐ,rev 上限（ea_rev_max_J_mol）",
+                        value=float(
+                            get_cfg(
+                                "ea_rev_max_J_mol",
+                                DEFAULT_EA_REV_MAX_J_MOL,
+                            )
+                        ),
+                        key="cfg_ea_rev_max_J_mol",
+                    )
+                with col_rev_b3:
+                    order_rev_min = ui_comp.smart_number_input(
+                        "逆反应级数下限（order_rev_min）",
+                        value=float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN)),
+                        key="cfg_order_rev_min",
+                    )
+                    order_rev_max = ui_comp.smart_number_input(
+                        "逆反应级数上限（order_rev_max）",
+                        value=float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX)),
+                        key="cfg_order_rev_max",
+                    )
+        else:
+            k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
+            k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
+            ea_rev_min_J_mol = float(
+                get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL)
+            )
+            ea_rev_max_J_mol = float(
+                get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL)
+            )
+            order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
+            order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
+
     _set_cfg_array("cfg_k0_guess", state["k0_guess"])
     _set_cfg_array("cfg_ea_guess_J_mol", state["ea_guess_J_mol"])
     _set_cfg_array("cfg_fit_k0_flags", state["fit_k0_flags"])
@@ -470,4 +533,10 @@ def render_fit_setup(ctx: dict) -> dict:
         "K0_ads_max": float(K0_ads_max),
         "Ea_K_min": float(Ea_K_min),
         "Ea_K_max": float(Ea_K_max),
+        "k0_rev_min": float(k0_rev_min),
+        "k0_rev_max": float(k0_rev_max),
+        "ea_rev_min_J_mol": float(ea_rev_min_J_mol),
+        "ea_rev_max_J_mol": float(ea_rev_max_J_mol),
+        "order_rev_min": float(order_rev_min),
+        "order_rev_max": float(order_rev_max),
     }

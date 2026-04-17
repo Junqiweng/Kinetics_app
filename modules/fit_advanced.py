@@ -80,54 +80,29 @@ def render_fit_advanced(ctx: dict) -> dict:
     K0_ads_max = float(get_cfg("K0_ads_max", DEFAULT_K0_ADS_MAX))
     Ea_K_min = float(get_cfg("Ea_K_min", DEFAULT_EA_K_MIN_J_MOL))
     Ea_K_max = float(get_cfg("Ea_K_max", DEFAULT_EA_K_MAX_J_MOL))
+    k0_rev_min = float(ctx.get("k0_rev_min", get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN)))
+    k0_rev_max = float(ctx.get("k0_rev_max", get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX)))
+    ea_rev_min_J_mol = float(
+        ctx.get(
+            "ea_rev_min_J_mol",
+            get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL),
+        )
+    )
+    ea_rev_max_J_mol = float(
+        ctx.get(
+            "ea_rev_max_J_mol",
+            get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL),
+        )
+    )
+    order_rev_min = float(
+        ctx.get("order_rev_min", get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
+    )
+    order_rev_max = float(
+        ctx.get("order_rev_max", get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
+    )
 
     with st.expander("高级设置 (点击展开)", expanded=False):
-        # 可逆反应边界（逆反应）
-        k0_rev_min = float(get_cfg("k0_rev_min", DEFAULT_K0_REV_MIN))
-        k0_rev_max = float(get_cfg("k0_rev_max", DEFAULT_K0_REV_MAX))
-        ea_rev_min_J_mol = float(get_cfg("ea_rev_min_J_mol", DEFAULT_EA_REV_MIN_J_MOL))
-        ea_rev_max_J_mol = float(get_cfg("ea_rev_max_J_mol", DEFAULT_EA_REV_MAX_J_MOL))
-        order_rev_min = float(get_cfg("order_rev_min", DEFAULT_ORDER_REV_MIN))
-        order_rev_max = float(get_cfg("order_rev_max", DEFAULT_ORDER_REV_MAX))
-        if reversible_enabled:
-            st.markdown("**1. 可逆反应边界设置（逆反应）**")
-            col_rev_b1, col_rev_b2, col_rev_b3 = st.columns(3)
-            with col_rev_b1:
-                k0_rev_min = ui_comp.smart_number_input(
-                    "k₀,rev 下限（k0_rev_min）",
-                    value=k0_rev_min,
-                    key="cfg_k0_rev_min",
-                )
-                k0_rev_max = ui_comp.smart_number_input(
-                    "k₀,rev 上限（k0_rev_max）",
-                    value=k0_rev_max,
-                    key="cfg_k0_rev_max",
-                )
-            with col_rev_b2:
-                ea_rev_min_J_mol = ui_comp.smart_number_input(
-                    "Eₐ,rev 下限（ea_rev_min_J_mol）",
-                    value=ea_rev_min_J_mol,
-                    key="cfg_ea_rev_min_J_mol",
-                )
-                ea_rev_max_J_mol = ui_comp.smart_number_input(
-                    "Eₐ,rev 上限（ea_rev_max_J_mol）",
-                    value=ea_rev_max_J_mol,
-                    key="cfg_ea_rev_max_J_mol",
-                )
-            with col_rev_b3:
-                order_rev_min = ui_comp.smart_number_input(
-                    "逆反应级数下限（order_rev_min）",
-                    value=order_rev_min,
-                    key="cfg_order_rev_min",
-                )
-                order_rev_max = ui_comp.smart_number_input(
-                    "逆反应级数上限（order_rev_max）",
-                    value=order_rev_max,
-                    key="cfg_order_rev_max",
-                )
-
-        st.divider()
-        st.markdown("**2. 算法与鲁棒性**")
+        st.markdown("**1. 算法与鲁棒性**")
 
         with st.container(border=True):
             st.caption("求解器与差分参数")
@@ -258,7 +233,7 @@ def render_fit_advanced(ctx: dict) -> dict:
                 )
 
         st.divider()
-        st.markdown("**3. 目标函数设置**")
+        st.markdown("**2. 目标函数设置**")
         st.caption("目标函数定义残差的计算方式，不同类型适用于不同数据特征：")
 
         residual_type_options = [

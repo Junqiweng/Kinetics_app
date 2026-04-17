@@ -8,6 +8,7 @@ import hashlib
 import html as html_lib
 import os
 import queue
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -1076,14 +1077,22 @@ def _run_fitting_job(
                 ),
             )
 
-    # 行级并行：持久化线程池（避免每次残差调用重复创建线程）
-    # scipy.integrate.solve_ivp 在 C 层释放 GIL，多线程可真正并行
+    # 行级并行：持久化线程池（避免每次残差调用重复创建线程）。
+    # LSODA/ODEPACK 在部分 Windows SciPy 构建上并发重入会污染残差/Jacobian，
+    # 表现为优化器很快收敛到较差拟合；因此 LSODA 强制串行评估。
     _n_parallel_tasks = (
         len(bstr_time_series_groups)
         if bstr_time_series_groups is not None
         else int(n_data_rows)
     )
-    _n_row_workers = min(max(int(_n_parallel_tasks), 1), os.cpu_count() or 4)
+    if str(solver_method).upper() == "LSODA" and sys.platform == "win32":
+        _n_row_workers = 1
+        timeline_add(
+            "ℹ️",
+            "LSODA 已禁用行级并行，以避免 Windows 上 ODEPACK 并发重入导致拟合过早停在较差结果。",
+        )
+    else:
+        _n_row_workers = min(max(int(_n_parallel_tasks), 1), os.cpu_count() or 4)
     _row_executor = ThreadPoolExecutor(max_workers=_n_row_workers)
 
     # 可变容差容器：允许粗拟合阶段使用放宽容差，精细拟合恢复原始容差

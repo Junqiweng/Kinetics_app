@@ -4,6 +4,7 @@ import hashlib
 import json
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -343,6 +344,49 @@ def _map_parity_temperatures_by_row_index(
     return t_k_by_label.reindex(row_index_labels)
 
 
+def _apply_equal_parity_ticks(
+    ax: plt.Axes,
+    axis_min: float,
+    axis_max: float,
+    nbins: int = 5,
+) -> None:
+    """
+    让奇偶校验图的 x/y 主刻度和次刻度完全一致。
+
+    说明：
+    - 奇偶校验图用于判断 y = x 附近的偏离，因此不仅 xlim/ylim 要一致，
+      刻度位置也应一致，否则视觉上仍可能产生误判。
+    - 先用 MaxNLocator 生成一组“好看”的主刻度，再同时写入 x/y。
+    - AutoMinorLocator(2) 表示每两个主刻度之间放 1 个次刻度；由于主刻度
+      已经相同，x/y 次刻度也会一致。
+    """
+    axis_min = float(axis_min)
+    axis_max = float(axis_max)
+    if (
+        (not np.isfinite(axis_min))
+        or (not np.isfinite(axis_max))
+        or axis_max <= axis_min
+    ):
+        axis_min, axis_max = 0.0, 1.0
+
+    locator = mticker.MaxNLocator(nbins=int(max(2, nbins)))
+    tick_values = np.asarray(locator.tick_values(axis_min, axis_max), dtype=float)
+    tick_values = tick_values[np.isfinite(tick_values)]
+    tick_values = tick_values[
+        (tick_values >= axis_min - 1e-12 * max(1.0, abs(axis_min)))
+        & (tick_values <= axis_max + 1e-12 * max(1.0, abs(axis_max)))
+    ]
+    if tick_values.size < 2:
+        tick_values = np.linspace(axis_min, axis_max, int(max(2, nbins)), dtype=float)
+
+    ax.xaxis.set_major_locator(mticker.FixedLocator(tick_values))
+    ax.yaxis.set_major_locator(mticker.FixedLocator(tick_values))
+    ax.xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+    ax.set_xlim(axis_min, axis_max)
+    ax.set_ylim(axis_min, axis_max)
+
+
 def _remap_species_vector(
     values,
     species_names_fit: list[str],
@@ -526,9 +570,27 @@ def render_fit_results(
         tab_fit_results_container.divider()
         phi_value = float(res.get("phi_final", res.get("cost", 0.0)))
         phi_text = ui_comp.smart_float_to_str(phi_value)
-        tab_fit_results_container.markdown(f"### 拟合结果 (目标函数 Φ: {phi_text})")
+        residual_type_used = str(res.get("residual_type", residual_type_current))
+        residual_latex_map = {
+            "绝对残差": r"r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}",
+            "相对残差": (
+                r"r_i=\dfrac{y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}}"
+                r"{\mathrm{sign}(y_i^{\mathrm{meas}})\cdot\max(|y_i^{\mathrm{meas}}|,\varepsilon)}"
+            ),
+            "百分比残差": (
+                r"r_i=100\times\dfrac{y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}}"
+                r"{|y_i^{\mathrm{meas}}|+\varepsilon}"
+            ),
+        }
+        residual_latex = residual_latex_map.get(
+            residual_type_used, residual_latex_map["绝对残差"]
+        )
+        tab_fit_results_container.markdown(
+            f"### 拟合结果 (目标函数 Φ: {phi_text}，残差类型：{residual_type_used})"
+        )
         tab_fit_results_container.latex(
-            r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad r_i=y_i^{\mathrm{pred}}-y_i^{\mathrm{meas}}"
+            r"\Phi(\theta)=\frac{1}{2}\sum_{i=1}^{N} r_i(\theta)^2,\quad "
+            + residual_latex
         )
 
         fitted_params = res["params"]
@@ -1230,11 +1292,11 @@ def render_fit_results(
                             )
                             axis_scope = st.radio(
                                 "坐标范围作用域",
-                                ["每个子图独立（自适应）", "所有子图一致"],
+                                ["每个子图独立（x/y 相同）", "所有子图一致"],
                                 index=0,
                                 horizontal=True,
-                                key="parity_axis_scope_v2",
-                                help="每个子图独立：按当前物种的数据范围自适应；所有子图一致：使用全局统一坐标，便于不同物种直接比较量级。",
+                                key="parity_axis_scope_v3",
+                                help="每个子图独立：按当前物种的实验值和预测值共同确定一个范围，并同时用于 x/y；所有子图一致：所有物种共用同一个 x/y 范围。",
                             )
                             axis_range_mode = st.radio(
                                 "范围来源",
@@ -1490,6 +1552,9 @@ def render_fit_results(
                                     )
                                 )
                                 _style_fit_axis(ax, show_grid=False)
+                                _apply_equal_parity_ticks(
+                                    ax, axis_min_i, axis_max_i
+                                )
                                 _style_fit_legend(ax)
 
                             for j in range(n_plots, n_rows * n_cols):
@@ -2011,7 +2076,7 @@ def render_fit_results(
                     f"<h1>{reactor_type_fit} 反应动力学拟合报告</h1>",
                     f"<p><b>动力学模型</b>: {kinetic_model_fit}",
                     f"{'（可逆）' if reversible_enabled_fit else ''}</p>",
-                    f"<p><b>目标函数 Φ</b>: {phi_text}</p>",
+                    f"<p><b>目标函数 Φ</b>: {phi_text}（残差类型：{residual_type_used}）</p>",
                     "<h2>拟合参数</h2>",
                     df_k0_ea.to_html(),
                 ]

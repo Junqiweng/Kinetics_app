@@ -191,7 +191,7 @@
   "order_rev_min": -2.0,
   "order_rev_max": 5.0,
   "residual_type": "相对残差",
-  "diff_step_rel": 0.01,
+  "diff_step_rel": 0.001,
   "max_nfev": 3000,
   "use_x_scale_jac": true,
   "use_multi_start": false,
