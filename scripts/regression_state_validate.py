@@ -25,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from modules import config_manager
 from modules import export_config
+from modules.ai_session import extract_action_block, prepare_config_action
 from modules.config_state import (
     _apply_imported_config_to_widget_state,
     _clear_state_for_imported_config,
@@ -39,6 +40,7 @@ from modules.fit_setup import derive_effective_fit_flags, resolve_fit_parameter_
 from modules.fit_state import build_fit_state_snapshot, describe_fit_state_differences
 from modules.fitting_background import _append_fit_history_entry
 from modules.tab_data import _bump_data_editor_revision, _get_data_editor_key, _should_reset_cached_data
+from modules.tab_ai_session import _build_bstr_example_config
 from modules.tab_model import _build_stoich_widget_reset_prefixes
 
 # 在“非 streamlit run”模式下，屏蔽无关的 ScriptRunContext 警告，保留断言失败信息。
@@ -562,6 +564,63 @@ def test_fit_state_diff_detects_fit_problem_changes() -> None:
     _assert_true("参数边界已变化" in reasons, "参数边界变化后应标记结果过期")
 
 
+def test_ai_action_block_extracts_config_patch() -> None:
+    text = (
+        "建议先放宽 k0 上限。\n"
+        "<kinetics_action>\n"
+        "{\"summary\":\"放宽 k0 边界\", \"config_patch\":{\"k0_max\":1000000000.0}, \"run_fit_after_apply\":true}\n"
+        "</kinetics_action>"
+    )
+    clean_text, action, error = extract_action_block(text)
+    _assert_true(error == "", "合法智能操作块不应报错")
+    _assert_true("kinetics_action" not in clean_text, "展示文本应移除智能操作块")
+    _assert_true(isinstance(action, dict), "应解析出智能操作 dict")
+    _assert_true(
+        float(action["config_patch"]["k0_max"]) == 1e9,
+        "应保留 config_patch 中的数值",
+    )
+
+
+def test_ai_config_patch_rejects_unknown_key() -> None:
+    cfg = config_manager.get_default_config()
+    new_cfg, error = prepare_config_action(
+        current_config=cfg,
+        action={
+            "summary": "不允许修改代码路径",
+            "config_patch": {"arbitrary_shell_command": "rm -rf ."},
+            "run_fit_after_apply": False,
+        },
+    )
+    _assert_true(new_cfg is None, "未知字段不应生成可导入配置")
+    _assert_true("不允许" in error, "未知字段应返回明确错误")
+
+
+def test_ai_config_patch_validates_merged_config() -> None:
+    cfg = config_manager.get_default_config()
+    new_cfg, error = prepare_config_action(
+        current_config=cfg,
+        action={
+            "summary": "放宽基础 k0 边界",
+            "config_patch": {"k0_max": 1e9},
+            "run_fit_after_apply": False,
+        },
+    )
+    _assert_true(error == "", "合法配置补丁不应报错")
+    _assert_true(isinstance(new_cfg, dict), "合法配置补丁应生成新配置")
+    _assert_true(float(new_cfg["k0_max"]) == 1e9, "新配置应包含补丁值")
+
+
+def test_ai_bstr_example_config_is_valid() -> None:
+    cfg = _build_bstr_example_config()
+    ok, message = config_manager.validate_config(cfg)
+    _assert_true(ok, "智能会话示例配置应通过校验：" + str(message))
+    _assert_true(cfg["reactor_type"] == "BSTR", "示例拟合应使用稳定的 BSTR 示例")
+    _assert_true(
+        cfg["fit_k0_flags"] == [True] and cfg["fit_ea_flags"] == [False],
+        "单温度示例应只拟合 k0，避免 k0/Ea 强相关",
+    )
+
+
 def main() -> None:
     test_import_keeps_csv_data()
     test_reset_clears_csv_data()
@@ -584,6 +643,10 @@ def main() -> None:
     test_hidden_fit_flags_keep_new_slots_disabled_after_resize()
     test_execution_layer_disables_inactive_fit_flags()
     test_fit_state_diff_detects_fit_problem_changes()
+    test_ai_action_block_extracts_config_patch()
+    test_ai_config_patch_rejects_unknown_key()
+    test_ai_config_patch_validates_merged_config()
+    test_ai_bstr_example_config_is_valid()
     print("REGRESSION_STATE_VALIDATE: OK")
 
 

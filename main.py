@@ -13,6 +13,7 @@ from modules.contexts import (
 )
 from modules.plot_helpers import apply_runtime_patches
 from modules.sidebar import render_sidebar
+from modules.tab_ai_session import render_ai_session_tab
 from modules.tab_data import render_data_tab
 from modules.tab_fit import render_fit_tab
 from modules.tab_model import render_model_tab
@@ -51,7 +52,7 @@ def main() -> None:
         f"工作流进度：{step1_icon} 反应与模型 → {step2_icon} 实验数据 → {step3_icon} 拟合与结果"
     )
 
-    tab_model, tab_data, tab_fit = st.tabs(bootstrap_state["main_tab_labels"])
+    tab_model, tab_data, tab_ai, tab_fit = st.tabs(bootstrap_state["main_tab_labels"])
     bootstrap_state["restore_active_main_tab"]()
 
     base_ctx = build_base_context(bootstrap_state, sidebar_state)
@@ -59,9 +60,10 @@ def main() -> None:
     data_ctx = build_data_context(base_ctx, model_state)
     data_state = render_data_tab(tab_data, data_ctx)
     fit_ctx = build_fit_context(base_ctx, model_state, data_state)
+    fit_ctx["fit_results"] = st.session_state.get("fit_results", None)
+    render_ai_session_tab(tab_ai, fit_ctx)
     render_fit_tab(tab_fit, fit_ctx)
 
 
 if __name__ == "__main__":
     main()
-

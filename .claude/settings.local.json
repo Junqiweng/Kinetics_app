@@ -1,3 +1,9 @@
 {
-  "outputStyle": "default"
+  "outputStyle": "default",
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import scipy; print\\(scipy.__version__\\)\")",
+      "Bash(python -c \"import inspect; from scipy.integrate._ivp.lsoda import LSODA; print\\(inspect.signature\\(LSODA.__init__\\)\\)\")"
+    ]
+  }
 }

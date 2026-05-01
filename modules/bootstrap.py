@@ -58,7 +58,7 @@ def bootstrap_app_state() -> dict:
             max_age_hours=DEFAULT_SESSION_MAX_AGE_HOURS
         )
 
-    MAIN_TAB_LABELS = ["反应与模型", "实验数据", "拟合与结果"]
+    MAIN_TAB_LABELS = ["反应与模型", "实验数据", "智能会话", "拟合与结果"]
 
     def _set_active_main_tab(tab_label: str) -> None:
         tab_label = str(tab_label).strip()
@@ -525,6 +525,7 @@ def bootstrap_app_state() -> dict:
     # --- 手动导入配置：延迟到“下一次 rerun”再应用（避免修改已创建 widget 的 session_state）---
     if "pending_imported_config" in st.session_state:
         pending_cfg = st.session_state.pop("pending_imported_config")
+        ai_should_start_fit = bool(st.session_state.pop("ai_auto_start_fit_after_import", False))
         is_valid, error_message = config_manager.validate_config(pending_cfg)
         if not is_valid:
             st.error(f"导入配置失败（配置校验未通过）：{error_message}")
@@ -540,6 +541,12 @@ def bootstrap_app_state() -> dict:
                 st.warning(message)
             # 同时保存到浏览器 LocalStorage
             browser_storage.save_config_to_browser(pending_cfg)
+            if ai_should_start_fit:
+                st.session_state["fit_notice"] = {
+                    "kind": "success",
+                    "text": "已应用智能会话给出的配置修改，正在启动重新拟合。",
+                }
+                _request_start_fitting()
 
     # --- 自动加载配置 ---
     # 如果刚刚执行了重置，则跳过配置加载（避免重新加载浏览器中的旧配置）
